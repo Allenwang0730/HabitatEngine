@@ -103,7 +103,13 @@ object HabitatShellManager {
                     }
                 }
                 cont.invokeOnCancellation { Shizuku.unbindUserService(args, conn, true) }
-                scope.launch(Dispatchers.Main) { Shizuku.bindUserService(args, conn) }
+                scope.launch(Dispatchers.Main) {
+                    try {
+                        Shizuku.bindUserService(args, conn)
+                    } catch (e: Exception) {
+                        cont.resumeWithException(e)
+                    }
+                }
             }
         }
 }

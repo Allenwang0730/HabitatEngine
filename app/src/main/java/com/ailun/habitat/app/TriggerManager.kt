@@ -2,6 +2,7 @@ package com.ailun.habitat.app
 
 import android.content.Context
 import com.ailun.habitat.HabitatExecutionService
+import com.ailun.habitat.HabitatStateStore
 import com.ailun.habitat.NodeHandlerFactory
 import com.ailun.habitat.TriggerConfig
 import com.ailun.habitat.api.ITriggerSource
@@ -12,12 +13,13 @@ import com.ailun.habitat.app.bridge.applyAppHandlers
 import com.ailun.habitat.app.triggers.*
 
 /**
- * 触发器调度中心。维护已注册工作流列表，事件匹配 → 调用执行服务。
+ * 触发器调度中心 + 工作流全局启用/禁用状态管理。
  *
- * 同一个 start() 路径同时服务手动和自动触发。
+ * 每个工作流一个开关：关闭时禁止一切执行（手动 + 触发）。
+ * 开关状态持久化到 SharedPreferences，默认关闭。
  */
 object TriggerManager {
-    private const val TAG = "TriggerManager"
+    private const val PREFS_NAME = "habitat_trigger_prefs"
 
     private data class TriggerEntry(
         val workflowId: String,
@@ -29,56 +31,115 @@ object TriggerManager {
     private val sourceInstances = mutableMapOf<String, ITriggerSource>()
     private var factory: NodeHandlerFactory? = null
 
-    /** 注册工作流触发器，有 trigger 字段的 JSON 自动注册。 */
+    // ── Global workflow enable/disable ──
+
+    /** 工作流是否允许执行（手动或触发），默认 false。 */
+    fun isWorkflowEnabled(context: Context, workflowId: String): Boolean {
+        return prefs(context).getBoolean(workflowId, false)
+    }
+
+    /**
+     * 设置工作流启用状态。
+     * - 启用且带有 trigger：注册触发器开始监听
+     * - 禁用：取消触发器注册 + 停止正在运行的任务
+     */
+    fun setWorkflowEnabled(
+        context: Context,
+        workflowId: String,
+        enabled: Boolean,
+        config: TriggerConfig? = null,
+        jsonContent: String? = null,
+    ) {
+        if (enabled) {
+            prefs(context).edit().putBoolean(workflowId, true).apply()
+            if (config != null && jsonContent != null) {
+                // Triggered workflow: register trigger listener
+                register(workflowId, config, jsonContent, context)
+            } else if (jsonContent != null) {
+                // Non-triggered: start execution. Auto-disable when it finishes.
+                val f = factory ?: buildFactory(context).also { factory = it }
+                HabitatExecutionService.start(
+                    workflowId = workflowId,
+                    jsonContent = jsonContent,
+                    androidContext = context,
+                    factory = f,
+                    onComplete = {
+                        prefs(context).edit().remove(workflowId).apply()
+                        notifyStateChange()
+                        HabitatLogger.habitat("Workflow '$workflowId' finished, auto-disabled")
+                    },
+                )
+            }
+        } else {
+            prefs(context).edit().remove(workflowId).apply()
+            unregister(workflowId, context)
+            HabitatExecutionService.stop(workflowId)
+        }
+        notifyStateChange()
+        HabitatLogger.habitat("Workflow '$workflowId' enabled=$enabled")
+    }
+
+    // ── Trigger registration ──
+
     fun register(
         workflowId: String,
         config: TriggerConfig,
         jsonContent: String,
         context: Context,
     ) {
+        if (entries.containsKey(workflowId)) return
         entries[workflowId] = TriggerEntry(workflowId, config, jsonContent)
 
-        // Lazy-create and start the trigger source for this type
-        val source = sourceInstances.getOrPut(config.type) {
-            createSource(config.type)
-        }
-        if (entries.values.count { it.config.type == config.type } <= 1) {
+        val source = sourceInstances.getOrPut(config.type) { createSource(config.type) }
+        if (entries.values.count { it.config.type == config.type } == 1) {
             source.start(context) { event -> onTriggerEvent(event, context) }
         }
 
-        HabitatLogger.habitat("Trigger registered: '$workflowId' type=${config.type}")
+        HabitatLogger.habitat("Trigger active: '$workflowId' type=${config.type}")
     }
 
-    /** 取消工作流触发器注册。 */
     fun unregister(workflowId: String, context: Context) {
         val entry = entries.remove(workflowId) ?: return
         val type = entry.config.type
 
-        // If no more workflows use this trigger type, stop the source
         if (entries.values.none { it.config.type == type }) {
             sourceInstances[type]?.stop(context)
             sourceInstances.remove(type)
         }
 
-        HabitatLogger.habitat("Trigger unregistered: '$workflowId' type=$type")
+        HabitatLogger.habitat("Trigger inactive: '$workflowId' type=$type")
     }
 
-    /** 清除所有注册。 */
     fun unregisterAll(context: Context) {
         sourceInstances.values.forEach { it.stop(context) }
         sourceInstances.clear()
         entries.clear()
+        HabitatStateStore.notifyLibraryChanged()
         HabitatLogger.habitat("All triggers unregistered")
     }
 
-    /** 检查工作流是否有活跃触发器。 */
+    /** 重置所有工作流状态：清除启用标记、停止执行、取消触发器。应用启动时调用。 */
+    fun resetAll(context: Context) {
+        unregisterAll(context)
+        // Stop all running workflows
+        HabitatExecutionService.activeWorkflowIds().forEach { HabitatExecutionService.stop(it) }
+        // Clear all per-workflow enabled flags
+        prefs(context).edit().clear().apply()
+        factory = null
+        HabitatLogger.habitat("All workflow states reset")
+    }
+
+    private fun notifyStateChange() {
+        HabitatStateStore.notifyLibraryChanged()
+    }
+
+    // ── Queries ──
+
     fun isRegistered(workflowId: String): Boolean = entries.containsKey(workflowId)
-
-    /** 获取已注册触发器的工作流 ID 列表。 */
     fun registeredWorkflowIds(): Set<String> = entries.keys.toSet()
-
-    /** 获取工作流的触发器配置，未注册则返回 null。 */
     fun triggerConfigFor(workflowId: String): TriggerConfig? = entries[workflowId]?.config
+
+    // ── Internals ──
 
     private fun createSource(type: String): ITriggerSource = when (type) {
         TriggerConfig.TYPE_NOTIFICATION -> NotificationTriggerSource()
@@ -91,17 +152,14 @@ object TriggerManager {
 
     private fun onTriggerEvent(event: TriggerEvent, context: Context) {
         val matched = entries.values.filter { entry ->
-            matchEvent(entry.config, event)
+            isWorkflowEnabled(context, entry.workflowId) && matchEvent(entry.config, event)
         }
 
         for (entry in matched) {
             HabitatLogger.habitat("Trigger fired: '${entry.workflowId}' type=${entry.config.type}")
             val f = factory ?: buildFactory(context).also { factory = it }
 
-            // Inject trigger event data as context variables
-            val vars = mutableMapOf<String, Any>(
-                "trigger_type" to event.type,
-            )
+            val vars = mutableMapOf<String, Any>("trigger_type" to event.type)
             event.params.forEach { (k, v) -> vars["trigger_$k"] = v }
 
             if (HabitatExecutionService.isRunning(entry.workflowId) && entry.config.repeat) {
@@ -127,11 +185,7 @@ object TriggerManager {
     private fun matchEvent(config: TriggerConfig, event: TriggerEvent): Boolean {
         if (config.type != event.type) return false
         return when (config.type) {
-            TriggerConfig.TYPE_NOTIFICATION -> {
-                val filterPkg = config.packageFilter
-                filterPkg == null || filterPkg == event.packageName
-            }
-            TriggerConfig.TYPE_SMS -> {
+            TriggerConfig.TYPE_NOTIFICATION, TriggerConfig.TYPE_SMS -> {
                 val filterPkg = config.packageFilter
                 filterPkg == null || filterPkg == event.packageName
             }
@@ -139,9 +193,7 @@ object TriggerManager {
                 val keycode = config.keycode
                 keycode == null || keycode == event.keyCode
             }
-            TriggerConfig.TYPE_TIMER,
-            TriggerConfig.TYPE_CLIPBOARD -> true
-            else -> false
+            else -> true
         }
     }
 
@@ -151,4 +203,7 @@ object TriggerManager {
             ShizukuShellExecutor(context.applicationContext),
         ).apply { applyAppHandlers(context.applicationContext) }
     }
+
+    private fun prefs(context: Context) =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 }

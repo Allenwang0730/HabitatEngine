@@ -35,13 +35,18 @@ internal fun FloatWindowUI(
     inCloseZone: Boolean,
     workflows: List<HabitatWorkflow>,
     activeJobIds: Set<String>,
+    enabledWorkflowIds: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     onWorkflowSelected: (HabitatWorkflow) -> Unit,
     onWorkflowStop: (HabitatWorkflow) -> Unit,
+    onWorkflowToggle: ((HabitatWorkflow, Boolean) -> Unit)? = null,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (isExpanded) {
-            WorkflowSelectionPanel(workflows, activeJobIds, onWorkflowSelected, onWorkflowStop, onDismiss)
+            WorkflowSelectionPanel(
+                workflows, activeJobIds, enabledWorkflowIds,
+                onWorkflowSelected, onWorkflowStop, onWorkflowToggle, onDismiss,
+            )
         } else {
             FloatBallContent(inCloseZone)
         }
@@ -77,8 +82,10 @@ private fun FloatBallContent(inCloseZone: Boolean) {
 internal fun WorkflowSelectionPanel(
     workflows: List<HabitatWorkflow>,
     activeJobIds: Set<String>,
+    enabledWorkflowIds: Set<String> = emptySet(),
     onWorkflowSelected: (HabitatWorkflow) -> Unit,
     onWorkflowStop: (HabitatWorkflow) -> Unit,
+    onWorkflowToggle: ((HabitatWorkflow, Boolean) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     Card(
@@ -125,11 +132,15 @@ internal fun WorkflowSelectionPanel(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(workflows, key = { it.id }) { wf ->
-                        WorkflowCard(
+                        FloatWorkflowCard(
                             wf,
                             isRunning = activeJobIds.contains(wf.id),
+                            isEnabled = enabledWorkflowIds.contains(wf.id),
                             onRun = { onWorkflowSelected(wf) },
-                            onStop = { onWorkflowStop(wf) }
+                            onStop = { onWorkflowStop(wf) },
+                            onToggle = if (onWorkflowToggle != null) {
+                                { enabled -> onWorkflowToggle(wf, enabled) }
+                            } else null,
                         )
                     }
                 }
@@ -139,13 +150,19 @@ internal fun WorkflowSelectionPanel(
 }
 
 @Composable
-private fun WorkflowCard(
+private fun FloatWorkflowCard(
     workflow: HabitatWorkflow,
     isRunning: Boolean,
+    isEnabled: Boolean,
     onRun: () -> Unit,
     onStop: () -> Unit,
+    onToggle: ((Boolean) -> Unit)? = null,
 ) {
-    val borderColor = if (isRunning) Green.copy(alpha = 0.4f) else Color.Transparent
+    val borderColor = when {
+        isRunning -> Green.copy(alpha = 0.4f)
+        isEnabled -> Color(0xFFF59E0B).copy(alpha = 0.3f)
+        else -> Color.Transparent
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth().border(1.dp, borderColor, RoundedCornerShape(12.dp)),
@@ -161,33 +178,49 @@ private fun WorkflowCard(
                 modifier = Modifier
                     .size(10.dp)
                     .clip(CircleShape)
-                    .background(if (isRunning) Green else Color.Gray.copy(alpha = 0.4f))
+                    .background(
+                        when {
+                            isRunning -> Green
+                            isEnabled -> Color(0xFFF59E0B)
+                            else -> Color.Gray.copy(alpha = 0.4f)
+                        }
+                    )
             )
             Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(
                     workflow.name.ifEmpty { "未命名" },
-                    color = White,
+                    color = if (isEnabled) White else White.copy(alpha = 0.4f),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    if (isRunning) "● 运行中" else "○ 空闲",
-                    color = if (isRunning) Green.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.3f),
+                    when {
+                        isRunning -> "● 运行中"
+                        isEnabled -> "○ 等待触发"
+                        else -> "已禁用"
+                    },
+                    color = when {
+                        isRunning -> Green.copy(alpha = 0.8f)
+                        isEnabled -> Color(0xFFF59E0B).copy(alpha = 0.8f)
+                        else -> Color.White.copy(alpha = 0.2f)
+                    },
                     fontSize = 11.sp
                 )
             }
-            Switch(
-                checked = isRunning,
-                onCheckedChange = { if (it) onRun() else onStop() },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = White,
-                    checkedTrackColor = Green,
-                    uncheckedThumbColor = White.copy(alpha = 0.5f),
-                    uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
-                ),
-            )
+            if (onToggle != null) {
+                Switch(
+                    checked = isEnabled,
+                    onCheckedChange = onToggle,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = White,
+                        checkedTrackColor = Green,
+                        uncheckedThumbColor = White.copy(alpha = 0.3f),
+                        uncheckedTrackColor = Color.White.copy(alpha = 0.08f)
+                    ),
+                )
+            }
         }
     }
 }

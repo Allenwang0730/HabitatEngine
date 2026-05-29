@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.lifecycle.lifecycleScope
 import com.ailun.habitat.R
+import com.ailun.habitat.app.TriggerManager
 import com.ailun.habitat.app.ui.HabitatSettingsActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,6 +35,9 @@ class HabitatMainActivity : ComponentActivity() {
             return
         }
 
+        // Reset all workflow states on app restart
+        TriggerManager.resetAll(this)
+
         // Normal launch → dashboard
         lifecycleScope.launch(Dispatchers.IO) {
             HabitatShellManager.proactiveConnect(this@HabitatMainActivity)
@@ -50,9 +54,8 @@ class HabitatMainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Auto-start float service if previously mounted
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getString("float_mounted_workflow_id", null) != null) {
+        val mountedIds = com.ailun.habitat.WorkflowRepository.getFloatMountedWorkflowIds(this)
+        if (mountedIds.isNotEmpty()) {
             HabitatFloatService.start(this)
         }
     }

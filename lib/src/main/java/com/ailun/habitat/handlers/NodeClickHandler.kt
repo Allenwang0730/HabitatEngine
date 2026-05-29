@@ -58,53 +58,54 @@ class NodeClickHandler(
         selfPackage: String,
     ): Boolean {
         val roots = mutableListOf<AccessibilityNodeInfo>()
-        service.rootInActiveWindow?.let { roots.add(it) }
-        service.windows.forEach { win -> win.root?.let { roots.add(it) } }
-
         val foundNodes = mutableListOf<AccessibilityNodeInfo>()
-        for (root in roots) {
-            root.findAccessibilityNodeInfosByViewId(selector)?.let { foundNodes.addAll(it) }
-            root.findAccessibilityNodeInfosByText(selector)?.let { foundNodes.addAll(it) }
-        }
+        try {
+            service.rootInActiveWindow?.let { roots.add(it) }
+            service.windows.forEach { win -> win.root?.let { roots.add(it) } }
 
-        val filteredNodes = foundNodes.filter { node ->
-            val pkg = node.packageName?.toString()
-            pkg != null && pkg != selfPackage
-        }
+            for (root in roots) {
+                root.findAccessibilityNodeInfosByViewId(selector)?.let { foundNodes.addAll(it) }
+                root.findAccessibilityNodeInfosByText(selector)?.let { foundNodes.addAll(it) }
+            }
 
-        if (filteredNodes.isEmpty()) {
-            Log.w(TAG, "No external node found for: '$selector'")
-            foundNodes.forEach { it.recycle() }
-            roots.forEach { it.recycle() }
-            return false
-        }
+            val filteredNodes = foundNodes.filter { node ->
+                val pkg = node.packageName?.toString()
+                pkg != null && pkg != selfPackage
+            }
 
-        val targetNode = filteredNodes.find { it.isVisibleToUser } ?: filteredNodes[0]
-        val r = Rect()
-        targetNode.getBoundsInScreen(r)
-        Log.d(TAG, "Target: text=${targetNode.text}, pkg=${targetNode.packageName}, bounds=$r")
+            if (filteredNodes.isEmpty()) {
+                Log.w(TAG, "No external node found for: '$selector'")
+                return false
+            }
 
-        var ok = HabitatAccessibility.dispatchTap(service, r.centerX(), r.centerY())
-        if (!ok) {
-            ok = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            if (!ok && !targetNode.isClickable) {
-                var parent = targetNode.parent
-                while (parent != null) {
-                    if (parent.isClickable) {
-                        ok = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        parent.recycle()
-                        break
+            val targetNode = filteredNodes.find { it.isVisibleToUser } ?: filteredNodes[0]
+            val r = Rect()
+            targetNode.getBoundsInScreen(r)
+            Log.d(TAG, "Target: text=${targetNode.text}, pkg=${targetNode.packageName}, bounds=$r")
+
+            var ok = HabitatAccessibility.dispatchTap(service, r.centerX(), r.centerY())
+            if (!ok) {
+                ok = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if (!ok && !targetNode.isClickable) {
+                    var parent = targetNode.parent
+                    while (parent != null) {
+                        if (parent.isClickable) {
+                            ok = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            parent.recycle()
+                            break
+                        }
+                        val toRecycle = parent
+                        parent = parent.parent
+                        toRecycle.recycle()
                     }
-                    val toRecycle = parent
-                    parent = parent.parent
-                    toRecycle.recycle()
                 }
             }
-        }
 
-        foundNodes.forEach { it.recycle() }
-        roots.forEach { it.recycle() }
-        return ok
+            return ok
+        } finally {
+            foundNodes.forEach { try { it.recycle() } catch (_: Exception) {} }
+            roots.forEach { try { it.recycle() } catch (_: Exception) {} }
+        }
     }
 
     companion object {

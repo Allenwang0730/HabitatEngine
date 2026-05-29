@@ -42,19 +42,33 @@ class FloatWindowManager private constructor(private val application: Applicatio
         fun getInstanceOrNull(): FloatWindowManager? = instance
     }
 
-    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val windowManager: WindowManager = application.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var composeView: ComposeView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var lifecycleOwner: ServiceLifecycleOwner? = null
+    @Volatile private var isOverlayShowing = false
 
     private var isExpanded by mutableStateOf(false)
     private var inCloseZone by mutableStateOf(false)
     private var panelDragStartX = 0
     private var panelDragStartY = 0
 
-    private var workflows by mutableStateOf(listOf<HabitatWorkflow>())
+    private var allWorkflows by mutableStateOf(listOf<HabitatWorkflow>())
+    private var mountedIds by mutableStateOf(setOf<String>())
+    private var enabledVersion by mutableStateOf(0L)
     private var libObserverJob: Job? = null
+
+    val mountedWorkflows: List<HabitatWorkflow>
+        get() = allWorkflows.filter { it.id in mountedIds }
+
+    val mountedEnabledIds: Set<String>
+        get() {
+            enabledVersion // read to establish dependency
+            return mountedWorkflows.filter { TriggerManager.isWorkflowEnabled(application, it.id) }.map { it.id }.toSet()
+        }
+
+    private fun bumpEnabled() { enabledVersion = System.currentTimeMillis() }
 
     private val displayMetrics: DisplayMetrics get() = application.resources.displayMetrics
     private val screenWidth: Int get() = displayMetrics.widthPixels
@@ -75,18 +89,40 @@ class FloatWindowManager private constructor(private val application: Applicatio
 
     // ── PUBLIC ──
 
-    fun showFloatWindow() { mainScope.launch { ensureOverlayPermissionAndShow() } }
-    fun hideFloatWindow() { mainScope.launch { removeOverlay() } }
+    fun isShowing(): Boolean = isOverlayShowing
+
+    fun showFloatWindow() {
+        if (isOverlayShowing) return // already visible
+        if (!mainScope.isActive) {
+            mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        }
+        mainScope.launch { ensureOverlayPermissionAndShow() }
+    }
+
+    fun hideFloatWindow() {
+        isOverlayShowing = false
+        libObserverJob?.cancel(); libObserverJob = null
+        removeOverlay()
+    }
+
+    /** 拖拽关闭：隐藏悬浮窗 + 停服务 + 通知主界面。 */
+    private fun dismissFloatWindowAndStopService() {
+        hideFloatWindow()
+        HabitatFloatService.stop(application)
+        HabitatStateStore.setFloatServiceActive(false)
+        onDismiss?.invoke()
+    }
 
     fun destroy() {
+        isOverlayShowing = false
         libObserverJob?.cancel()
         HabitatExecutionService.activeWorkflowIds().forEach { HabitatExecutionService.stop(it) }
-        mainScope.launch { removeOverlay(); mainScope.cancel() }
+        removeOverlay()
     }
 
     fun refreshWorkflows() {
         mainScope.launch {
-            withContext(Dispatchers.IO) { workflows = WorkflowRepository.getAll(application) }
+            withContext(Dispatchers.IO) { allWorkflows = WorkflowRepository.getAll(application); mountedIds = WorkflowRepository.getFloatMountedWorkflowIds(application) }
         }
     }
 
@@ -94,29 +130,38 @@ class FloatWindowManager private constructor(private val application: Applicatio
 
     private suspend fun ensureOverlayPermissionAndShow() {
         if (!Settings.canDrawOverlays(application)) { HabitatLogger.w(TAG, "overlay permission missing"); return }
+        if (isOverlayShowing) return // double-check
         removeOverlay()
-        withContext(Dispatchers.IO) { workflows = WorkflowRepository.getAll(application) }
+        withContext(Dispatchers.IO) { allWorkflows = WorkflowRepository.getAll(application); mountedIds = WorkflowRepository.getFloatMountedWorkflowIds(application) }
         createOverlay()
-        libObserverJob?.cancel()
         libObserverJob = mainScope.launch {
             HabitatStateStore.libraryVersion.collect { version ->
-                if (version > 0) workflows = withContext(Dispatchers.IO) { WorkflowRepository.getAll(application) }
+                if (version > 0) {
+                    allWorkflows = withContext(Dispatchers.IO) { WorkflowRepository.getAll(application) }
+                    mountedIds = WorkflowRepository.getFloatMountedWorkflowIds(application)
+                    bumpEnabled()
+                }
             }
         }
     }
 
     private fun createOverlay() {
+        if (isOverlayShowing) return // guard against double-create
+        isOverlayShowing = true
+        HabitatStateStore.setFloatServiceActive(true)
         val view = ComposeView(application).apply {
             setContent {
                 MaterialTheme(colorScheme = habitatColorScheme()) {
                     val runningStates by HabitatStateStore.runningStates.collectAsState()
                     val activeIds = runningStates.keys
 
+                    val mounted = mountedWorkflows
                     FloatWindowUI(
                         isExpanded = isExpanded,
                         inCloseZone = inCloseZone,
-                        workflows = workflows,
+                        workflows = mounted,
                         activeJobIds = activeIds,
+                        enabledWorkflowIds = mountedEnabledIds,
                         onDismiss = { isExpanded = false; updateLayout() },
                         onWorkflowSelected = { wf ->
                             onWorkflowSelected?.invoke(wf) ?: executeHabitatWorkflow(wf)
@@ -124,6 +169,13 @@ class FloatWindowManager private constructor(private val application: Applicatio
                         onWorkflowStop = { wf ->
                             HabitatExecutionService.stop(wf.id)
                             onWorkflowStop?.invoke(wf)
+                        },
+                        onWorkflowToggle = { wf, enabled ->
+                            val config = try {
+                                com.ailun.habitat.HabitatJson.fromJson(wf.jsonContent).triggerConfig()
+                            } catch (_: Exception) { null }
+                            TriggerManager.setWorkflowEnabled(application, wf.id, enabled, config, wf.jsonContent)
+                            bumpEnabled()
                         },
                     )
                 }
@@ -225,7 +277,7 @@ class FloatWindowManager private constructor(private val application: Applicatio
                     if (moved) {
                         inCloseZone = false
                         if (dragY > closeThreshold) {
-                            hideFloatWindow()
+                            dismissFloatWindowAndStopService()
                         } else {
                             animateToEdge(params)
                         }
@@ -295,6 +347,10 @@ class FloatWindowManager private constructor(private val application: Applicatio
     // ── EXECUTION ──
 
     private fun executeHabitatWorkflow(wf: HabitatWorkflow) {
+        if (!TriggerManager.isWorkflowEnabled(application, wf.id)) {
+            HabitatLogger.habitat("Workflow '${wf.name}' is disabled, skipping execution")
+            return
+        }
         val factory = NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(application)).apply {
             applyAppHandlers(application)
         }
@@ -304,9 +360,15 @@ class FloatWindowManager private constructor(private val application: Applicatio
     // ── LIFECYCLE ──
 
     private fun removeOverlay() {
-        composeView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
-        composeView = null; layoutParams = null
-        lifecycleOwner?.onDestroy(); lifecycleOwner = null
+        val view = composeView
+        composeView = null
+        layoutParams = null
+        val owner = lifecycleOwner
+        lifecycleOwner = null
         isExpanded = false
+        isOverlayShowing = false
+        HabitatStateStore.setFloatServiceActive(false)
+        view?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
+        owner?.onDestroy()
     }
 }

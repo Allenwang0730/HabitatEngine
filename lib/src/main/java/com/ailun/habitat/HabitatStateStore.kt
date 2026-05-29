@@ -25,6 +25,10 @@ object HabitatStateStore {
     private val _libraryVersion = MutableStateFlow(0L)
     val libraryVersion: StateFlow<Long> = _libraryVersion.asStateFlow()
 
+    /** 悬浮窗可见性，供主界面与悬浮窗双向同步。 */
+    private val _floatServiceActive = MutableStateFlow(false)
+    val floatServiceActive: StateFlow<Boolean> = _floatServiceActive.asStateFlow()
+
     fun setRunning(workflowId: String, isRunning: Boolean, stepCount: Int = 0) {
         val current = _runningStates.value.toMutableMap()
         if (isRunning) {
@@ -33,6 +37,10 @@ object HabitatStateStore {
             current.remove(workflowId)
         }
         _runningStates.value = current
+    }
+
+    fun setFloatServiceActive(active: Boolean) {
+        _floatServiceActive.value = active
     }
 
     fun notifyLibraryChanged() {

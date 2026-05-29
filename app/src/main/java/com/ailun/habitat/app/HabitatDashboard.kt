@@ -52,14 +52,14 @@ import com.ailun.habitat.app.bridge.applyAppHandlers
 import com.ailun.habitat.app.dag.DagGraph
 import com.ailun.habitat.app.dag.DagLayoutEngine
 import com.ailun.habitat.app.dag.DagView
-import com.ailun.habitat.app.habitatColorScheme
+import com.ailun.habitat.app.ui.ProfileTab
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
 // ── Bottom navigation tabs ──
-private enum class Tab(val label: String) { Workflows("工作流"), Editor("编辑器"), Account("我的") }
+private enum class Tab(val label: String) { Workflows("工作流"), Editor("编辑器"), Profile("个人主页") }
 
 @Composable
 fun HabitatDashboard(activity: ComponentActivity) {
@@ -74,20 +74,22 @@ fun HabitatDashboard(activity: ComponentActivity) {
         var editJson by remember { mutableStateOf("") }
         val editLogs = remember { mutableStateListOf<String>() }
         val libraryLogs = remember { mutableStateListOf<String>() }
-        var mountedFloatId by remember { mutableStateOf<String?>(null) }
-        var pendingMountWorkflowId by remember { mutableStateOf<String?>(null) }
         val runningStates by HabitatStateStore.runningStates.collectAsState()
+        val floatActiveFromStore by HabitatStateStore.floatServiceActive.collectAsState()
+        var floatServiceRunning by remember { mutableStateOf(HabitatFloatService.isRunning) }
+
+        // Sync float switch state from HabitatStateStore (drag-to-close from float window)
+        LaunchedEffect(floatActiveFromStore) {
+            floatServiceRunning = floatActiveFromStore
+        }
 
         val overlayPermissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) {
-            val pending = pendingMountWorkflowId
-            pendingMountWorkflowId = null
-            if (pending != null && Settings.canDrawOverlays(activity)) {
-                WorkflowRepository.setFloatMountedWorkflowId(activity, pending)
+            if (Settings.canDrawOverlays(activity)) {
+                HabitatFloatService.start(activity)
                 FloatWindowManager.getInstance(activity.application).showFloatWindow()
-                mountedFloatId = pending
-                Toast.makeText(activity, activity.getString(R.string.habitat_mount_started), Toast.LENGTH_SHORT).show()
+                Toast.makeText(activity, "悬浮窗已开启", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -101,19 +103,17 @@ fun HabitatDashboard(activity: ComponentActivity) {
             }
             val currentIds = current.map { it.first }.toSet()
 
-            // Unregister removed ones
             for (oldId in registered) {
-                if (oldId !in currentIds) {
+                if (oldId !in currentIds || !TriggerManager.isWorkflowEnabled(ctx, oldId)) {
                     TriggerManager.unregister(oldId, ctx)
                 }
             }
-            // Register new / updated ones
             for ((id, config) in current) {
                 val wf = workflows.find { it.id == id } ?: continue
+                if (!TriggerManager.isWorkflowEnabled(ctx, id)) continue
                 if (id !in registered) {
                     TriggerManager.register(id, config, wf.jsonContent, ctx)
                 } else if (TriggerManager.triggerConfigFor(id) != config) {
-                    // Config changed — re-register
                     TriggerManager.unregister(id, ctx)
                     TriggerManager.register(id, config, wf.jsonContent, ctx)
                 }
@@ -122,16 +122,56 @@ fun HabitatDashboard(activity: ComponentActivity) {
 
         fun reloadLibrary() {
             workflows = WorkflowRepository.getAll(activity)
-            mountedFloatId = WorkflowRepository.getFloatMountedWorkflowId(activity)
             HabitatStateStore.notifyLibraryChanged()
             syncTriggers()
         }
 
         LaunchedEffect(Unit) { reloadLibrary() }
 
+        val mountedIds = remember { mutableStateOf(WorkflowRepository.getFloatMountedWorkflowIds(activity)) }
+        LaunchedEffect(workflows) {
+            mountedIds.value = WorkflowRepository.getFloatMountedWorkflowIds(activity)
+        }
+
+        fun ensureFloatServiceForMount() {
+            if (!Settings.canDrawOverlays(activity)) {
+                overlayPermissionLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${activity.packageName}"))
+                )
+                return
+            }
+            HabitatFloatService.start(activity) // service onCreate → showFloatWindow
+            floatServiceRunning = true
+            HabitatStateStore.setFloatServiceActive(true)
+            Toast.makeText(activity, "悬浮窗已开启", Toast.LENGTH_SHORT).show()
+        }
+
+        fun turnOffFloatService() {
+            HabitatFloatService.stop(activity)
+            FloatWindowManager.getInstanceOrNull()?.hideFloatWindow()
+            floatServiceRunning = false
+            HabitatStateStore.setFloatServiceActive(false)
+            Toast.makeText(activity, "悬浮窗已关闭", Toast.LENGTH_SHORT).show()
+        }
+
+        fun toggleMountWorkflow(wf: HabitatWorkflow) {
+            if (WorkflowRepository.isFloatMounted(activity, wf.id)) {
+                WorkflowRepository.removeFloatMountedWorkflowId(activity, wf.id)
+            } else {
+                WorkflowRepository.addFloatMountedWorkflowId(activity, wf.id)
+                ensureFloatServiceForMount()
+            }
+            mountedIds.value = WorkflowRepository.getFloatMountedWorkflowIds(activity)
+            HabitatStateStore.notifyLibraryChanged()
+        }
+
         fun runGraphJson(json: String, targetLogs: MutableList<String>, workflowId: String? = null) {
             val id = workflowId ?: "adhoc_${System.currentTimeMillis()}"
             activity.lifecycleScope.launch(Dispatchers.IO) {
+                if (workflowId != null && !TriggerManager.isWorkflowEnabled(activity.applicationContext, workflowId)) {
+                    withContext(Dispatchers.Main) { targetLogs.add("工作流已禁用，无法执行") }
+                    return@launch
+                }
                 if (HabitatExecutionService.isRunning(id)) {
                     withContext(Dispatchers.Main) { targetLogs.add("已在运行中，跳过重复启动") }
                     return@launch
@@ -146,44 +186,6 @@ fun HabitatDashboard(activity: ComponentActivity) {
             }
         }
 
-        fun mountToFloat(wf: HabitatWorkflow) {
-            if (!Settings.canDrawOverlays(activity)) {
-                pendingMountWorkflowId = wf.id
-                overlayPermissionLauncher.launch(
-                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${activity.packageName}"))
-                )
-                return
-            }
-            WorkflowRepository.setFloatMountedWorkflowId(activity, wf.id)
-            val manager = FloatWindowManager.getInstance(activity.application)
-            manager.onWorkflowSelected = { wf2 ->
-                val factory = NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(activity.applicationContext)).apply {
-                    applyAppHandlers(activity.applicationContext)
-                }
-                val ok = HabitatExecutionService.start(wf2.id, wf2.jsonContent, activity.applicationContext, factory)
-                if (ok) {
-                    activity.lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(activity, "已启动: ${wf2.name}", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    activity.lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(activity, "${wf2.name} 已在运行中", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            manager.onWorkflowStop = { wf2 -> HabitatExecutionService.stop(wf2.id) }
-            manager.showFloatWindow()
-            mountedFloatId = wf.id
-            Toast.makeText(activity, activity.getString(R.string.habitat_mount_started), Toast.LENGTH_SHORT).show()
-        }
-
-        fun unmountFloat() {
-            WorkflowRepository.setFloatMountedWorkflowId(activity, null)
-            FloatWindowManager.getInstanceOrNull()?.hideFloatWindow()
-            mountedFloatId = null
-            Toast.makeText(activity, activity.getString(R.string.habitat_float_unmounted), Toast.LENGTH_SHORT).show()
-        }
-
         // ── Main scaffold with bottom nav ──
         Scaffold(
             modifier = Modifier.fillMaxSize(),
@@ -196,11 +198,13 @@ fun HabitatDashboard(activity: ComponentActivity) {
                     Tab.Workflows -> WorkflowsTab(
                         workflows = workflows,
                         libraryLogs = libraryLogs,
-                        mountedFloatWorkflowId = mountedFloatId,
+                        mountedIds = mountedIds.value,
                         runningStates = runningStates,
-                        onRunWorkflow = { wf -> runGraphJson(wf.jsonContent, libraryLogs, wf.id) },
-                        onMountToFloat = ::mountToFloat,
-                        onUnmountFloat = ::unmountFloat,
+                        onToggleWorkflow = { wf, enabled ->
+                            val config = try { HabitatJson.fromJson(wf.jsonContent).triggerConfig() } catch (_: Exception) { null }
+                            TriggerManager.setWorkflowEnabled(activity.applicationContext, wf.id, enabled, config, wf.jsonContent)
+                        },
+                        onToggleMount = ::toggleMountWorkflow,
                         onEditWorkflow = { wf ->
                             editingBase = wf; editName = wf.name; editDescription = wf.description
                             editJson = wf.jsonContent; editLogs.clear(); selectedTab = Tab.Editor
@@ -214,10 +218,14 @@ fun HabitatDashboard(activity: ComponentActivity) {
                             editJson = editingBase!!.jsonContent; editLogs.clear(); selectedTab = Tab.Editor
                         },
                         onDeleteWorkflow = { wf ->
+                            TriggerManager.setWorkflowEnabled(activity.applicationContext, wf.id, false)
                             WorkflowRepository.delete(activity, wf.id)
-                            TriggerManager.unregister(wf.id, activity.applicationContext)
                             reloadLibrary()
-                        }
+                        },
+                        onFloatServiceToggle = { on ->
+                            if (on) ensureFloatServiceForMount() else turnOffFloatService()
+                        },
+                        isFloatServiceRunning = floatServiceRunning,
                     )
 
                     Tab.Editor -> EditorTab(
@@ -230,16 +238,28 @@ fun HabitatDashboard(activity: ComponentActivity) {
                             val saved = base.copy(name = editName.trim().ifEmpty { base.name }, description = editDescription.trim(), jsonContent = editJson)
                             WorkflowRepository.upsert(activity, saved); editingBase = saved; reloadLibrary()
                         },
-                        onSaveAndRun = {
-                            val base = editingBase ?: return@EditorTab
-                            val saved = base.copy(name = editName.trim().ifEmpty { base.name }, description = editDescription.trim(), jsonContent = editJson)
-                            WorkflowRepository.upsert(activity, saved); editingBase = saved; reloadLibrary()
-                            runGraphJson(editJson, editLogs, saved.id)
+                        onTestRun = {
+                            runGraphJson(editJson, editLogs, editingBase?.id)
                         },
-                        onRunOnly = { runGraphJson(editJson, editLogs, editingBase?.id) }
                     )
 
-                    Tab.Account -> AccountTab(activity = activity)
+                    Tab.Profile -> {
+                        var showLLM by remember { mutableStateOf(false) }
+                        if (showLLM) {
+                            HabitatLLMConsoleContent(activity = activity, onBack = { showLLM = false })
+                        } else {
+                            ProfileTab(
+                                isFloatServiceRunning = floatServiceRunning,
+                                onFloatServiceToggle = { on ->
+                                    if (on) ensureFloatServiceForMount() else turnOffFloatService()
+                                },
+                                onNavigateToLLM = { showLLM = true },
+                                onNavigateToPermissions = {
+                                    activity.startActivity(Intent(activity, com.ailun.habitat.app.ui.HabitatSettingsActivity::class.java))
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -277,15 +297,15 @@ private fun HabitatBottomBar(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
             label = { Text("编辑器") }
         )
         NavigationBarItem(
-            selected = selectedTab == Tab.Account,
-            onClick = { onTabSelected(Tab.Account) },
+            selected = selectedTab == Tab.Profile,
+            onClick = { onTabSelected(Tab.Profile) },
             icon = {
                 Icon(
-                    if (selectedTab == Tab.Account) Icons.Filled.Person else Icons.Outlined.Person,
+                    if (selectedTab == Tab.Profile) Icons.Filled.Person else Icons.Outlined.Person,
                     contentDescription = null
                 )
             },
-            label = { Text("我的") }
+            label = { Text("个人主页") }
         )
     }
 }
@@ -296,15 +316,17 @@ private fun HabitatBottomBar(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
 private fun WorkflowsTab(
     workflows: List<HabitatWorkflow>,
     libraryLogs: MutableList<String>,
-    mountedFloatWorkflowId: String?,
+    mountedIds: Set<String>,
     runningStates: Map<String, HabitatStateStore.WorkflowRunState>,
-    onRunWorkflow: (HabitatWorkflow) -> Unit,
-    onMountToFloat: (HabitatWorkflow) -> Unit,
-    onUnmountFloat: () -> Unit,
+    onToggleWorkflow: (HabitatWorkflow, Boolean) -> Unit,
+    onToggleMount: (HabitatWorkflow) -> Unit,
     onEditWorkflow: (HabitatWorkflow) -> Unit,
     onNewWorkflow: () -> Unit,
     onDeleteWorkflow: (HabitatWorkflow) -> Unit,
+    onFloatServiceToggle: (Boolean) -> Unit,
+    isFloatServiceRunning: Boolean,
 ) {
+    val ctx = LocalContext.current.applicationContext
     Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         // Header
         Surface(
@@ -321,7 +343,17 @@ private fun WorkflowsTab(
                     Text("Habitat", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text("脚本中枢", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = isFloatServiceRunning,
+                        onCheckedChange = onFloatServiceToggle,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                    Text(
+                        "悬浮窗", style = MaterialTheme.typography.bodySmall,
+                        color = if (isFloatServiceRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                    Spacer(Modifier.width(8.dp))
                     FilledTonalButton(onClick = onNewWorkflow, contentPadding = PaddingValues(horizontal = 12.dp)) {
                         Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
@@ -354,16 +386,32 @@ private fun WorkflowsTab(
             ) {
                 items(workflows, key = { it.id }) { wf ->
                     val isRunning = runningStates[wf.id]?.isRunning == true
-                    val isMounted = mountedFloatWorkflowId == wf.id
-                    val hasTrigger = TriggerManager.isRegistered(wf.id)
-                    val triggerType = TriggerManager.triggerConfigFor(wf.id)?.type
+                    val isMounted = mountedIds.contains(wf.id)
+                    val triggerConfig = remember(wf.jsonContent) {
+                        try { HabitatJson.fromJson(wf.jsonContent).triggerConfig() } catch (_: Exception) { null }
+                    }
+                    val hasTrigger = triggerConfig != null
+                    // Triggered: show enabled state. Non-triggered: show running state.
+                    val switchOn = if (hasTrigger)
+                        remember(wf.id) { mutableStateOf(TriggerManager.isWorkflowEnabled(ctx, wf.id)) }
+                    else
+                        remember(wf.id) { mutableStateOf(isRunning) }
+
+                    // Keep non-triggered switch in sync with running state
+                    if (!hasTrigger) {
+                        LaunchedEffect(isRunning) { switchOn.value = isRunning }
+                    }
+
                     WorkflowCard(
                         wf = wf, isRunning = isRunning, isMounted = isMounted,
-                        hasTrigger = hasTrigger, triggerType = triggerType,
-                        onRun = { onRunWorkflow(wf) },
+                        hasTrigger = hasTrigger, triggerType = triggerConfig?.type,
+                        switchOn = switchOn.value,
+                        onToggle = { checked ->
+                            switchOn.value = checked
+                            onToggleWorkflow(wf, checked)
+                        },
+                        onMountToggle = { onToggleMount(wf) },
                         onEdit = { onEditWorkflow(wf) },
-                        onMount = { onMountToFloat(wf) },
-                        onUnmount = { onUnmountFloat() },
                         onDelete = { onDeleteWorkflow(wf) }
                     )
                 }
@@ -395,8 +443,11 @@ private fun WorkflowsTab(
 private fun WorkflowCard(
     wf: HabitatWorkflow, isRunning: Boolean, isMounted: Boolean,
     hasTrigger: Boolean = false, triggerType: String? = null,
-    onRun: () -> Unit, onEdit: () -> Unit, onMount: () -> Unit,
-    onUnmount: () -> Unit, onDelete: () -> Unit
+    switchOn: Boolean = false,
+    onToggle: ((Boolean) -> Unit)? = null,
+    onMountToggle: (() -> Unit)? = null,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -408,7 +459,7 @@ private fun WorkflowCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier.size(8.dp).clip(CircleShape).background(
-                        when { isRunning -> Color(0xFF22C55E); isMounted -> MaterialTheme.colorScheme.primary; else -> Color.Gray.copy(alpha = 0.3f) }
+                        when { isRunning -> Color(0xFF22C55E); switchOn -> Color(0xFFF59E0B); else -> Color.Gray.copy(alpha = 0.3f) }
                     )
                 )
                 Spacer(Modifier.width(8.dp))
@@ -418,7 +469,7 @@ private fun WorkflowCard(
                         Text("运行中", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 11.sp, color = Color(0xFF16A34A), fontWeight = FontWeight.SemiBold)
                     }
                 }
-                if (hasTrigger) {
+                if (hasTrigger && switchOn) {
                     Spacer(Modifier.width(6.dp))
                     Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.tertiaryContainer) {
                         Text(
@@ -442,21 +493,30 @@ private fun WorkflowCard(
                 Text(wf.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilledTonalButton(onClick = onRun, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(34.dp)) {
-                    Text("执行", fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Status label
+                Text(
+                    when { isRunning -> "● 运行中"; switchOn -> if (hasTrigger) "○ 等待触发" else "○ 运行中"; else -> "已停止" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when { isRunning -> Color(0xFF16A34A); switchOn -> Color(0xFFF59E0B); else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) },
+                    modifier = Modifier.weight(1f),
+                )
+                // Switch as sole control
+                if (onToggle != null) {
+                    Switch(checked = switchOn, onCheckedChange = onToggle)
                 }
                 OutlinedButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp), modifier = Modifier.height(34.dp)) {
                     Text("编辑", fontSize = 13.sp)
                 }
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = if (isMounted) onUnmount else onMount, modifier = Modifier.size(34.dp)) {
-                    Icon(
-                        if (isMounted) Icons.Filled.PushPin else Icons.Outlined.PushPin,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = if (isMounted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                if (onMountToggle != null) {
+                    IconButton(onClick = onMountToggle, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            if (isMounted) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (isMounted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
                     Icon(Icons.Outlined.Delete, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
@@ -473,7 +533,7 @@ private fun EditorTab(
     name: String, description: String, jsonBody: String, logs: MutableList<String>,
     onNameChange: (String) -> Unit, onDescriptionChange: (String) -> Unit,
     onJsonChange: (String) -> Unit, onBack: () -> Unit,
-    onSave: () -> Unit, onSaveAndRun: () -> Unit, onRunOnly: () -> Unit
+    onSave: () -> Unit, onTestRun: () -> Unit,
 ) {
     var showDag by remember { mutableStateOf(false) }
     var dagError by remember { mutableStateOf<String?>(null) }
@@ -575,10 +635,8 @@ private fun EditorTab(
         // Action buttons
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = onSave, modifier = Modifier.weight(1f)) { Text("保存") }
-            Button(onClick = onSaveAndRun, modifier = Modifier.weight(1f)) { Text("保存并执行") }
+            OutlinedButton(onClick = onTestRun, modifier = Modifier.weight(1f)) { Text("测试运行") }
         }
-        Spacer(Modifier.height(6.dp))
-        OutlinedButton(onClick = onRunOnly, modifier = Modifier.fillMaxWidth()) { Text("仅执行") }
 
         // Logs
         if (logs.isNotEmpty()) {
@@ -589,70 +647,6 @@ private fun EditorTab(
                     Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, lineHeight = 16.sp)
                 }
             }
-        }
-    }
-}
-
-// ── Tab 3: Account ──
-
-@Composable
-private fun AccountTab(activity: ComponentActivity) {
-    val context = LocalContext.current
-    var showLLMConsole by remember { mutableStateOf(false) }
-
-    if (showLLMConsole) {
-        HabitatLLMConsoleContent(activity = activity, onBack = { showLLMConsole = false })
-    } else {
-        Column(
-            modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)
-        ) {
-            Spacer(Modifier.height(20.dp))
-            Text("我的", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(24.dp))
-
-            // Engine status card
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))) {
-                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Memory, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("引擎状态", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        val activeCount = HabitatStateStore.runningStates.collectAsState().value.count { it.value.isRunning }
-                        Text("${activeCount} 个工作流运行中", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // Menu items
-            AccountMenuItem(icon = Icons.Filled.Psychology, title = "LLM 控制台", subtitle = "加载模型并进行推理测试") {
-                showLLMConsole = true
-            }
-            AccountMenuItem(icon = Icons.Filled.Settings, title = "权限管理", subtitle = "管理无障碍、悬浮窗等系统权限") {
-                context.startActivity(Intent(context, com.ailun.habitat.app.ui.HabitatSettingsActivity::class.java))
-            }
-            AccountMenuItem(icon = Icons.Filled.Info, title = "关于 Habitat", subtitle = "智能自动化脚本引擎") {}
-        }
-    }
-}
-
-@Composable
-private fun AccountMenuItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface
-    ) {
-        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

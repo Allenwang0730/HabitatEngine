@@ -61,6 +61,7 @@ class HabitatFloatService : Service() {
 
     override fun onDestroy() {
         HabitatLogger.d(TAG, "HabitatFloatService onDestroy")
+        isRunning = false
         FloatWindowManager.getInstanceOrNull()?.destroy()
         ioScope.cancel()
         mainScope.cancel()
@@ -135,10 +136,18 @@ class HabitatFloatService : Service() {
         private const val NOTIFICATION_ID = 31042
         private const val CHANNEL_ID = "habitat_float_service"
 
-        fun start(context: Context) =
-            ContextCompat.startForegroundService(context, Intent(context, HabitatFloatService::class.java))
+        @Volatile
+        var isRunning: Boolean = false
+            private set
 
-        fun stop(context: Context) =
+        fun start(context: Context) {
+            isRunning = true
+            ContextCompat.startForegroundService(context, Intent(context, HabitatFloatService::class.java))
+        }
+
+        fun stop(context: Context) {
+            isRunning = false
             context.stopService(Intent(context, HabitatFloatService::class.java))
+        }
     }
 }

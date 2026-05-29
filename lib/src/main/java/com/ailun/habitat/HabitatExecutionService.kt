@@ -32,6 +32,7 @@ object HabitatExecutionService {
         androidContext: Context,
         factory: NodeHandlerFactory,
         initialVars: Map<String, Any>? = null,
+        onComplete: (() -> Unit)? = null,
         onLog: ((String) -> Unit)? = null,
     ): Boolean {
         if (isRunning(workflowId)) {
@@ -60,6 +61,7 @@ object HabitatExecutionService {
                 Log.i(TAG, "=== End workflow '$workflowId' ===")
                 HabitatStateStore.setRunning(workflowId, false)
                 activeJobs.remove(workflowId)
+                onComplete?.invoke()
             }
         }
 
