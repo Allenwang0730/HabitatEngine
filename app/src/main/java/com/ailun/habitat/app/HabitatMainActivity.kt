@@ -10,7 +10,10 @@ import androidx.compose.material3.Surface
 import androidx.lifecycle.lifecycleScope
 import com.ailun.habitat.R
 import com.ailun.habitat.app.TriggerManager
+import com.ailun.habitat.app.auth.AuthStateManager
+import com.ailun.habitat.app.network.HabitatApiClient
 import com.ailun.habitat.app.ui.HabitatSettingsActivity
+import com.ailun.habitat.app.ui.ProfilePrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -37,6 +40,10 @@ class HabitatMainActivity : ComponentActivity() {
 
         // Reset all workflow states on app restart
         TriggerManager.resetAll(this)
+
+        // Initialize auth and API client on startup
+        AuthStateManager.init(this)
+        HabitatApiClient.init(ProfilePrefs.getServerUrl(this))
 
         // Normal launch → dashboard
         lifecycleScope.launch(Dispatchers.IO) {

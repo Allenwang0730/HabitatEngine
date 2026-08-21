@@ -46,9 +46,9 @@ class NodeMathHandler : INodeHandler {
         return when (raw) {
             is Number -> raw.toDouble()
             is String -> {
-                // 先尝试作为变量名从上下文查找
-                val fromCtx = ctx.getVariable(raw)
-                (fromCtx as? Number)?.toDouble() ?: raw.toDoubleOrNull()
+                val interpolated = ctx.interpolate(raw)
+                interpolated.toDoubleOrNull()
+                    ?: (ctx.getVariable(raw) as? Number)?.toDouble()
             }
             else -> null
         }

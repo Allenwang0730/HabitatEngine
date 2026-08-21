@@ -1,12 +1,17 @@
-# Habitat — JSON-Driven Android Automation Engine
+# Habitat — Embeddable, LLM-Driven Android Automation Runtime
 
-> Lightweight, AI-friendly, 40+ node types. Define workflows as flat JSON — designed for
-> LLM generation, not hand-authoring.
+> An **embeddable** Android automation runtime. Define workflows as flat JSON
+> (LLM-generatable), run them via **accessibility + system APIs**.
+> Drop the `:lib` into any app — or use it as the execution layer for **device AI agents**.
+
+> **One line**: the library that lets LLMs & AI agents control Android, and lets developers
+> embed JSON-workflow automation into their own apps.
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-purple)]()
 [![Min SDK](https://img.shields.io/badge/API-29+-green)]()
-[![Nodes](https://img.shields.io/badge/Nodes-40+-blue)]()
+[![Nodes](https://img.shields.io/badge/Nodes-47-blue)]()
 [![Compose](https://img.shields.io/badge/UI-Compose_M3-orange)]()
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue)]()
 
 ---
 
@@ -56,7 +61,22 @@ HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
 
 ---
 
-## Node Types (40+)
+## Why not Tasker / MaaFramework / Auto.js?
+
+| Tool | Style | Can you embed it in your app? |
+|------|-------|:---:|
+| **Tasker / Automate / MacroDroid** | End-user apps with GUI editors | ❌ |
+| **MaaFramework** | Embeddable & JSON task graphs, but C++ and image-recognition-first | ⚠️ |
+| **Auto.js / AutoX.js** | JavaScript scripting | ❌ |
+| **Habitat** | **Embeddable Kotlin `:lib` + flat JSON workflows + LLM generation + accessibility & system-API dual-track** | ✅ |
+
+Habitat is the one that is **embeddable + LLM-generatable + dual-track**. Define workflows
+as flat JSON designed for LLM output, embed the runtime in your app, and let agents or
+automation drive the device.
+
+---
+
+## Node Types (47)
 
 ### Interaction (6)
 | Type | What it does |
@@ -82,6 +102,12 @@ HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
 | `ACTION_FLASHLIGHT` | Flashlight on / off / toggle |
 | `ACTION_CALL_PHONE` | Open dialer with number |
 | `ACTION_SHARE` | System share sheet |
+
+### Telephony (2)
+| Type | What it does |
+|------|-------------|
+| `ACTION_CALL_DIRECT` | Place call directly via `ACTION_CALL` (no a11y needed, dual-SIM via `sim` param) — needs `CALL_PHONE` |
+| `ACTION_WAIT_CALL_END` | Block until the call ends (polls `TelephonyManager.callState`) — needs `READ_PHONE_STATE` |
 
 ### Data (8)
 | Type | What it does |
@@ -326,7 +352,9 @@ See `habitat-server/README.md` in the server repository for details.
 | Shell (system-level) | Shizuku or Root |
 | Screenshot | Accessibility Service |
 | Flashlight | `CAMERA` |
-| Dial | None (uses `ACTION_DIAL`) |
+| Open dialer | None (`ACTION_DIAL`) |
+| Direct call (`ACTION_CALL_DIRECT`) | `CALL_PHONE` |
+| Wait call end (`ACTION_WAIT_CALL_END`) | `READ_PHONE_STATE` |
 
 ---
 
@@ -345,6 +373,11 @@ class MyHandler : INodeHandler {
 factory.register("MY_ACTION", MyHandler())
 ```
 
+> **⚠️ Handler 线程约束**：handler 跑在 `Dispatchers.Default`（无 Looper 的后台协程线程）。
+> 用**同步查询**（如 `TelephonyManager.callState`）或自带 `Executor`/`HandlerThread`；
+> **不要用依赖 `Looper.myLooper()` 的 API**（如 `PhoneStateListener`），会因 Looper 为 null 崩溃。
+> 详见 [docs/ENGINE_EXTENDING.md](docs/ENGINE_EXTENDING.md)。
+
 ---
 
 ## FAQ
@@ -360,4 +393,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 40+ node types · AI-friendly flat JSON · `habitat-server` companion backend
+**Habitat** · 47 node types · embeddable · LLM-generatable · accessibility + system API · `habitat-server` companion backend

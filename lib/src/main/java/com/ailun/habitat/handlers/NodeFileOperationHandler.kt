@@ -7,11 +7,13 @@ import com.ailun.habitat.WorkflowNode
 import java.io.File
 
 /**
- * [ACTION_FILE_OPERATION]：文件操作（读、写、删除、存在检查、列表）。
+ * [ACTION_FILE_OPERATION]：文件操作（读、写、复制、删除、存在检查、列表）。
  *
  * params：
- * - `action`（必填）："read" / "write" / "delete" / "exists" / "list"
+ * - `action`（必填）："read" / "write" / "copy" / "delete" / "exists" / "list"
  * - `path`（必填）：文件或目录路径
+ * - `dest`（copy 时必填）：目标路径。path 为文件时是完整目标文件路径；
+ *   path 为目录时视为目录，把其中**最新修改**的文件复制进去（保留原文件名）
  * - `content`（write 时必填）：要写入的内容
  * - `output_var`（可选）：存储结果的变量名
  * - `append`（write 时可选）：true 表示追加，默认 false 覆盖
@@ -143,6 +145,57 @@ class NodeFileOperationHandler : INodeHandler {
                     }
 
                     Log.i(TAG, "File list: $path -> ${names.size} entries")
+                }
+
+                "copy" -> {
+                    val rawDest = params["dest"]?.toString()?.trim()
+                    if (rawDest.isNullOrEmpty()) {
+                        Log.w(TAG, "Copy failed: 'dest' parameter is empty")
+                        context.variables["file_success"] = false
+                        context.variables["file_error"] = "No 'dest' path specified"
+                        return node.next
+                    }
+                    val destPath = context.interpolate(rawDest)
+                    val source = File(path)
+
+                    if (!source.exists()) {
+                        Log.w(TAG, "Copy failed: source does not exist: $path")
+                        context.variables["file_success"] = false
+                        context.variables["file_error"] = "Source does not exist"
+                        return node.next
+                    }
+
+                    // 源为目录 → 复制其中最新修改的文件（刚生成的录音）；源为文件 → 直接复制
+                    val sourceFile: File
+                    val targetFile: File
+                    if (source.isDirectory) {
+                        val newest = source.listFiles()
+                            ?.filter { it.isFile }
+                            ?.maxByOrNull { it.lastModified() }
+                        if (newest == null) {
+                            Log.w(TAG, "Copy failed: no file in directory: $path")
+                            context.variables["file_success"] = false
+                            context.variables["file_error"] = "Directory contains no files"
+                            return node.next
+                        }
+                        sourceFile = newest
+                        targetFile = File(destPath, newest.name)
+                    } else {
+                        sourceFile = source
+                        targetFile = File(destPath)
+                    }
+
+                    targetFile.parentFile?.let { parent ->
+                        if (!parent.exists()) parent.mkdirs()
+                    }
+
+                    // 二进制流复制，录音等音频文件不会被损坏
+                    sourceFile.copyTo(targetFile, overwrite = true)
+
+                    context.variables["file_result"] = targetFile.absolutePath
+                    context.variables["file_copied_from"] = sourceFile.absolutePath
+                    context.variables["file_success"] = true
+                    Log.i(TAG, "File copied: ${sourceFile.absolutePath} -> ${targetFile.absolutePath}")
                 }
 
                 else -> {

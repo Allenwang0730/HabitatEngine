@@ -24,6 +24,9 @@ object HabitatExecutionService {
 
     /**
      * 启动工作流执行。
+     *
+     * @param onResult 工作流执行结束后，把上下文变量（所有节点输出）返还给调用方。
+     *                 这是引擎向 App 返还"内容"的正式通道（此前只能靠文件副作用）。
      * @return true 如果成功启动，false 如果已在运行中（防止重复执行）
      */
     fun start(
@@ -34,6 +37,7 @@ object HabitatExecutionService {
         initialVars: Map<String, Any>? = null,
         onComplete: (() -> Unit)? = null,
         onLog: ((String) -> Unit)? = null,
+        onResult: ((Map<String, Any?>) -> Unit)? = null,
     ): Boolean {
         if (isRunning(workflowId)) {
             Log.w(TAG, "Workflow '$workflowId' already running — skip duplicate start")
@@ -50,6 +54,8 @@ object HabitatExecutionService {
                 val ctx = WorkflowContext(androidContext)
                 initialVars?.forEach { (k, v) -> ctx.variables[k] = v }
                 executor.execute(graph, ctx, onLog).join()
+                // 工作流结束：把变量快照返还给调用方（在 onComplete 之前）
+                onResult?.invoke(HashMap(ctx.variables))
             } catch (_: CancellationException) {
                 Log.i(TAG, "Workflow '$workflowId' cancelled")
             } catch (e: Exception) {

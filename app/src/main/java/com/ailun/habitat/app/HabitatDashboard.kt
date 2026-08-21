@@ -239,7 +239,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
                             WorkflowRepository.upsert(activity, saved); editingBase = saved; reloadLibrary()
                         },
                         onTestRun = {
-                            runGraphJson(editJson, editLogs, editingBase?.id)
+                            runGraphJson(editJson, editLogs, null)
                         },
                     )
 

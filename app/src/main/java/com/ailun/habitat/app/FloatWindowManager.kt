@@ -59,6 +59,9 @@ class FloatWindowManager private constructor(private val application: Applicatio
     private var enabledVersion by mutableStateOf(0L)
     private var libObserverJob: Job? = null
 
+    val floatLogs = mutableStateListOf<String>()
+    private var currentRunningId: String? = null
+
     val mountedWorkflows: List<HabitatWorkflow>
         get() = allWorkflows.filter { it.id in mountedIds }
 
@@ -162,6 +165,7 @@ class FloatWindowManager private constructor(private val application: Applicatio
                         workflows = mounted,
                         activeJobIds = activeIds,
                         enabledWorkflowIds = mountedEnabledIds,
+                        executionLogs = floatLogs,
                         onDismiss = { isExpanded = false; updateLayout() },
                         onWorkflowSelected = { wf ->
                             onWorkflowSelected?.invoke(wf) ?: executeHabitatWorkflow(wf)
@@ -347,14 +351,17 @@ class FloatWindowManager private constructor(private val application: Applicatio
     // ── EXECUTION ──
 
     private fun executeHabitatWorkflow(wf: HabitatWorkflow) {
-        if (!TriggerManager.isWorkflowEnabled(application, wf.id)) {
-            HabitatLogger.habitat("Workflow '${wf.name}' is disabled, skipping execution")
-            return
-        }
+        floatLogs.clear()
+        floatLogs.add("— 开始执行: ${wf.name} —")
+        currentRunningId = wf.id
         val factory = NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(application)).apply {
             applyAppHandlers(application)
         }
-        HabitatExecutionService.start(wf.id, wf.jsonContent, application, factory)
+        HabitatExecutionService.start(wf.id, wf.jsonContent, application, factory, onLog = { line ->
+            mainScope.launch {
+                floatLogs.add(line)
+            }
+        })
     }
 
     // ── LIFECYCLE ──

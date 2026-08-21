@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -26,29 +27,24 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.util.Log
 import com.ailun.habitat.HabitatStateStore
 import com.ailun.habitat.WorkflowRepository
+import com.ailun.habitat.app.auth.AuthStateManager
+import com.ailun.habitat.app.network.HabitatApiClient
 import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 
 // ── Preferences keys ──
+private const val TAG = "ProfileTab"
 private const val PREFS_PROFILE = "habitat_profile"
-private const val KEY_DISPLAY_NAME = "display_name"
 private const val KEY_SERVER_URL = "server_url"
 
 object ProfilePrefs {
-    fun getDisplayName(ctx: Context): String =
-        ctx.getSharedPreferences(PREFS_PROFILE, Context.MODE_PRIVATE)
-            .getString(KEY_DISPLAY_NAME, "") ?: ""
-
-    fun setDisplayName(ctx: Context, name: String) {
-        ctx.getSharedPreferences(PREFS_PROFILE, Context.MODE_PRIVATE)
-            .edit().putString(KEY_DISPLAY_NAME, name).apply()
-    }
-
     fun getServerUrl(ctx: Context): String =
         ctx.getSharedPreferences(PREFS_PROFILE, Context.MODE_PRIVATE)
             .getString(KEY_SERVER_URL, "http://10.0.2.2:8080") ?: "http://10.0.2.2:8080"
@@ -78,16 +74,17 @@ fun ProfileTab(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var displayName by remember {
-        mutableStateOf(ProfilePrefs.getDisplayName(context).ifEmpty { "Habitat 用户" })
-    }
-    var showNameDialog by remember { mutableStateOf(false) }
-    var nameInput by remember { mutableStateOf(displayName) }
-
     var serverUrl by remember { mutableStateOf(ProfilePrefs.getServerUrl(context)) }
     var showServerDialog by remember { mutableStateOf(false) }
     var serverInput by remember { mutableStateOf(serverUrl) }
     var connectionStatus by remember { mutableStateOf<ConnectionState>(ConnectionState.Unknown) }
+
+    val isLoggedIn by AuthStateManager.isLoggedIn.collectAsState()
+    val authUsername = AuthStateManager.username
+    val effectiveName = authUsername ?: "Habitat 用户"
+
+    var showLoginDialog by remember { mutableStateOf(false) }
+    var showRegisterDialog by remember { mutableStateOf(false) }
 
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var apiKeys: MutableList<LocalApiKey> by remember {
@@ -119,14 +116,19 @@ fun ProfileTab(
             connectionStatus = ConnectionState.Testing
             try {
                 val result = withContext(Dispatchers.IO) {
-                    val conn = URL("${url.trimEnd('/')}/actuator/health").openConnection() as HttpURLConnection
+                    val fullUrl = "${url.trimEnd('/')}/actuator/health"
+                    Log.d(TAG, "Testing connection to: $fullUrl")
+                    val conn = URL(fullUrl).openConnection() as HttpURLConnection
                     conn.connectTimeout = 5000
                     conn.readTimeout = 5000
-                    conn.responseCode
+                    val code = conn.responseCode
+                    Log.d(TAG, "Connection result: HTTP $code")
+                    code
                 }
                 connectionStatus = if (result == 200) ConnectionState.Connected
                 else ConnectionState.Error("HTTP $result")
             } catch (e: Exception) {
+                Log.e(TAG, "Connection test failed for $url", e)
                 connectionStatus = ConnectionState.Error(e.message ?: "连接失败")
             }
         }
@@ -161,11 +163,14 @@ fun ProfileTab(
                         modifier = Modifier
                             .size(56.dp)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
+                            .background(
+                                if (isLoggedIn) Color(0xFF16A34A)
+                                else MaterialTheme.colorScheme.primary,
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = displayName.take(1).uppercase(),
+                            text = effectiveName.take(1).uppercase(),
                             style = MaterialTheme.typography.headlineSmall,
                             color = MaterialTheme.colorScheme.onPrimary,
                             fontWeight = FontWeight.Bold,
@@ -173,12 +178,59 @@ fun ProfileTab(
                     }
                     Spacer(Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            effectiveName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
                         Spacer(Modifier.height(2.dp))
-                        Text("工作流自动化用户", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            if (isLoggedIn) "已登录" else "未登录 · 点击下方按钮登录",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    IconButton(onClick = { nameInput = displayName; showNameDialog = true }) {
-                        Icon(Icons.Outlined.Edit, "编辑名称", modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        // ── Auth Actions ──
+        item {
+            if (isLoggedIn) {
+                OutlinedButton(
+                    onClick = {
+                        AuthStateManager.logout()
+                        HabitatApiClient.init(serverUrl)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Logout, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("退出登录")
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { showLoginDialog = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Filled.Login, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("登录")
+                    }
+                    Button(
+                        onClick = { showRegisterDialog = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Filled.PersonAdd, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("注册")
                     }
                 }
             }
@@ -432,36 +484,6 @@ fun ProfileTab(
         item { Spacer(Modifier.height(24.dp)) }
     }
 
-    // ── Edit Name Dialog ──
-    if (showNameDialog) {
-        AlertDialog(
-            onDismissRequest = { showNameDialog = false },
-            title = { Text("修改显示名称") },
-            text = {
-                OutlinedTextField(
-                    value = nameInput,
-                    onValueChange = { nameInput = it },
-                    label = { Text("名称") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val trimmed = nameInput.trim()
-                    if (trimmed.isNotEmpty()) {
-                        displayName = trimmed
-                        ProfilePrefs.setDisplayName(context, trimmed)
-                    }
-                    showNameDialog = false
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showNameDialog = false }) { Text("取消") }
-            },
-        )
-    }
-
     // ── Server Config Dialog ──
     if (showServerDialog) {
         AlertDialog(
@@ -493,7 +515,9 @@ fun ProfileTab(
                     val trimmed = serverInput.trim().trimEnd('/')
                     if (trimmed.isNotEmpty()) {
                         serverUrl = trimmed
+                        Log.d(TAG, "Server URL saved: $trimmed")
                         ProfilePrefs.setServerUrl(context, trimmed)
+                        HabitatApiClient.init(trimmed)
                         connectionStatus = ConnectionState.Unknown
                     }
                     showServerDialog = false
@@ -502,6 +526,23 @@ fun ProfileTab(
             dismissButton = {
                 TextButton(onClick = { showServerDialog = false }) { Text("取消") }
             },
+        )
+    }
+
+    // ── Login Dialog ──
+    if (showLoginDialog) {
+        LoginDialog(
+            onDismiss = { showLoginDialog = false },
+            onSuccess = { showLoginDialog = false },
+            onNavigateToRegister = { showRegisterDialog = true },
+        )
+    }
+
+    // ── Register Dialog ──
+    if (showRegisterDialog) {
+        RegisterDialog(
+            onDismiss = { showRegisterDialog = false },
+            onSuccess = { showRegisterDialog = false },
         )
     }
 

@@ -13,8 +13,9 @@ class NodeAdvancedSwitchHandler : INodeHandler {
         // Support two formats:
         // 1. expression: "sum > 15" (compact)
         // 2. var + operator + value: var="sum", operator=">", value="15" (split)
-        val expr = node.params?.get("expression")?.toString()?.trim()
+        val rawExpr = node.params?.get("expression")?.toString()?.trim()
             ?: buildExpression(node.params ?: emptyMap())
+        val expr = context.interpolate(rawExpr)
 
         val result = evaluate(expr, context)
         val key = if (result) "true" else "false"

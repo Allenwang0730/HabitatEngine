@@ -31,14 +31,17 @@ class NodeLaunchAppHandler(
             ?.takeIf { it.isNotEmpty() }
 
         try {
+            // REORDER_TO_FRONT + SINGLE_TOP：若目标 App 已有任务，则拉回前台而非新建实例
+            val bringToFrontFlags = Intent.FLAG_ACTIVITY_NEW_TASK + Intent.FLAG_ACTIVITY_REORDER_TO_FRONT + Intent.FLAG_ACTIVITY_SINGLE_TOP
+
             val intent = if (activityName != null) {
                 Intent().apply {
                     setClassName(packageName, activityName)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(bringToFrontFlags)
                 }
             } else {
                 context.appContext.packageManager.getLaunchIntentForPackage(packageName)?.apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(bringToFrontFlags)
                 }
             }
 

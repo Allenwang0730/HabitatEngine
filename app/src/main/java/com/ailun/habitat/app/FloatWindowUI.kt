@@ -36,6 +36,7 @@ internal fun FloatWindowUI(
     workflows: List<HabitatWorkflow>,
     activeJobIds: Set<String>,
     enabledWorkflowIds: Set<String> = emptySet(),
+    executionLogs: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onWorkflowSelected: (HabitatWorkflow) -> Unit,
     onWorkflowStop: (HabitatWorkflow) -> Unit,
@@ -44,7 +45,7 @@ internal fun FloatWindowUI(
     Box(modifier = Modifier.fillMaxSize()) {
         if (isExpanded) {
             WorkflowSelectionPanel(
-                workflows, activeJobIds, enabledWorkflowIds,
+                workflows, activeJobIds, enabledWorkflowIds, executionLogs,
                 onWorkflowSelected, onWorkflowStop, onWorkflowToggle, onDismiss,
             )
         } else {
@@ -83,6 +84,7 @@ internal fun WorkflowSelectionPanel(
     workflows: List<HabitatWorkflow>,
     activeJobIds: Set<String>,
     enabledWorkflowIds: Set<String> = emptySet(),
+    executionLogs: List<String> = emptyList(),
     onWorkflowSelected: (HabitatWorkflow) -> Unit,
     onWorkflowStop: (HabitatWorkflow) -> Unit,
     onWorkflowToggle: ((HabitatWorkflow, Boolean) -> Unit)? = null,
@@ -128,7 +130,7 @@ internal fun WorkflowSelectionPanel(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().weight(0.55f).padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(workflows, key = { it.id }) { wf ->
@@ -142,6 +144,34 @@ internal fun WorkflowSelectionPanel(
                                 { enabled -> onWorkflowToggle(wf, enabled) }
                             } else null,
                         )
+                    }
+                }
+            }
+
+            // Execution log panel
+            if (executionLogs.isNotEmpty()) {
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.1f))
+                Column(modifier = Modifier.fillMaxWidth().weight(0.45f).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Text(
+                        "执行日志",
+                        color = White.copy(alpha = 0.5f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        items(executionLogs) { log ->
+                            Text(
+                                log,
+                                color = White.copy(alpha = 0.7f),
+                                fontSize = 10.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
