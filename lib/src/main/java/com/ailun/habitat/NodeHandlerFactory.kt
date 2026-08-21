@@ -49,7 +49,20 @@ class NodeHandlerFactory(
         register(ACTION_BRIGHTNESS, NodeBrightnessHandler())
         register(ACTION_FLASHLIGHT, NodeFlashlightHandler())
         register(ACTION_CALL_PHONE, NodeCallHandler())
+        register(ACTION_CALL_DIRECT, NodeCallDirectHandler())
+        register(ACTION_WAIT_CALL_END, NodeWaitCallEndHandler())
+        register(ACTION_WAIT_CALL_ANSWER, NodeWaitCallAnswerHandler())
         register(ACTION_SHARE, NodeShareHandler())
+        register(ACTION_GET_CALL_STATE, NodeGetCallStateHandler())
+        register(ACTION_GET_SIM_INFO, NodeGetSimInfoHandler())
+        register(ACTION_SET_ALARM, NodeSetAlarmHandler())
+        register(ACTION_DND_MODE, NodeDndModeHandler())
+        register(ACTION_GLOBAL_NAV, NodeGlobalNavHandler(a11y))
+        register(ACTION_WAIT_FOR_ELEMENT, NodeWaitForElementHandler(a11y))
+        register(ACTION_RECORD_AUDIO, NodeRecordAudioHandler())
+        register(ACTION_CAPTURE_PHOTO, NodeCapturePhotoHandler())
+        register(ACTION_GET_LOCATION, NodeGetLocationHandler())
+        register(ACTION_READ_NOTIFICATIONS, NodeReadNotificationsHandler())
 
         // ── 媒体 ──
         register(ACTION_SCREENSHOT, NodeScreenshotHandler(shell))
@@ -62,10 +75,17 @@ class NodeHandlerFactory(
         // ── 工具 ──
         register(ACTION_GET_TIME, NodeGetTimeHandler())
         register(ACTION_RANDOM, NodeRandomHandler())
+        register(ACTION_GET_BATTERY, NodeGetBatteryHandler())
+        register(ACTION_GET_DEVICE_INFO, NodeGetDeviceInfoHandler())
+        register(ACTION_GET_STORAGE_INFO, NodeGetStorageInfoHandler())
+        register(ACTION_PLAY_MEDIA, NodePlayMediaHandler())
+        register(ACTION_WAIT_UNTIL_TIME, NodeWaitUntilTimeHandler())
+        register(ACTION_GET_SENSOR, NodeGetSensorHandler())
 
         // ── 感知 ──
         register(ACTION_READ_SCREEN, NodeReadScreenHandler(a11y))
         register(ACTION_READ_SMS, NodeReadSmsHandler(shell))
+        register(ACTION_READ_CALL_LOG, NodeReadCallLogHandler())
         register(ACTION_GET_APP_INFO, NodeAppInfoHandler(a11y))
         register(ACTION_FOREGROUND_APP, NodeForegroundAppHandler(a11y, shell))
         register(ACTION_APP_SEARCH, NodeAppSearchHandler())
@@ -111,15 +131,35 @@ class NodeHandlerFactory(
         const val ACTION_BRIGHTNESS = "ACTION_BRIGHTNESS"
         const val ACTION_FLASHLIGHT = "ACTION_FLASHLIGHT"
         const val ACTION_CALL_PHONE = "ACTION_CALL_PHONE"
+        const val ACTION_CALL_DIRECT = "ACTION_CALL_DIRECT"
+        const val ACTION_WAIT_CALL_END = "ACTION_WAIT_CALL_END"
+        const val ACTION_WAIT_CALL_ANSWER = "ACTION_WAIT_CALL_ANSWER"
         const val ACTION_SHARE = "ACTION_SHARE"
+        const val ACTION_GET_CALL_STATE = "ACTION_GET_CALL_STATE"
+        const val ACTION_GET_SIM_INFO = "ACTION_GET_SIM_INFO"
+        const val ACTION_SET_ALARM = "ACTION_SET_ALARM"
+        const val ACTION_DND_MODE = "ACTION_DND_MODE"
+        const val ACTION_GLOBAL_NAV = "ACTION_GLOBAL_NAV"
+        const val ACTION_WAIT_FOR_ELEMENT = "ACTION_WAIT_FOR_ELEMENT"
+        const val ACTION_RECORD_AUDIO = "ACTION_RECORD_AUDIO"
+        const val ACTION_CAPTURE_PHOTO = "ACTION_CAPTURE_PHOTO"
+        const val ACTION_GET_LOCATION = "ACTION_GET_LOCATION"
+        const val ACTION_READ_NOTIFICATIONS = "ACTION_READ_NOTIFICATIONS"
         const val ACTION_SCREENSHOT = "ACTION_SCREENSHOT"
         const val ACTION_TEXT_TO_SPEECH = "ACTION_TEXT_TO_SPEECH"
         const val ACTION_HTTP_REQUEST = "ACTION_HTTP_REQUEST"
         const val ACTION_NETWORK_STATUS = "ACTION_NETWORK_STATUS"
         const val ACTION_GET_TIME = "ACTION_GET_TIME"
         const val ACTION_RANDOM = "ACTION_RANDOM"
+        const val ACTION_GET_BATTERY = "ACTION_GET_BATTERY"
+        const val ACTION_GET_DEVICE_INFO = "ACTION_GET_DEVICE_INFO"
+        const val ACTION_GET_STORAGE_INFO = "ACTION_GET_STORAGE_INFO"
+        const val ACTION_PLAY_MEDIA = "ACTION_PLAY_MEDIA"
+        const val ACTION_WAIT_UNTIL_TIME = "ACTION_WAIT_UNTIL_TIME"
+        const val ACTION_GET_SENSOR = "ACTION_GET_SENSOR"
         const val ACTION_READ_SCREEN = "ACTION_READ_SCREEN"
         const val ACTION_READ_SMS = "ACTION_READ_SMS"
+        const val ACTION_READ_CALL_LOG = "ACTION_READ_CALL_LOG"
         const val ACTION_GET_APP_INFO = "ACTION_GET_APP_INFO"
         const val ACTION_FOREGROUND_APP = "ACTION_FOREGROUND_APP"
         const val ACTION_APP_SEARCH = "ACTION_APP_SEARCH"

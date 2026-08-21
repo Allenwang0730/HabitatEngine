@@ -121,9 +121,9 @@ class HabitatFloatService : Service() {
         val factory = NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(applicationContext)).apply {
             applyAppHandlers(applicationContext)
         }
-        val ok = HabitatExecutionService.start(wf.id, wf.jsonContent, applicationContext, factory) { log ->
+        val ok = HabitatExecutionService.start(wf.id, wf.jsonContent, applicationContext, factory, onLog = { log ->
             HabitatLogger.habitat(log)
-        }
+        })
         if (ok) {
             HabitatLogger.d(TAG, "启动工作流: ${wf.name}")
         } else {

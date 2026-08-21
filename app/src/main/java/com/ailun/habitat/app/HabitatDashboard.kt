@@ -180,9 +180,9 @@ fun HabitatDashboard(activity: ComponentActivity) {
                 val factory = NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(activity.applicationContext)).apply {
                     applyAppHandlers(activity.applicationContext)
                 }
-                HabitatExecutionService.start(id, json, activity.applicationContext, factory) { line ->
+                HabitatExecutionService.start(id, json, activity.applicationContext, factory, onLog = { line ->
                     activity.lifecycleScope.launch(Dispatchers.Main.immediate) { targetLogs.add(line) }
-                }
+                })
             }
         }
 

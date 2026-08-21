@@ -15,6 +15,12 @@
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
@@ -50,6 +56,11 @@
         <activity
             android:name="com.ailun.habitat.app.ui.HabitatSettingsActivity"
             android:exported="false" />
+
+        <!-- 节点自测（adb am start -n com.ailun.habitat/.NodeSelfTestActivity -e auto true） -->
+        <activity
+            android:name="com.ailun.habitat.app.NodeSelfTestActivity"
+            android:exported="true" />
 
         <!-- Float service -->
         <service
