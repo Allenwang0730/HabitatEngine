@@ -69,38 +69,27 @@ val factory = NodeHandlerFactory(
 
 ## 5. 参考项目调研：值得补进引擎的节点/触发器（2026-08-22）
 
-来源：Automate（380+ block）、MacroDroid、MaaFramework、Auto.js、Tasker。按"正常 App + 无 root（Shizuku/无障碍/权限）可行 + 有真实用途"标注可行性。
+来源：Automate（官方 416 页 block 索引）、Tasker（官方 A-Z 索引 + 6.6 更新日志）、MacroDroid（官方 Wiki 97 触发器）、Auto.js/AutoJs6（全系文档），4 个子代理抓取官方文档后交叉对照 Habitat 现有 67 个节点。**完整报告见 [RESEARCH_REFERENCE_PROJECTS.md](RESEARCH_REFERENCE_PROJECTS.md)**。
 
-### 值得补的节点（按可行性排序）
+### 关键趋势
+- Tasker 6.6 官方集成 Shizuku → 佐证 Habitat"无障碍 + Shizuku"路线正确
+- Automate 也没有 PDF/SFTP/磁条卡/WebSocket/独立正则块 → 不是差距
+- 事件模型：Automate "When changed"、MacroDroid 广播回调 → Habitat 落地为"节点 waitForChange 语义 + 常驻监听服务"
 
-| 节点 | 参考来源 | 权限/依赖 | 可行性 |
-|------|---------|----------|--------|
-| `ACTION_SET_WALLPAPER` | 各项目 | 无（需图片路径） | ★ 高，零权限 |
-| `ACTION_GET_SCREEN_STATE` | Auto.js | 无 | ★ 高，`PowerManager.isInteractive` |
-| `ACTION_GET_TRAFFIC` | 各项目 | 无 | ★ 高，`TrafficStats` |
-| `ACTION_AIRPLANE_MODE` | MacroDroid | WRITE_SECURE_SETTINGS（adb 授权）或 shell | ★ 高，`settings put global` |
-| `ACTION_MOBILE_DATA` | MacroDroid/Tasker | Shizuku shell `svc data` | ★ 高（有 shell 时） |
-| `ACTION_MEDIA_CONTROL`（play/pause/next） | Tasker/Auto.js | 通知监听（控制他 app 播放） | ◐ 中，需 NLS |
-| `ACTION_DIALOG_INPUT`（工作流中弹窗要用户输入/选择） | Automate | app 侧 UI | ◐ 中，需宿主配合 |
-| `ACTION_SQLITE_QUERY` | Automate | 无（自己文件） | ◐ 中 |
-| `ACTION_TEXT_OCR`（截图识字） | Auto.js | ML Kit 依赖 | ◐ 中 |
-| `ACTION_STT`（语音转文字） | Automate | 网络/系统识别 | ◐ 中 |
-| `ACTION_GEOFENCE`（进出区域） | Tasker/Automate | 定位权限 | ◐ 中（可先用 GET_LOCATION 轮询替代） |
-| `ACTION_GET_WEATHER` | 各项目 | 网络 | ★ 高（HTTP+PARSE_JSON 已可实现，无需新节点） |
-| `ACTION_APP_INSTALL/UNINSTALL` | MacroDroid | PackageInstaller/UI | ✗ 低，权限重 |
+### 第一批候选（★高、零/低权限、纯逻辑或 Shizuku 一行命令）
+Dialog 输入/确认/选择、SQLite 查询、ZIP 压缩/解压、文件加解密（AES-GCM）、媒体控制（play/pause/next）、壁纸设置、泛化系统设置读写（Shizuku settings）、飞行模式/移动数据（Shizuku）、数组/多变量 + 日期时间解析、屏幕状态/耳机/音乐播放查询、广播发送 + Intent Received 触发器、TTS 增强、天气/地理编码（HTTP）
 
-### 值得补的触发器（Trigger）
+### 第二批候选（◐中）
+OCR、STT、热点、NFC 标签、通知点击、地理围栏、日历/联系人 CRUD、FTP、SMTP 邮件、Quick Settings 磁贴入口、定时/周期触发器（cron 调度器）
 
-| 触发器 | 说明 | 可行性 |
-|--------|------|--------|
-| `battery_level` / `charger` | 电量低于阈值 / 插拔充电器 | ★ 高，注册广播即可 |
-| `call_end`（通话结束） | 挂断后触发收尾工作流（ENGINE_EXTENDING 已提过） | ★ 高，已有 IncomingCallService 同款监听 |
-| `app_launched`（应用打开） | 前台应用变化触发 | ◐ 中，需常驻监听/无障碍 |
-| `wifi_connected` | 连上指定 WiFi | ◐ 中 |
-| `shake`（摇一摇） | 传感器触发 | ◐ 中 |
-| `location_enter`（进入区域） | 地理围栏 | ◐ 中（权限重） |
+### 触发器候选（事件）
+屏幕亮/灭/解锁、充电插拔、WiFi 连接、蓝牙设备、耳机插拔、前台应用变化/新窗口、通知点击/移除、应用安装/卸载、开机/关机、时间/时区变化、摇一摇/传感器阈值、来电状态、变量变化、Intent Received、日出日落（纯计算）
 
-**建议**：下一批优先做 ★ 高 的零权限/低权限节点（SET_WALLPAPER / GET_SCREEN_STATE / GET_TRAFFIC / AIRPLANE_MODE / MOBILE_DATA），以及 battery/charger 与 call_end 触发器。
+### 明确不做
+Net Access 防火墙（VPNService）、Call Block/Divert（运营商级）、Matter/MIDI/Device Effects、远程多设备执行、Java/JS 万能后门、磁条卡/MIFARE、PDF
+
+### 国内 ROM 适配（写文档的"坑"）
+MIUI 无障碍易失效（自启动/省电白名单/神隐模式必改）；ColorOS 15 需"后台耗电管理+自启动"；OriginOS 高耗电白名单 + 后台弹出界面；EMUI 启动管理改三项；Android 10+ 剪贴板后台受限、13+ 悬浮窗单独授权、MediaProjection 每次弹窗。
 
 ## 6. 引擎线程约束（重要，新增节点必读）
 
