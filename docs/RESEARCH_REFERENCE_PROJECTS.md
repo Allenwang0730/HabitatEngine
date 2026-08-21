@@ -81,7 +81,7 @@ Wifi Connected(SSID)、电量区间、充电中、屏幕状态、飞行模式、
 
 ### 需要单独规划的（引擎级）
 - **定时/周期触发器**（Time/Day/Location 上下文）：cron 式调度器 + AlarmManager（Tasker/MacroDroid/Automate 都有 Time await/周期触发；Habitat 目前只有 WAIT_UNTIL_TIME 阻塞等待）
-- **地理围栏**：Geofencing API 或轮询 GET_LOCATION
+- **地理围栏**：对齐 Automate "Location at" 语义（坐标 + 半径默认 250m + 响应时间 30s + 等待进出，底层 Google Play Services；无 GMS 则轮询 GET_LOCATION）
 
 ## 3. 建议实施顺序（回填 ROADMAP）
 
