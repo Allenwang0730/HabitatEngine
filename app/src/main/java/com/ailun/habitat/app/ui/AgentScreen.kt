@@ -85,15 +85,29 @@ fun AgentScreen() {
                     Switch(
                         checked = running,
                         onCheckedChange = { enable ->
+                            lastError = null
                             if (enable) {
-                                context.startService(Intent(context, AgentService::class.java))
+                                // 乐观更新：立即反馈"开启中"，轮询会矫正真实状态
+                                running = true
+                                try {
+                                    context.startService(Intent(context, AgentService::class.java))
+                                } catch (e: Exception) {
+                                    running = AgentService.serverRunning
+                                    lastError = "启动失败: ${e.message}"
+                                }
                             } else {
+                                running = false
                                 context.stopService(Intent(context, AgentService::class.java))
+                                // 停止后真实 serverRunning 在 onDestroy 置 false，这里同步掉
+                                AgentService.serverRunning = false
                             }
                         },
                     )
                 }
                 StatusRow("服务状态", if (running) "运行中" else if (checking) "检测中…" else "已停止")
+                lastError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
                 StatusRow("局域网 IP", wifiIp(context))
                 StatusRow("MCP 地址", "ws://${wifiIp(context)}:$port/mcp")
                 StatusRow("WebSocket 地址", "ws://${wifiIp(context)}:$port/ws")
@@ -114,10 +128,15 @@ fun AgentScreen() {
                     Button(onClick = {
                         val newPort = portInput.toIntOrNull()?.coerceIn(1024, 65535) ?: return@Button
                         if (newPort != port) {
-                            context.stopService(Intent(context, AgentService::class.java))
-                            AgentService.setPort(context, newPort)
-                            port = newPort
-                            context.startService(Intent(context, AgentService::class.java))
+                            try {
+                                context.stopService(Intent(context, AgentService::class.java))
+                                AgentService.setPort(context, newPort)
+                                port = newPort
+                                context.startService(Intent(context, AgentService::class.java))
+                                lastError = null
+                            } catch (e: Exception) {
+                                lastError = "重启失败: ${e.message}"
+                            }
                         }
                     }) { Text("保存并重启") }
                 }

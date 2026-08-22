@@ -78,9 +78,14 @@ fun HabitatDashboard(activity: ComponentActivity) {
         val floatActiveFromStore by HabitatStateStore.floatServiceActive.collectAsState()
         var floatServiceRunning by remember { mutableStateOf(HabitatFloatService.isRunning) }
 
-        // Sync float switch state from HabitatStateStore (drag-to-close from float window)
+        // Sync float switch state. 注意：floatActiveFromStore 初值为 false（内存默认），不代表服务停止，
+        // 因此只在"明确开启"或"明确停止且实际服务也停了"时同步，避免冷启动时覆盖真实运行状态。
         LaunchedEffect(floatActiveFromStore) {
-            floatServiceRunning = floatActiveFromStore
+            if (floatActiveFromStore && !floatServiceRunning) {
+                floatServiceRunning = true
+            } else if (!floatActiveFromStore && floatServiceRunning && !HabitatFloatService.isRunning) {
+                floatServiceRunning = false
+            }
         }
 
         val overlayPermissionLauncher = rememberLauncherForActivityResult(
