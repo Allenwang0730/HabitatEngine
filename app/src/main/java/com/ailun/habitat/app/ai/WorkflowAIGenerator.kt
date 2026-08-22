@@ -21,12 +21,23 @@ object WorkflowAIGenerator {
     private const val TAG = "WorkflowAIGen"
     private val gson = Gson()
 
-    /** 生成工作流。 */
-    suspend fun generate(context: Context, userRequest: String): Result<GeneratedWorkflow> {
+    /**
+     * 生成工作流。
+     * @param request 用户最新需求
+     * @param baseWorkflow 已有工作流 JSON（用于"在现有基础上修改"的多轮对话），可为 null
+     */
+    suspend fun generate(context: Context, request: String, baseWorkflow: String? = null): Result<GeneratedWorkflow> {
         val apiKey = WorkflowAIClient.getApiKey(context)
         val baseUrl = WorkflowAIClient.getBaseUrl(context)
         val systemPrompt = buildSystemPrompt()
-        val userPrompt = "用户需求：$userRequest\n请生成对应的 Habitat 工作流。"
+
+        val userPrompt = buildString {
+            if (baseWorkflow != null) {
+                append("这是现有的 Habitat 工作流：\n$baseWorkflow\n\n")
+                append("请根据新的需求【修改】这个工作流，输出修改后的完整工作流 JSON（不要省略任何节点）。\n")
+            }
+            append("用户需求：$request")
+        }
 
         val llmResult = WorkflowAIClient.chat(apiKey, systemPrompt, userPrompt, baseUrl)
         val raw = llmResult.getOrElse {

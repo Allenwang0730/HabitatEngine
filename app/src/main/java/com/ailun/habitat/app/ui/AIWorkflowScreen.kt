@@ -53,20 +53,44 @@ class AIWorkflowViewModel(app: Application) : AndroidViewModel(app) {
     val messages: SnapshotStateList<ChatMsg> = mutableStateListOf()
     val busy = mutableStateOf(false)
 
+    /** 最近一次成功生成的工作流（多轮对话时作为"在现有基础上修改"的基线）。 */
+    private var lastGenerated: GeneratedWorkflow? = null
+
     fun send(request: String) {
         val req = request.trim()
         if (req.isEmpty() || busy.value) return
         messages.add(ChatMsg(isUser = true, text = req))
         busy.value = true
         viewModelScope.launch {
-            val result = WorkflowAIGenerator.generate(getApplication(), req)
+            val result = WorkflowAIGenerator.generate(getApplication(), req, lastGenerated?.workflowJson)
             busy.value = false
             result.onSuccess { gen ->
+                lastGenerated = gen
                 messages.add(ChatMsg(isUser = false, text = "", generated = gen))
             }.onFailure {
                 messages.add(ChatMsg(isUser = false, text = "❌ 生成失败：${it.message}"))
             }
         }
+    }
+
+    /** 编辑后重新验证并保存（编辑态的 JSON 可能不合法）。 */
+    fun saveEdited(msg: ChatMsg, editedJson: String): String? {
+        val parsed = WorkflowAIGenerator.parseAndValidate(editedJson).getOrElse { return null }
+        val gen = parsed
+        val workflow = HabitatWorkflow(
+            id = UUID.randomUUID().toString(),
+            name = gen.name,
+            description = gen.description,
+            jsonContent = gen.workflowJson,
+        )
+        WorkflowRepository.upsert(getApplication(), workflow)
+        // 用编辑后的结果替换消息（generated 是 val，需整体替换）
+        val idx = messages.indexOf(msg)
+        if (idx >= 0) {
+            messages[idx] = msg.copy(generated = gen, saved = true)
+        }
+        lastGenerated = gen
+        return workflow.id
     }
 
     fun save(msg: ChatMsg): String? {
@@ -79,7 +103,16 @@ class AIWorkflowViewModel(app: Application) : AndroidViewModel(app) {
         )
         WorkflowRepository.upsert(getApplication(), workflow)
         msg.saved = true
+        lastGenerated = gen
         return workflow.id
+    }
+
+    /** 保存并挂载到悬浮窗。 */
+    fun saveAndMount(msg: ChatMsg): String? {
+        val id = save(msg) ?: return null
+        WorkflowRepository.addFloatMountedWorkflowId(getApplication(), id)
+        com.ailun.habitat.HabitatStateStore.notifyLibraryChanged()
+        return id
     }
 }
 
@@ -158,25 +191,59 @@ fun AIWorkflowScreen() {
 @Composable
 private fun GeneratedCard(msg: ChatMsg, vm: AIWorkflowViewModel, context: android.content.Context) {
     val gen = msg.generated ?: return
+    var editing by remember { mutableStateOf(false) }
+    var editJson by remember { mutableStateOf("") }
+    var editError by remember { mutableStateOf<String?>(null) }
+
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("🤖 ${gen.name}", style = MaterialTheme.typography.titleSmall)
             Text(gen.description, style = MaterialTheme.typography.bodySmall)
-            Text(
-                gen.workflowJson,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                maxLines = 8,
-            )
+
+            if (editing) {
+                Text("编辑 JSON（保存前会重新校验）", style = MaterialTheme.typography.labelSmall)
+                OutlinedTextField(
+                    value = editJson,
+                    onValueChange = { editJson = it; editError = null },
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                )
+                editError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                }
+            } else {
+                Text(
+                    gen.workflowJson,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    maxLines = 8,
+                )
+            }
+
             Row {
-                if (msg.saved) {
-                    Text("✓ 已保存", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                if (editing) {
+                    TextButton(onClick = {
+                        vm.saveEdited(msg, editJson)?.let {
+                            Toast.makeText(context, "已保存编辑", Toast.LENGTH_SHORT).show()
+                            editing = false
+                        } ?: run { editError = "JSON 校验失败，请检查格式" }
+                    }) { Text("保存编辑") }
+                    TextButton(onClick = { editing = false }) { Text("取消") }
                 } else {
                     TextButton(onClick = {
-                        vm.save(msg)?.let {
-                            Toast.makeText(context, "已保存到工作流库", Toast.LENGTH_SHORT).show()
-                        }
+                        editing = true; editJson = gen.workflowJson
+                    }) { Text("编辑") }
+                    TextButton(onClick = {
+                        vm.save(msg)?.let { Toast.makeText(context, "已保存到工作流库", Toast.LENGTH_SHORT).show() }
                     }) { Text("保存") }
+                    TextButton(onClick = {
+                        vm.saveAndMount(msg)?.let {
+                            Toast.makeText(context, "已保存并挂载到悬浮窗", Toast.LENGTH_LONG).show()
+                        }
+                    }) { Text("挂载悬浮窗") }
                 }
+            }
+            if (msg.saved && !editing) {
+                Text("✓ 已保存", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             }
         }
     }
