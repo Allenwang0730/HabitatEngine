@@ -89,10 +89,10 @@ class NodeSelfTestActivity : Activity() {
             }
             Log.i(TAG, "$MARKER_DONE total=${results.size} pass=$passCount fail=$failCount skip=$skipCount")
 
-            // 界面展示
+            // 界面展示（协程在 Dispatchers.Default，必须切主线程）
             val sb = StringBuilder("节点自测完成：PASS $passCount / FAIL $failCount / SKIP $skipCount\n\n")
             results.forEach { r -> sb.append("${r.status}\t${r.name}\t${r.detail}\n") }
-            statusView.text = sb.toString()
+            runOnUiThread { statusView.text = sb.toString() }
 
             if (auto) {
                 delay(1500) // 给 Logcat 一点刷新时间

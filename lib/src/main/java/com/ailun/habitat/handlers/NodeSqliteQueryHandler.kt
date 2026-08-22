@@ -51,7 +51,9 @@ class NodeSqliteQueryHandler : INodeHandler {
             db = SQLiteDatabase.openDatabase(
                 database,
                 null,
-                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.NO_LOCALIZED_COLLATORS,
+                SQLiteDatabase.OPEN_READWRITE or
+                    SQLiteDatabase.CREATE_IF_NECESSARY or
+                    SQLiteDatabase.NO_LOCALIZED_COLLATORS,
             )
             val isSelect = query.trimStart().substringBefore(" ").equals("SELECT", ignoreCase = true)
 

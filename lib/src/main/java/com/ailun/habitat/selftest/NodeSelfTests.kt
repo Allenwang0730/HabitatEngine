@@ -311,15 +311,16 @@ object NodeSelfTests {
 
     private fun testSqlite() = SelfTestCase(
         name = "ACTION_SQLITE_QUERY·建表插查",
-        description = "CREATE+INSERT+SELECT 应返回 3 行",
+        description = "DROP+CREATE+INSERT+SELECT 应恰好返回 3 行（幂等）",
         workflowJson = """
         {
-          "start_node_id": "create",
+          "start_node_id": "drop",
           "nodes": {
-            "create": {"id":"create","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"CREATE TABLE IF NOT EXISTS t(x INTEGER, y TEXT)"},"next":"insert"},
+            "drop":   {"id":"drop","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"DROP TABLE IF EXISTS t"},"next":"create"},
+            "create": {"id":"create","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"CREATE TABLE t(x INTEGER, y TEXT)"},"next":"insert"},
             "insert": {"id":"insert","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"INSERT INTO t(x,y) VALUES(1,'a'),(2,'b'),(3,'c')"},"next":"select"},
             "select": {"id":"select","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"SELECT * FROM t ORDER BY x","output_var":"rows"},"next":"done"},
-            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+            "done":   {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
           }
         }
         """.trimIndent(),
@@ -702,7 +703,7 @@ object NodeSelfTests {
         {
           "start_node_id": "s",
           "nodes": {
-            "s":    {"id":"s","type":"ACTION_GET_SIM_INFO","params":{"output_var":"sim"},"next":"done"},
+            "s":    {"id":"s","type":"ACTION_GET_SIM_INFO","params":{},"next":"done"},
             "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
           }
         }
@@ -742,7 +743,7 @@ object NodeSelfTests {
         {
           "start_node_id": "w",
           "nodes": {
-            "w":    {"id":"w","type":"ACTION_WAIT_FOR_ELEMENT","params":{"selector":"habitat_absent_marker_xyz","mode":"text","wait_for":"disappear","timeout_ms":3000,"output_var":"ef"},"next":"done"},
+            "w":    {"id":"w","type":"ACTION_WAIT_FOR_ELEMENT","params":{"selector":"habitat_absent_marker_xyz","mode":"text","wait_for":"disappear","timeout_ms":3000},"next":"done"},
             "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
           }
         }
@@ -759,7 +760,7 @@ object NodeSelfTests {
         {
           "start_node_id": "w",
           "nodes": {
-            "w":    {"id":"w","type":"ACTION_WAIT_FOR_ELEMENT","params":{"selector":"habitat_absent_marker_xyz","mode":"text","wait_for":"appear","timeout_ms":2000,"output_var":"ef"},"next":"done"},
+            "w":    {"id":"w","type":"ACTION_WAIT_FOR_ELEMENT","params":{"selector":"habitat_absent_marker_xyz","mode":"text","wait_for":"appear","timeout_ms":2000},"next":"done"},
             "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
           }
         }
@@ -867,7 +868,8 @@ object NodeSelfTests {
 
     private fun testSetAlarm() = SelfTestCase(
         name = "ACTION_SET_ALARM·设置闹钟",
-        description = "应调起系统闹钟界面（会打开时钟 App，放最后执行）",
+        description = "调起系统闹钟界面（vivo/BBK 需系统签名权限 SET_ALARM，普通应用被拒，其他 ROM 手工验证）",
+        skipReason = "vivo/BBK 时钟要求系统签名权限 SET_ALARM，普通应用被拒；在支持 ACTION_SET_ALARM 的 ROM 上手工验证",
         workflowJson = """
         {
           "start_node_id": "a",

@@ -47,15 +47,20 @@ if (-not $SkipInstall) {
     Write-Host "[3/5] 安装 APK..." -ForegroundColor Cyan
     & $adb install -r $Apk
     if ($LASTEXITCODE -ne 0) { Write-Host "安装失败" -ForegroundColor Red; exit 1 }
+    # 安装会杀进程：等无障碍服务重新绑定（否则 a11y 用例会 SKIP）
+    Write-Host "      等待无障碍服务重连（8s）..."
+    Start-Sleep -Seconds 8
 }
 
 # 4. 清 logcat → 启动测试
 Write-Host "[4/5] 启动节点自测（auto 模式）..." -ForegroundColor Cyan
 & $adb logcat -c
+# Activity 位于 com.ailun.habitat.app 子包
+$activity = "$Package/.app.NodeSelfTestActivity"
 if ($Only) {
-    & $adb shell am start -n "$Package/.NodeSelfTestActivity" --ez auto true --es only $Only | Out-Null
+    & $adb shell am start -n $activity --ez auto true --es only $Only | Out-Null
 } else {
-    & $adb shell am start -n "$Package/.NodeSelfTestActivity" --ez auto true | Out-Null
+    & $adb shell am start -n $activity --ez auto true | Out-Null
 }
 
 # 5. 轮询结束标记
