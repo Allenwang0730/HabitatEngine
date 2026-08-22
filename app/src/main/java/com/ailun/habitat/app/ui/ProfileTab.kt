@@ -70,6 +70,7 @@ fun ProfileTab(
     onFloatServiceToggle: (Boolean) -> Unit,
     onNavigateToLLM: () -> Unit,
     onNavigateToPermissions: () -> Unit,
+    onNavigateToWorkflowAI: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -458,6 +459,15 @@ fun ProfileTab(
                 title = "LLM 控制台",
                 subtitle = "加载本地模型并进行推理测试",
                 onClick = onNavigateToLLM,
+            )
+        }
+
+        item {
+            MenuCard(
+                icon = Icons.Filled.AutoAwesome,
+                title = "AI 工作流生成",
+                subtitle = "自然语言描述需求，AI 自动生成并保存工作流",
+                onClick = onNavigateToWorkflowAI,
             )
         }
 

@@ -247,10 +247,11 @@ fun HabitatDashboard(activity: ComponentActivity) {
 
                     Tab.Profile -> {
                         var showLLM by remember { mutableStateOf(false) }
-                        if (showLLM) {
-                            HabitatLLMConsoleContent(activity = activity, onBack = { showLLM = false })
-                        } else {
-                            ProfileTab(
+                        var showWorkflowAI by remember { mutableStateOf(false) }
+                        when {
+                            showLLM -> HabitatLLMConsoleContent(activity = activity, onBack = { showLLM = false })
+                            showWorkflowAI -> com.ailun.habitat.app.ui.AIWorkflowScreen()
+                            else -> ProfileTab(
                                 isFloatServiceRunning = floatServiceRunning,
                                 onFloatServiceToggle = { on ->
                                     if (on) ensureFloatServiceForMount() else turnOffFloatService()
@@ -259,6 +260,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
                                 onNavigateToPermissions = {
                                     activity.startActivity(Intent(activity, com.ailun.habitat.app.ui.HabitatSettingsActivity::class.java))
                                 },
+                                onNavigateToWorkflowAI = { showWorkflowAI = true },
                             )
                         }
                     }
