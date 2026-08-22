@@ -20,6 +20,8 @@ class SmsTriggerSource : ITriggerSource {
     private var onEvent: ((TriggerEvent) -> Unit)? = null
 
     override fun start(context: Context, onEvent: (TriggerEvent) -> Unit) {
+        // 幂等：若已 start，先清理旧的（防重复注册 receiver 泄漏）
+        if (receiver != null) stop(context)
         this.onEvent = onEvent
 
         val r = object : BroadcastReceiver() {

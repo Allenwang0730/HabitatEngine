@@ -20,6 +20,8 @@ class ClipboardTriggerSource : ITriggerSource {
     private var onEvent: ((TriggerEvent) -> Unit)? = null
 
     override fun start(context: Context, onEvent: (TriggerEvent) -> Unit) {
+        // 幂等：若已 start，先清理旧的（防重复注册 listener 泄漏）
+        if (listener != null) stop(context)
         this.onEvent = onEvent
 
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager

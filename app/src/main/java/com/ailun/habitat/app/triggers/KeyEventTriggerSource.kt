@@ -35,10 +35,12 @@ class KeyEventTriggerSource : ITriggerSource {
         var activeInstance: KeyEventTriggerSource? = null
             private set
 
-        /** 由无障碍服务调用，将按键事件转发给触发器系统。 */
+        /** 由无障碍服务调用，将按键事件转发给触发器系统。返回 false = 监听但不拦截按键。 */
         fun onKeyEvent(keyCode: Int, action: Int): Boolean {
             val instance = activeInstance ?: return false
             val onEvent = instance.onEvent ?: return false
+            // 只在按下时触发，避免 Key DOWN/UP 双触发（拦截由返回 false 交给系统）
+            if (action != KeyEvent.ACTION_DOWN) return false
             onEvent(
                 TriggerEvent(
                     type = TriggerConfig.TYPE_KEY,
@@ -48,7 +50,8 @@ class KeyEventTriggerSource : ITriggerSource {
                     ),
                 )
             )
-            return true
+            // 监听但不拦截：把按键事件交回系统（音量/返回等仍正常工作）
+            return false
         }
     }
 }

@@ -35,6 +35,9 @@ object TriggerManager {
     /** on_busy=queue 的待补跑集合：旧实例完成后补跑一次 */
     private val pendingRuns = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** timer 触发间隔门控：key=workflowId, value=上次触发时间戳（保证 interval_ms 生效） */
+    private val timerLastFired = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     // ── Global workflow enable/disable ──
 
     /** 工作流是否允许执行（手动或触发），默认 false。 */
@@ -105,6 +108,7 @@ object TriggerManager {
     fun unregister(workflowId: String, context: Context) {
         val entry = entries.remove(workflowId) ?: return
         val type = entry.config.type
+        timerLastFired.remove(workflowId)
 
         if (entries.values.none { it.config.type == type }) {
             sourceInstances[type]?.stop(context)
@@ -160,6 +164,14 @@ object TriggerManager {
         }
 
         for (entry in matched) {
+            // timer 触发间隔门控：source 以 5s 最小粒度 tick，这里按每个 entry 的 interval_ms 决定是否真正触发
+            if (entry.config.type == TriggerConfig.TYPE_TIMER) {
+                val now = System.currentTimeMillis()
+                val last = timerLastFired[entry.workflowId] ?: 0L
+                if (now - last < entry.config.intervalMs) continue // 间隔未到，跳过本次 tick
+                timerLastFired[entry.workflowId] = now
+            }
+
             HabitatLogger.habitat("Trigger fired: '${entry.workflowId}' type=${entry.config.type}")
             val f = factory ?: buildFactory(context).also { factory = it }
 
