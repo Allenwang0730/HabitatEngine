@@ -38,6 +38,10 @@ object NodeSelfTests {
         testGetWeather(),
         testSetWallpaper(),
         testMediaControl(),
+        testGeocode(),
+        testSayToFile(),
+        testGetTraffic(),
+        testGetSetting(),
         // ── 变量与数据 ──
         testSetVariable(),
         testTextOperation(),
@@ -376,6 +380,81 @@ object NodeSelfTests {
         }
         """.trimIndent(),
         verify = { v -> v["wf_completed"] == true && v["media_success"] == true },
+    )
+
+    // ── 新增：地理编码/TTS到文件/流量/系统设置（零权限大部分）──
+
+    private fun testGeocode() = SelfTestCase(
+        name = "ACTION_GEOCODE·地理编码",
+        description = "查'南京市'应返回经纬度",
+        timeoutMs = 45_000L,
+        workflowJson = """
+        {
+          "start_node_id": "g",
+          "nodes": {
+            "g":    {"id":"g","type":"ACTION_GEOCODE","params":{"address":"南京市"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["geocode_success"] == true && v["latitude"] is Number
+        },
+    )
+
+    private fun testSayToFile() = SelfTestCase(
+        name = "ACTION_SAY_TO_FILE·TTS 到文件",
+        description = "合成'你好 Habitat'到 wav（需 TTS 引擎）",
+        timeoutMs = 45_000L,
+        workflowJson = """
+        {
+          "start_node_id": "s",
+          "nodes": {
+            "s":    {"id":"s","type":"ACTION_SAY_TO_FILE","params":{"text":"你好 Habitat","language":"zh","path":"${'$'}{filesDir}/tts_test.wav","output_var":"f"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["say_success"] == true &&
+                !(v["tts_file"] as? String).isNullOrBlank()
+        },
+    )
+
+    private fun testGetTraffic() = SelfTestCase(
+        name = "ACTION_GET_TRAFFIC·流量",
+        description = "应返回累计收发字节",
+        workflowJson = """
+        {
+          "start_node_id": "t",
+          "nodes": {
+            "t":    {"id":"t","type":"ACTION_GET_TRAFFIC","params":{"output_var":"tr"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["traffic_success"] == true &&
+                ((v["traffic_total"] as? Number)?.toLong() ?: -1L) >= 0L
+        },
+    )
+
+    private fun testGetSetting() = SelfTestCase(
+        name = "ACTION_GET_SETTING·系统设置",
+        description = "读 screen_off_timeout（system 命名空间）",
+        workflowJson = """
+        {
+          "start_node_id": "st",
+          "nodes": {
+            "st":   {"id":"st","type":"ACTION_GET_SETTING","params":{"key":"screen_off_timeout","namespace":"system","output_var":"sv"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["setting_success"] == true &&
+                !(v["setting_value"] as? String).isNullOrBlank()
+        },
     )
 
     // ── 逻辑控制 ──

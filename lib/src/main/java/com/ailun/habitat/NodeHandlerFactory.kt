@@ -141,6 +141,10 @@ class NodeHandlerFactory(
         const val ACTION_MEDIA_CONTROL = "ACTION_MEDIA_CONTROL"
         const val ACTION_GET_WEATHER = "ACTION_GET_WEATHER"
         const val ACTION_SET_WALLPAPER = "ACTION_SET_WALLPAPER"
+        const val ACTION_GEOCODE = "ACTION_GEOCODE"
+        const val ACTION_SAY_TO_FILE = "ACTION_SAY_TO_FILE"
+        const val ACTION_GET_TRAFFIC = "ACTION_GET_TRAFFIC"
+        const val ACTION_GET_SETTING = "ACTION_GET_SETTING"
         // FORK/JOIN 由 HabitatExecutor 内建处理（不注册 handler，仅声明常量供白名单/LLM）
         const val ACTION_FORK = "ACTION_FORK"
         const val ACTION_JOIN = "ACTION_JOIN"

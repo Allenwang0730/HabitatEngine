@@ -56,6 +56,7 @@ object CoreNodes {
         NodeHandlerFactory.ACTION_GET_SENSOR to { _, _ -> NodeGetSensorHandler() },
         NodeHandlerFactory.ACTION_GET_SCREEN_STATE to { _, _ -> NodeGetScreenStateHandler() },
         NodeHandlerFactory.ACTION_GET_AUDIO_STATE to { _, _ -> NodeGetAudioStateHandler() },
+        NodeHandlerFactory.ACTION_GET_SETTING to { _, _ -> NodeGetSettingHandler() },
         // 异常处理
         NodeHandlerFactory.ACTION_RETRY to { _, _ -> NodeRetryHandler() },
         NodeHandlerFactory.ACTION_ASSERT to { _, _ -> NodeAssertHandler() },
@@ -121,6 +122,7 @@ object MediaNodes {
         NodeHandlerFactory.ACTION_RECORD_AUDIO to { _, _ -> NodeRecordAudioHandler() },
         NodeHandlerFactory.ACTION_CAPTURE_PHOTO to { _, _ -> NodeCapturePhotoHandler() },
         NodeHandlerFactory.ACTION_SET_WALLPAPER to { _, _ -> NodeSetWallpaperHandler() },
+        NodeHandlerFactory.ACTION_SAY_TO_FILE to { _, _ -> NodeSayToFileHandler() },
     )
 }
 
@@ -130,6 +132,8 @@ object NetworkNodes {
         NodeHandlerFactory.ACTION_HTTP_REQUEST to { _, _ -> NodeHttpHandler() },
         NodeHandlerFactory.ACTION_NETWORK_STATUS to { _, _ -> NodeNetworkStatusHandler() },
         NodeHandlerFactory.ACTION_GET_WEATHER to { _, _ -> NodeGetWeatherHandler() },
+        NodeHandlerFactory.ACTION_GEOCODE to { _, _ -> NodeGeocodeHandler() },
+        NodeHandlerFactory.ACTION_GET_TRAFFIC to { _, _ -> NodeGetTrafficHandler() },
     )
 }
 
