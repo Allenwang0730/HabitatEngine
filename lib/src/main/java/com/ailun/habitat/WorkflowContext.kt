@@ -32,6 +32,13 @@ class WorkflowContext(
     @Volatile
     var forkJobs: List<Job>? = null
 
+    /**
+     * 整棵树终止标志：on_error=stop 时由 executor 置 true，
+     * 所有分支（含 FORK 分支）在每次循环迭代检查此标志，实现对整个工作流树的级联停止。
+     */
+    @Volatile
+    var stopRequested: Boolean = false
+
     // 日志回调，由 Executor 设置
     var onLog: ((String) -> Unit)? = null
 

@@ -106,6 +106,11 @@ class HabitatExecutor(
 
         while (currentId != null && step < maxSteps) {
             coroutineContext.ensureActive()
+            // 树级终止：on_error=stop 置 stopRequested，所有分支在此检查后停止
+            if (ctx.stopRequested) {
+                ctx.log("Habitat: stop requested — terminating branch")
+                break
+            }
             val node = index[currentId]
             if (node == null) {
                 ctx.log("Habitat: Missing node '$currentId'")
@@ -121,9 +126,11 @@ class HabitatExecutor(
                     // 分支用 CoroutineScope(coroutineContext) 挂到当前执行 job 下，使整棵树可被外部取消级联
                     val jobs = targets.map { t ->
                         CoroutineScope(coroutineContext).launch {
-                            runCatching {
+                            try {
                                 runBranch(t, index, ctx, maxSteps)
-                            }.onFailure { e ->
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e // 取消必须向上传播（分支 job 已随父取消）
+                            } catch (e: Exception) {
                                 ctx.log("✗ Branch '$t' failed: ${e.message}")
                             }
                         }
@@ -232,7 +239,8 @@ class HabitatExecutor(
             ctx.variables["last_error_any"] = errorMsg
             val onError = node.params?.get("on_error")?.toString()?.trim()?.lowercase() ?: "skip"
             if (onError == "stop") {
-                ctx.log("✗ '${node.type}' 失败（on_error=stop 终止）: $errorMsg")
+                ctx.stopRequested = true // 树级终止：所有随后的节点/分支检查此标志后停止
+                ctx.log("✗ '${node.type}' 失败（on_error=stop 终止整棵树）: $errorMsg")
                 return NodeResult(null, failed = true, error = errorMsg)
             }
             ctx.log("✗ '${node.type}' 失败（跳过继续）: $errorMsg")
