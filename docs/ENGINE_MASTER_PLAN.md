@@ -110,13 +110,20 @@
 ### 阶段 B：引擎模块化（NodeModule）
 **目标**：`from x import y` 式按需引入，才能放心铺全量节点。
 
+**状态：✅ 已实现（2026-08-22，v1.5.0）**
+- `enum NodeModule { CORE, INTERACTION, SYSTEM, TELEPHONY, MEDIA, NETWORK, SENSOR, AI }`
+- 编译期分组注册表：`CoreNodes` / `InteractionNodes` / …（无反射、R8 安全）
+- `NodeHandlerFactory(a11y, shell, modules: Set<NodeModule>? = null, extra: Map<String, NodeFactory>)`
+  - `modules = null`（默认）→ 全量注册（向后兼容，老代码不传不变）
+  - `extra` → 单节点/自定义节点注入
+  - 懒实例化 + `availableTypes()`
+- 自测：模块化冒烟（CORE 32 节点 / 全量 78；INTERACTION 缺失验证）
+- 文档偏离说明：原案默认 `setOf(CORE)` 会破坏老调用，改为 `null = 全量`
+
 ```kotlin
-enum class NodeModule { CORE, TELEPHONY, SYSTEM, MEDIA, NETWORK, SENSOR, DATA, LOGIC, UI, AI }
-class NodeHandlerFactory(a11y, shell, modules: Set<NodeModule> = setOf(NodeModule.CORE))
+// 用法：App 按需引入
+val factory = NodeHandlerFactory(a11y, shell, modules = setOf(NodeModule.CORE, NodeModule.TELEPHONY))
 ```
-- 内置节点按模块分组注册
-- 后端白名单随模块配置
-- 向后兼容：默认 modules 含 CORE（老代码不传也行）
 
 ### 阶段 C：按模块实现节点目录（16 个候选，逐个用测试架验证）
 见下表。**实现顺序建议**：低风险优先（零权限的），高风险后做。

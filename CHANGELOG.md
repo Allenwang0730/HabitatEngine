@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.0] - 2026-08-22
+
+### Added — 模块化（阶段 B）+ 异常处理/通用节点
+- **NodeModule 模块化**：枚举 + 编译期分组注册表（`CoreNodes`/`InteractionNodes`/`SystemNodes`/`TelephonyNodes`/`MediaNodes`/`NetworkNodes`/`SensorNodes`/`AiNodes`）；`NodeHandlerFactory(modules: Set<NodeModule>? = null, extra: Map<String, NodeFactory>)`——null=全量（向后兼容）、extra 单节点/自定义注入、懒实例化、`availableTypes()`；FORK/JOIN 常量同步
+- **异常处理**：`ACTION_RETRY`（target/times/interval_ms 失败重试）、`ACTION_ASSERT`（断言失败走错误流）
+- **通用查询**：`ACTION_GET_SCREEN_STATE`（屏幕开关/锁定）、`ACTION_GET_AUDIO_STATE`（音乐/耳机）
+- **系统/媒体**：`ACTION_SEND_BROADCAST`（自定义 action）、`ACTION_MEDIA_CONTROL`（shell keyevent）、`ACTION_GET_WEATHER`（Open-Meteo）、`ACTION_SET_WALLPAPER`
+- executor：成功路径记录 `last_node`/`last_node_type`（RETRY 回跳判定依赖）
+- 引擎 80 节点；自测用例 51 → 61；**真机验收：61 条 = 52 PASS / 0 FAIL / 9 SKIP**（含模块化冒烟：CORE 32 / 全量 78）
+- 后端白名单×2 + RAGService + 知识库 md 同步
+
+### Notes
+- SmartCS 完全不动；两份 `:lib` 暂不同步。
+
 ## [1.4.1] - 2026-08-22
 
 ### Added — 架构加固（失败处理 / 超时 / 分叉 / Collision）
