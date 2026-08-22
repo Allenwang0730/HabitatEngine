@@ -3,6 +3,18 @@
 > 目标：一条 adb 命令跑完全部低风险节点测试并输出 pass/fail 报告，免人工。
 > 对应总纲：`ENGINE_MASTER_PLAN.md` 阶段 A。
 
+## 真机验收结果（2026-08-22，iQOO / OriginOS）
+
+**46 条用例 = 39 PASS / 0 FAIL / 7 SKIP** ✅ 全部可自动验证的用例通过。
+
+设计内 SKIP（7 条）：ACTION_PLAY_MEDIA（需真实媒体文件）、ACTION_GLOBAL_NAV（导航副作用）、ACTION_RECORD_AUDIO / ACTION_CAPTURE_PHOTO / ACTION_GET_LOCATION / ACTION_READ_NOTIFICATIONS（高风险需权限）、ACTION_SET_ALARM（vivo/BBK 需系统签名权限 SET_ALARM，其他 ROM 可手工验证）。
+
+验收过程中修复的 bug：
+1. `NodeSqliteQueryHandler` — openDatabase 缺 CREATE_IF_NECESSARY，新建库文件打不开
+2. `NodeSelfTestActivity` — 结果 UI 更新未切主线程（后台线程改 TextView 崩溃）
+3. 用例缺陷：WAIT_FOR_ELEMENT / SIM_INFO 的 verify 与 output_var 不匹配；SQLITE 用例不幂等（重复 INSERT 累积行数）
+4. 脚本：Activity 类名（`.app` 子包）、安装后等无障碍服务重连（8s）
+
 ## 一条命令
 
 ```powershell

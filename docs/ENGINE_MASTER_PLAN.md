@@ -91,12 +91,13 @@
 ### 阶段 A：自跑测试架（先做，是铺节点的前提）
 **目标**：adb 驱动真机自动跑每个节点的测试工作流，读结果验证，免人工。
 
-**状态：骨架已实现（2026-08-22），真机验收待做。**
+**状态：骨架已实现（2026-08-22），真机验收完成（39 PASS / 0 FAIL / 7 SKIP）。**
 - 测试框架 + 46 条用例：`lib/.../selftest/`（NodeSelfTest.kt / NodeSelfTests.kt）
 - 宿主：Habitat `:app` 的 `NodeSelfTestActivity`（SmartCS 不动）
 - 驱动：`scripts/run_selftest.ps1`（一条命令构建→安装→跑→报告）
-- 文档：`docs/SELFTEST.md`
-- 下一步：设备 adb 授权恢复后跑一次真机验收；测试架暴露的 2 个引擎问题（ACTION_LOG 不走 onLog、TRY_CATCH error 分支不可达）待修。
+- 文档：`docs/SELFTEST.md`（含验收记录）
+- 验收暴露并修复：SQLITE CREATE_IF_NECESSARY、Activity UI 线程崩溃、3 处用例缺陷、脚本类名/无障碍重连
+- 剩余：测试架暴露的 2 个引擎问题（ACTION_LOG 不走 onLog、TRY_CATCH error 分支不可达）待修；7 条设计内 SKIP 需手工/授权后验证
 
 **设计（实现时遵循）**：
 - 每个节点一个**测试工作流**（JSON），跑完写 `wf_completed=true`，由 verify 断言读变量判断 pass/fail
