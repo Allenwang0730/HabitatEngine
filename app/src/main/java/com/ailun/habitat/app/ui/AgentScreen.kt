@@ -43,8 +43,8 @@ fun AgentScreen() {
     val context = LocalContext.current
     var port by remember { mutableIntStateOf(AgentService.getPort(context)) }
     var portInput by remember { mutableStateOf(port.toString()) }
-    var running by remember { mutableStateOf(false) }
-    var checking by remember { mutableStateOf(true) }
+    var running by remember { mutableStateOf(AgentService.serverRunning) }
+    var checking by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf<String?>(null) }
 
     val checkHealth: suspend (Int) -> Boolean = { p ->
@@ -60,12 +60,12 @@ fun AgentScreen() {
         }
     }
 
-    // 定期健康检查
-    LaunchedEffect(port, running) {
+    // 定期刷新：以服务静态标志为准，网络检查为补充
+    LaunchedEffect(Unit) {
         while (true) {
-            running = checkHealth(port)
+            running = AgentService.serverRunning || checkHealth(port)
             checking = false
-            delay(3000)
+            delay(2000)
         }
     }
 

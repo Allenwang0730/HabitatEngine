@@ -46,6 +46,10 @@ class AgentService : Service() {
         const val DEFAULT_PORT = 8931
         private const val TOOL_TIMEOUT_MS = 60_000L
 
+        /** 服务运行标志（同进程内由 startAgentServer/onDestroy 维护，控制页直接读取）。 */
+        @Volatile
+        var serverRunning: Boolean = false
+
         /** 当前服务端口（可配置，存 SharedPreferences）。 */
         fun getPort(context: android.content.Context): Int =
             context.getSharedPreferences(PREFS, 0).getInt("port", DEFAULT_PORT)
@@ -75,6 +79,7 @@ class AgentService : Service() {
     }
 
     override fun onDestroy() {
+        serverRunning = false
         server?.stop(100, 500)
         server = null
         super.onDestroy()
@@ -118,6 +123,7 @@ class AgentService : Service() {
         }
         this.server = server
         server.start(wait = false)
+        serverRunning = true
         Log.i(TAG, "Agent server started on :${getPort(this@AgentService)}")
     }
 
