@@ -13,7 +13,7 @@ object HabitatExecutionService {
     private const val TAG = "HabitatExecutionSvc"
 
     private val execScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val activeJobs = mutableMapOf<String, Job>()
+    private val activeJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
 
     /** 检查指定工作流是否正在运行 */
     fun isRunning(workflowId: String): Boolean =
@@ -29,6 +29,7 @@ object HabitatExecutionService {
      *                 这是引擎向 App 返还"内容"的正式通道（此前只能靠文件副作用）。
      * @return true 如果成功启动，false 如果已在运行中（防止重复执行）
      */
+    @Synchronized
     fun start(
         workflowId: String,
         jsonContent: String,
