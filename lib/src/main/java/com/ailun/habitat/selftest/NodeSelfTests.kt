@@ -235,7 +235,7 @@ object NodeSelfTests {
         }
         """.trimIndent(),
         verify = { v ->
-            v["wf_completed"] == true && ((v["run_errors"] as? Number)?.toInt() ?: -1) == 0
+            v["wf_completed"] == true && ((v["run_errors"] as? Number)?.toInt() ?: 0) == 0
         },
     )
 
@@ -253,7 +253,7 @@ object NodeSelfTests {
         }
         """.trimIndent(),
         verify = { v ->
-            v["wf_completed"] == true && ((v["run_errors"] as? Number)?.toInt() ?: -1) == 0
+            v["wf_completed"] == true && ((v["run_errors"] as? Number)?.toInt() ?: 0) == 0
         },
     )
 

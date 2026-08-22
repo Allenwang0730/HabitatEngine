@@ -238,9 +238,12 @@ class HabitatExecutor(
             return NodeResult(next ?: node.next, failed = true, error = errorMsg)
         }
 
-        // 成功：清空错误标记，供 ACTION_TRY_CATCH 判定（CHM 不允许 null value，用 remove）
+        // 成功：清空错误标记，供 ACTION_TRY_CATCH 判定（CHM 不允许 null value，用 remove）；
+        // 记录 last_node 供 ACTION_RETRY 判断"上一节点是否目标"
         ctx.variables.remove("last_error")
         ctx.variables.remove("last_error_msg")
+        ctx.variables["last_node"] = node.id
+        ctx.variables["last_node_type"] = node.type
         return NodeResult(next, failed = false, error = null)
     }
 
