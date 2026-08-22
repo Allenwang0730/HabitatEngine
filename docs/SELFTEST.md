@@ -5,7 +5,7 @@
 
 ## 真机验收结果（2026-08-22，iQOO / OriginOS）
 
-**51 条用例 = 39 PASS / 0 FAIL / 7 SKIP** ✅ 全部可自动验证的用例通过。
+**51 条用例 = 44 PASS / 0 FAIL / 7 SKIP** ✅（v1.4.1 架构加固后，含 on_error/节点超时/TRY_CATCH error 分支/FORK-JOIN 并行用例）全部可自动验证的用例通过。
 
 设计内 SKIP（7 条）：ACTION_PLAY_MEDIA（需真实媒体文件）、ACTION_GLOBAL_NAV（导航副作用）、ACTION_RECORD_AUDIO / ACTION_CAPTURE_PHOTO / ACTION_GET_LOCATION / ACTION_READ_NOTIFICATIONS（高风险需权限）、ACTION_SET_ALARM（vivo/BBK 需系统签名权限 SET_ALARM，其他 ROM 可手工验证）。
 
