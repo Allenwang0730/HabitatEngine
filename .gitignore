@@ -12,3 +12,6 @@
 keystore.properties
 *.keystore
 *.jks
+
+# 自跑测试架运行产物
+selftest_results/
