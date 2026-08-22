@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.0] - 2026-08-22
+
+### Added — 第一批纯逻辑数据节点（零权限，调研结论落地）
+- `ACTION_SQLITE_QUERY` — 任意 .db 文件 SQL（SELECT 转 JSON 行集 / 非 SELECT 走 changes()），支持 ? 占位符 args
+- `ACTION_ZIP` — zip/unzip/list，目录递归 + zip-slip 防护，可选 delete_source
+- `ACTION_CRYPTO` — 文件 AES-GCM 加解密（PBKDF2 口令派生，salt+IV+密文格式）
+- `ACTION_ARRAY` — 数组 set/push/pop/get/length/join/clear/remove/contains（支持 JSON 数组或分隔串）
+- `ACTION_PARSE_DATETIME` — now/parse/format，java.time，支持 add_days/hours/minutes/seconds 偏移
+- 同步三处：后端白名单×2 + RAGService + 知识库 md；自测用例 41 → 46 条
+- 来源：docs/RESEARCH_REFERENCE_PROJECTS.md（参考项目调研，4 项目官方文档交叉对照）
+
+### Notes
+- SmartCS 完全不动；两份 `:lib` 暂不同步。
+
 ## [1.3.0] - 2026-08-22
 
 ### Added — 阶段 C：16 个候选节点全部实现

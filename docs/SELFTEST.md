@@ -26,7 +26,7 @@
 ```
 lib/src/main/java/com/ailun/habitat/selftest/
 ├── NodeSelfTest.kt    # 框架：SelfTestCase / SelfTestResult / NodeSelfTestRunner
-└── NodeSelfTests.kt   # 用例目录（首批 41 条）
+└── NodeSelfTests.kt   # 用例目录（首批 46 条）
 
 app: NodeSelfTestActivity.kt   # adb 驱动的测试宿主（Habitat app，com.ailun.habitat）
 ```
@@ -50,12 +50,12 @@ app: NodeSelfTestActivity.kt   # adb 驱动的测试宿主（Habitat app，com.a
 3. 跑 `run_selftest.ps1 -Only "用例名"` 单条验证。
 4. 同步两份 `:lib`（`diff -rq` 确认 0 差异）。
 
-## 首批 41 条用例
+## 首批 46 条用例
 
 | 类别 | 用例 |
 |------|------|
 | 逻辑控制 | CONDITION_SWITCH·true/false 分支、CONDITION_ADVANCED_SWITCH·数值比较、ACTION_LOOP·计数循环、ACTION_TRY_CATCH·成功分支、ACTION_LOG |
-| 变量与数据 | ACTION_SET_VARIABLE、ACTION_TEXT_OPERATION、ACTION_MATH、ACTION_CLIPBOARD、ACTION_PARSE_JSON、ACTION_PARSE_XML、ACTION_BASE64、ACTION_FILE_OPERATION |
+| 变量与数据 | ACTION_SET_VARIABLE、ACTION_TEXT_OPERATION、ACTION_MATH、ACTION_CLIPBOARD、ACTION_PARSE_JSON、ACTION_PARSE_XML、ACTION_BASE64、ACTION_FILE_OPERATION、ACTION_SQLITE_QUERY、ACTION_ZIP、ACTION_CRYPTO、ACTION_ARRAY、ACTION_PARSE_DATETIME |
 | 工具/时间 | ACTION_GET_TIME、ACTION_RANDOM、ACTION_DELAY、ACTION_GET_BATTERY、ACTION_GET_DEVICE_INFO、ACTION_GET_STORAGE_INFO、ACTION_WAIT_UNTIL_TIME、ACTION_GET_SENSOR |
 | 网络 | ACTION_HTTP_REQUEST、ACTION_NETWORK_STATUS |
 | UI | ACTION_TOAST、ACTION_VIBRATE |
@@ -77,3 +77,4 @@ app: NodeSelfTestActivity.kt   # adb 驱动的测试宿主（Habitat app，com.a
 
 - 界面模式：`am start -n com.ailun.habitat/.NodeSelfTestActivity`（不带 auto）→ 留在界面展示结果。
 - 结果文件：`adb shell run-as com.ailun.habitat cat files/test_results.json`
+

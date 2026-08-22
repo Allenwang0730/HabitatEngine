@@ -48,9 +48,9 @@
 | **SmartCS**（智能客服）| `C:\Users\wang\SmartCS` | 独立 App，嵌了引擎拷贝。版本 v0.3.3 |
 
 ### 引擎现状
-- **67 个节点**（`:lib` 注册 65 + 2 个 app 侧 SEND_NOTIFICATION/DYNAMIC_ISLAND）—— 51 个既有 + 阶段 C 新增 16 个
+- **72 个节点**（`:lib` 注册 70 + 2 个 app 侧 SEND_NOTIFICATION/DYNAMIC_ISLAND）—— 51 个既有 + 阶段 C 16 个 + 第一批纯逻辑 5 个
 - `HabitatExecutionService.start(...)` 支持 `initialVars / onComplete / onLog / onResult`（onResult 是"引擎返还内容"的正式通道）
-- 新增节点：`ACTION_CALL_DIRECT`、`ACTION_WAIT_CALL_END`、`ACTION_WAIT_CALL_ANSWER`、`ACTION_READ_CALL_LOG`、阶段 C 16 个
+- 新增节点：`ACTION_CALL_DIRECT`、`ACTION_WAIT_CALL_END`、`ACTION_WAIT_CALL_ANSWER`、`ACTION_READ_CALL_LOG`、阶段 C 16 个、第一批数据节点 5 个（SQLITE_QUERY/ZIP/CRYPTO/ARRAY/PARSE_DATETIME）
 - 两份 `:lib`（SmartCS + Habitat）**暂不同步**（测试架/新节点只在 Habitat，SmartCS 下次收引擎改动时一并拷入）
 
 ### 已交付（勿重复做）
@@ -92,7 +92,7 @@
 **目标**：adb 驱动真机自动跑每个节点的测试工作流，读结果验证，免人工。
 
 **状态：骨架已实现（2026-08-22），真机验收待做。**
-- 测试框架 + 41 条用例：`lib/.../selftest/`（NodeSelfTest.kt / NodeSelfTests.kt）
+- 测试框架 + 46 条用例：`lib/.../selftest/`（NodeSelfTest.kt / NodeSelfTests.kt）
 - 宿主：Habitat `:app` 的 `NodeSelfTestActivity`（SmartCS 不动）
 - 驱动：`scripts/run_selftest.ps1`（一条命令构建→安装→跑→报告）
 - 文档：`docs/SELFTEST.md`

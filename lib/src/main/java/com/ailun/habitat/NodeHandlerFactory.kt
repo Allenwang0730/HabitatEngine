@@ -29,6 +29,11 @@ class NodeHandlerFactory(
         register(ACTION_PARSE_XML, NodeParseXmlHandler())
         register(ACTION_BASE64, NodeBase64Handler())
         register(ACTION_FILE_OPERATION, NodeFileOperationHandler())
+        register(ACTION_SQLITE_QUERY, NodeSqliteQueryHandler())
+        register(ACTION_ZIP, NodeZipHandler())
+        register(ACTION_CRYPTO, NodeCryptoHandler())
+        register(ACTION_ARRAY, NodeArrayHandler())
+        register(ACTION_PARSE_DATETIME, NodeParseDateTimeHandler())
 
         // ── 交互 ──
         register(ACTION_CLICK, NodeClickHandler(a11y))
@@ -115,6 +120,11 @@ class NodeHandlerFactory(
         const val ACTION_PARSE_XML = "ACTION_PARSE_XML"
         const val ACTION_BASE64 = "ACTION_BASE64"
         const val ACTION_FILE_OPERATION = "ACTION_FILE_OPERATION"
+        const val ACTION_SQLITE_QUERY = "ACTION_SQLITE_QUERY"
+        const val ACTION_ZIP = "ACTION_ZIP"
+        const val ACTION_CRYPTO = "ACTION_CRYPTO"
+        const val ACTION_ARRAY = "ACTION_ARRAY"
+        const val ACTION_PARSE_DATETIME = "ACTION_PARSE_DATETIME"
         const val ACTION_CLICK = "ACTION_CLICK"
         const val ACTION_SWIPE = "ACTION_SWIPE"
         const val ACTION_LONG_PRESS = "ACTION_LONG_PRESS"

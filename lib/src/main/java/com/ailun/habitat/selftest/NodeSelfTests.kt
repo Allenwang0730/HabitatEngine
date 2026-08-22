@@ -30,6 +30,11 @@ object NodeSelfTests {
         testParseXml(),
         testBase64(),
         testFileOperation(),
+        testSqlite(),
+        testZip(),
+        testCrypto(),
+        testArray(),
+        testParseDateTime(),
         // ── 工具/时间 ──
         testGetTime(),
         testRandom(),
@@ -300,6 +305,119 @@ object NodeSelfTests {
         }
         """.trimIndent(),
         verify = { v -> v["wf_completed"] == true && v["file_success"] == true && v["fc"] == "engine-selftest-ok" },
+    )
+
+    // ── 数据扩展（第一批纯逻辑节点）──
+
+    private fun testSqlite() = SelfTestCase(
+        name = "ACTION_SQLITE_QUERY·建表插查",
+        description = "CREATE+INSERT+SELECT 应返回 3 行",
+        workflowJson = """
+        {
+          "start_node_id": "create",
+          "nodes": {
+            "create": {"id":"create","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"CREATE TABLE IF NOT EXISTS t(x INTEGER, y TEXT)"},"next":"insert"},
+            "insert": {"id":"insert","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"INSERT INTO t(x,y) VALUES(1,'a'),(2,'b'),(3,'c')"},"next":"select"},
+            "select": {"id":"select","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"SELECT * FROM t ORDER BY x","output_var":"rows"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["sql_success"] == true &&
+                ((v["sql_rows"] as? Number)?.toInt() ?: 0) == 3 &&
+                (v["rows"] as? String)?.contains("\"x\":2") == true
+        },
+    )
+
+    private fun testZip() = SelfTestCase(
+        name = "ACTION_ZIP·压缩/列表/解压",
+        description = "zip→list→unzip 应还原文件内容",
+        workflowJson = """
+        {
+          "start_node_id": "write",
+          "nodes": {
+            "write": {"id":"write","type":"ACTION_FILE_OPERATION","params":{"action":"write","path":"${'$'}{filesDir}/ziptest.txt","content":"zip-selftest-content"},"next":"zip"},
+            "zip":   {"id":"zip","type":"ACTION_ZIP","params":{"action":"zip","source":"${'$'}{filesDir}/ziptest.txt","dest":"${'$'}{filesDir}/ziptest.zip","output_var":"zpath"},"next":"list"},
+            "list":  {"id":"list","type":"ACTION_ZIP","params":{"action":"list","source":"${'$'}{filesDir}/ziptest.zip","output_var":"zlist"},"next":"unzip"},
+            "unzip": {"id":"unzip","type":"ACTION_ZIP","params":{"action":"unzip","source":"${'$'}{filesDir}/ziptest.zip","dest":"${'$'}{filesDir}/zipout","output_var":"zdir"},"next":"read"},
+            "read":  {"id":"read","type":"ACTION_FILE_OPERATION","params":{"action":"read","path":"${'$'}{filesDir}/zipout/ziptest.txt","output_var":"zc"},"next":"done"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["zip_success"] == true &&
+                (v["zlist"] as? String)?.contains("ziptest.txt") == true &&
+                v["zc"] == "zip-selftest-content"
+        },
+    )
+
+    private fun testCrypto() = SelfTestCase(
+        name = "ACTION_CRYPTO·AES 加解密往返",
+        description = "encrypt→decrypt 应还原明文",
+        workflowJson = """
+        {
+          "start_node_id": "write",
+          "nodes": {
+            "write": {"id":"write","type":"ACTION_FILE_OPERATION","params":{"action":"write","path":"${'$'}{filesDir}/secret.txt","content":"crypto-selftest-secret"},"next":"enc"},
+            "enc":   {"id":"enc","type":"ACTION_CRYPTO","params":{"action":"encrypt","path":"${'$'}{filesDir}/secret.txt","password":"selftest-pass-123","output_var":"encpath"},"next":"dec"},
+            "dec":   {"id":"dec","type":"ACTION_CRYPTO","params":{"action":"decrypt","path":"${'$'}{filesDir}/secret.txt.enc","password":"selftest-pass-123","output_path":"${'$'}{filesDir}/secret.dec.txt","output_var":"decpath"},"next":"read"},
+            "read":  {"id":"read","type":"ACTION_FILE_OPERATION","params":{"action":"read","path":"${'$'}{filesDir}/secret.dec.txt","output_var":"plain"},"next":"done"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["crypto_success"] == true &&
+                v["plain"] == "crypto-selftest-secret"
+        },
+    )
+
+    private fun testArray() = SelfTestCase(
+        name = "ACTION_ARRAY·增删改查",
+        description = "set/push/join/pop/get 应正确",
+        workflowJson = """
+        {
+          "start_node_id": "set",
+          "nodes": {
+            "set":  {"id":"set","type":"ACTION_ARRAY","params":{"action":"set","var":"arr","value":"a,b,c","output_var":"len1"},"next":"push"},
+            "push": {"id":"push","type":"ACTION_ARRAY","params":{"action":"push","var":"arr","item":"d","output_var":"len2"},"next":"join"},
+            "join": {"id":"join","type":"ACTION_ARRAY","params":{"action":"join","var":"arr","delimiter":"-","output_var":"joined"},"next":"pop"},
+            "pop":  {"id":"pop","type":"ACTION_ARRAY","params":{"action":"pop","var":"arr","output_var":"popped"},"next":"get"},
+            "get":  {"id":"get","type":"ACTION_ARRAY","params":{"action":"get","var":"arr","index":1,"output_var":"got"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true &&
+                (v["len1"] as? Number)?.toInt() == 3 &&
+                (v["len2"] as? Number)?.toInt() == 4 &&
+                v["joined"] == "a-b-c-d" &&
+                v["popped"] == "d" &&
+                v["got"] == "b"
+        },
+    )
+
+    private fun testParseDateTime() = SelfTestCase(
+        name = "ACTION_PARSE_DATETIME·now+parse 偏移",
+        description = "now 后解析加 1 天应得到明天日期",
+        workflowJson = """
+        {
+          "start_node_id": "now",
+          "nodes": {
+            "now":   {"id":"now","type":"ACTION_PARSE_DATETIME","params":{"action":"now","format":"yyyy-MM-dd HH:mm:ss","output_var":"ts"},"next":"parse"},
+            "parse": {"id":"parse","type":"ACTION_PARSE_DATETIME","params":{"action":"parse","input":"${'$'}{ts}","input_format":"yyyy-MM-dd HH:mm:ss","add_days":1,"format":"yyyy-MM-dd","output_var":"tomorrow"},"next":"done"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["datetime_success"] == true &&
+                ((v["datetime_epoch"] as? Number)?.toLong() ?: 0L) > 0L &&
+                !(v["tomorrow"] as? String).isNullOrBlank()
+        },
     )
 
     // ── 工具/时间 ──

@@ -55,7 +55,7 @@ val factory = NodeHandlerFactory(
 | 位置 | `ACTION_GET_LOCATION` | 定位 |
 | 通知 | `ACTION_READ_NOTIFICATIONS` | 通知监听 |
 
-**当前状态**：已实现的通话/来电相关节点（CALL_DIRECT、WAIT_CALL_END、WAIT_CALL_ANSWER、READ_CALL_LOG）不在上表。**阶段 C 16 个候选节点已全部实现（2026-08-22）**，见 `ENGINE_MASTER_PLAN.md` §4 状态；其中 6 个零权限 + 6 个中风险 + 4 个高风险（仅代码，待真机验收）。
+**当前状态**：已实现的通话/来电相关节点（CALL_DIRECT、WAIT_CALL_END、WAIT_CALL_ANSWER、READ_CALL_LOG）不在上表。**阶段 C 16 个候选节点已全部实现（2026-08-22）**，见 `ENGINE_MASTER_PLAN.md` §4 状态；其中 6 个零权限 + 6 个中风险 + 4 个高风险（仅代码，待真机验收）。**第一批纯逻辑数据节点 5 个已实现（SQLITE_QUERY / ZIP / CRYPTO / ARRAY / PARSE_DATETIME，零权限，2026-08-22）**。
 
 ## 4. 存储区（Habitat 的"接收的文件"）
 
@@ -100,7 +100,7 @@ Handler 跑在 `Dispatchers.Default`（无 Looper）：
 
 ## 实施优先级建议
 
-1. **自跑测试架**（先验证现有 51 节点，也是铺新节点的前提）→ 骨架已实现，41 条用例待真机验收
+1. **自跑测试架**（先验证现有 51 节点，也是铺新节点的前提）→ 骨架已实现，46 条用例待真机验收
 2. **引擎模块化**（NodeModule，地基）
 3. **按模块实现待实现节点**（用测试架逐个验证）→ 阶段 C 16 个已实现，待真机验收
 4. **下一批节点**（见 §5：SET_WALLPAPER / GET_SCREEN_STATE / GET_TRAFFIC / AIRPLANE_MODE / MOBILE_DATA）
