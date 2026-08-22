@@ -3,6 +3,8 @@ package com.ailun.habitat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 全局状态存储 — 悬浮窗和应用界面共享同一数据源，
@@ -23,6 +25,7 @@ object HabitatStateStore {
 
     /** 工作流列表版本号 — 每次增删改工作流时递增，悬浮窗观察此值自动刷新 */
     private val _libraryVersion = MutableStateFlow(0L)
+    private val libraryVersionCounter = AtomicLong(0)
     val libraryVersion: StateFlow<Long> = _libraryVersion.asStateFlow()
 
     /** 悬浮窗可见性，供主界面与悬浮窗双向同步。 */
@@ -30,13 +33,16 @@ object HabitatStateStore {
     val floatServiceActive: StateFlow<Boolean> = _floatServiceActive.asStateFlow()
 
     fun setRunning(workflowId: String, isRunning: Boolean, stepCount: Int = 0) {
-        val current = _runningStates.value.toMutableMap()
-        if (isRunning) {
-            current[workflowId] = WorkflowRunState(workflowId, true, stepCount)
-        } else {
-            current.remove(workflowId)
+        // update{} 原子 CAS 回写，避免并发读-改-写丢更新
+        _runningStates.update { current ->
+            val m = current.toMutableMap()
+            if (isRunning) {
+                m[workflowId] = WorkflowRunState(workflowId, true, stepCount)
+            } else {
+                m.remove(workflowId)
+            }
+            m
         }
-        _runningStates.value = current
     }
 
     fun setFloatServiceActive(active: Boolean) {
@@ -44,6 +50,7 @@ object HabitatStateStore {
     }
 
     fun notifyLibraryChanged() {
-        _libraryVersion.value = System.currentTimeMillis()
+        // 用原子递增而非 currentTimeMillis，避免同一毫秒内两次变更因 StateFlow 去重而漏刷新
+        _libraryVersion.value = libraryVersionCounter.incrementAndGet()
     }
 }
