@@ -5,7 +5,7 @@
 
 ## 真机验收结果（2026-08-22，iQOO / OriginOS）
 
-**46 条用例 = 39 PASS / 0 FAIL / 7 SKIP** ✅ 全部可自动验证的用例通过。
+**51 条用例 = 39 PASS / 0 FAIL / 7 SKIP** ✅ 全部可自动验证的用例通过。
 
 设计内 SKIP（7 条）：ACTION_PLAY_MEDIA（需真实媒体文件）、ACTION_GLOBAL_NAV（导航副作用）、ACTION_RECORD_AUDIO / ACTION_CAPTURE_PHOTO / ACTION_GET_LOCATION / ACTION_READ_NOTIFICATIONS（高风险需权限）、ACTION_SET_ALARM（vivo/BBK 需系统签名权限 SET_ALARM，其他 ROM 可手工验证）。
 
@@ -38,7 +38,7 @@
 ```
 lib/src/main/java/com/ailun/habitat/selftest/
 ├── NodeSelfTest.kt    # 框架：SelfTestCase / SelfTestResult / NodeSelfTestRunner
-└── NodeSelfTests.kt   # 用例目录（首批 46 条）
+└── NodeSelfTests.kt   # 用例目录（首批 51 条）
 
 app: NodeSelfTestActivity.kt   # adb 驱动的测试宿主（Habitat app，com.ailun.habitat）
 ```
@@ -62,7 +62,7 @@ app: NodeSelfTestActivity.kt   # adb 驱动的测试宿主（Habitat app，com.a
 3. 跑 `run_selftest.ps1 -Only "用例名"` 单条验证。
 4. 同步两份 `:lib`（`diff -rq` 确认 0 差异）。
 
-## 首批 46 条用例
+## 首批 51 条用例
 
 | 类别 | 用例 |
 |------|------|
@@ -89,4 +89,5 @@ app: NodeSelfTestActivity.kt   # adb 驱动的测试宿主（Habitat app，com.a
 
 - 界面模式：`am start -n com.ailun.habitat/.NodeSelfTestActivity`（不带 auto）→ 留在界面展示结果。
 - 结果文件：`adb shell run-as com.ailun.habitat cat files/test_results.json`
+
 

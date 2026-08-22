@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.1] - 2026-08-22
+
+### Added — 架构加固（失败处理 / 超时 / 分叉 / Collision）
+- **executor 失败处理**：节点级超时（`node_timeout_ms`，默认 30min）+ `require` 声明式成功条件 + `on_error`（`skip` 默认/`stop`）+ 错误变量（`last_error`/`last_error_msg`/`last_node`/`last_node_type`，成功清除；`run_errors`/`last_error_any` 累计不清，供事后检查）
+- **ACTION_FORK / ACTION_JOIN**：并行分叉（executor 内建，共享线程安全 variables，分支各自步数与超时护栏）
+- **ACTION_TRY_CATCH error 分支修复**：改读 executor 维护的 last_error（原 _last_error 机制不可达，已废弃）
+- **TriggerManager on_busy 碰撞策略**：`ignore`（默认）/ `abort_existing` / `queue`（TriggerConfig.onBusy）
+- 修复 ConcurrentHashMap null value NPE（putVariable null=remove 语义 + executor/Array 相关处改 remove）
+- 自测用例 46 → 51；真机验收：**51 条 = 44 PASS / 0 FAIL / 7 SKIP**
+- 后端白名单 + RAG + 知识库同步（FORK/JOIN + 健壮性参数说明）
+
 ## [1.4.0] - 2026-08-22
 
 ### Added — 第一批纯逻辑数据节点（零权限，调研结论落地）
