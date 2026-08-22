@@ -59,7 +59,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 // ── Bottom navigation tabs ──
-private enum class Tab(val label: String) { Workflows("工作流"), Editor("编辑器"), Profile("个人主页") }
+private enum class Tab(val label: String) { Workflows("工作流"), Editor("编辑器"), Agent("Agent"), Profile("个人主页") }
 
 @Composable
 fun HabitatDashboard(activity: ComponentActivity) {
@@ -243,6 +243,8 @@ fun HabitatDashboard(activity: ComponentActivity) {
                         },
                     )
 
+                    Tab.Agent -> com.ailun.habitat.app.ui.AgentScreen()
+
                     Tab.Profile -> {
                         var showLLM by remember { mutableStateOf(false) }
                         if (showLLM) {
@@ -306,6 +308,17 @@ private fun HabitatBottomBar(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
                 )
             },
             label = { Text("个人主页") }
+        )
+        NavigationBarItem(
+            selected = selectedTab == Tab.Agent,
+            onClick = { onTabSelected(Tab.Agent) },
+            icon = {
+                Icon(
+                    if (selectedTab == Tab.Agent) Icons.Filled.Android else Icons.Outlined.Android,
+                    contentDescription = null
+                )
+            },
+            label = { Text("Agent") }
         )
     }
 }
