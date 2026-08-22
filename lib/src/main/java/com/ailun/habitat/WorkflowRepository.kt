@@ -68,15 +68,19 @@ object WorkflowRepository {
     }
 
     fun addFloatMountedWorkflowId(context: Context, id: String) {
-        val ids = getFloatMountedWorkflowIds(context).toMutableSet()
-        ids.add(id)
-        saveMountedIds(context, ids)
+        synchronized(lock) {
+            val ids = getFloatMountedWorkflowIds(context).toMutableSet()
+            ids.add(id)
+            saveMountedIds(context, ids)
+        }
     }
 
     fun removeFloatMountedWorkflowId(context: Context, id: String) {
-        val ids = getFloatMountedWorkflowIds(context).toMutableSet()
-        ids.remove(id)
-        saveMountedIds(context, ids)
+        synchronized(lock) {
+            val ids = getFloatMountedWorkflowIds(context).toMutableSet()
+            ids.remove(id)
+            saveMountedIds(context, ids)
+        }
     }
 
     fun isFloatMounted(context: Context, id: String): Boolean =

@@ -38,6 +38,7 @@ class HabitatFloatService : Service() {
     override fun onCreate() {
         super.onCreate()
         HabitatLogger.d(TAG, "HabitatFloatService onCreate")
+        isRunning = true  // 真实服务启动后才标记在运行（避免 optimism 虚假状态）
         ensureNotificationChannel()
         startForegroundSafely()
 
@@ -141,12 +142,11 @@ class HabitatFloatService : Service() {
             private set
 
         fun start(context: Context) {
-            isRunning = true
+            // 不乐观置 isRunning——由 onCreate 真实置 true（FGS 启动失败时避免虚假状态）
             ContextCompat.startForegroundService(context, Intent(context, HabitatFloatService::class.java))
         }
 
         fun stop(context: Context) {
-            isRunning = false
             context.stopService(Intent(context, HabitatFloatService::class.java))
         }
     }

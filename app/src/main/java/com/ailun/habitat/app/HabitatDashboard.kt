@@ -145,10 +145,15 @@ fun HabitatDashboard(activity: ComponentActivity) {
                 )
                 return
             }
-            HabitatFloatService.start(activity) // service onCreate → showFloatWindow
-            floatServiceRunning = true
-            HabitatStateStore.setFloatServiceActive(true)
-            Toast.makeText(activity, "悬浮窗已开启", Toast.LENGTH_SHORT).show()
+            // 幂等：服务已在运行则不重复启动/提示
+            if (!HabitatFloatService.isRunning) {
+                HabitatFloatService.start(activity)
+                floatServiceRunning = true
+                HabitatStateStore.setFloatServiceActive(true)
+                Toast.makeText(activity, "悬浮窗已开启", Toast.LENGTH_SHORT).show()
+            } else {
+                floatServiceRunning = true
+            }
         }
 
         fun turnOffFloatService() {
