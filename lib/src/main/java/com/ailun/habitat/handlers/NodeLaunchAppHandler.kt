@@ -2,6 +2,7 @@ package com.ailun.habitat.handlers
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.Settings
 import android.util.Log
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
@@ -48,8 +49,13 @@ class NodeLaunchAppHandler(
             if (intent == null) {
                 Log.e(TAG, "Launch app failed: unable to resolve intent for package '$packageName'")
                 context.variables["launch_success"] = false
+                context.variables["launch_error"] = "无法解析启动 Intent: $packageName（应用未安装？）"
                 return node.next
             }
+
+            // 后台 startActivity 豁免检测（Android 10+）：有悬浮窗权限时后台启动才被允许
+            val hasOverlay = Settings.canDrawOverlays(context.appContext)
+            context.variables["launch_has_overlay"] = hasOverlay
 
             context.appContext.startActivity(intent)
             Log.i(TAG, "Successfully launched app: $packageName")
@@ -57,6 +63,7 @@ class NodeLaunchAppHandler(
         } catch (e: Exception) {
             Log.e(TAG, "Launch app error for '$packageName': ${e.message}", e)
             context.variables["launch_success"] = false
+            context.variables["launch_error"] = e.message ?: e.javaClass.simpleName
         }
 
         return node.next
