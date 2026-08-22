@@ -2,6 +2,7 @@ package com.ailun.habitat
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.Job
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -24,11 +25,19 @@ class WorkflowContext(
     /** 线程安全的变量存储 */
     val variables: MutableMap<String, Any?> = ConcurrentHashMap()
 
+    /**
+     * ACTION_FORK 产生的分支 Job 列表，ACTION_JOIN 等待其完成。
+     * 由 HabitatExecutor 内建处理（不经过 handler）。
+     */
+    @Volatile
+    var forkJobs: List<Job>? = null
+
     // 日志回调，由 Executor 设置
     var onLog: ((String) -> Unit)? = null
 
     fun putVariable(key: String, value: Any?) {
-        variables[key] = value
+        // ConcurrentHashMap 不允许 null value：null 视为"删除该变量"
+        if (value == null) variables.remove(key) else variables[key] = value
     }
 
     fun getVariable(key: String): Any? = variables[key]

@@ -112,6 +112,9 @@ class NodeHandlerFactory(
         const val ACTION_LOOP = "ACTION_LOOP"
         const val ACTION_TRY_CATCH = "ACTION_TRY_CATCH"
         const val ACTION_LOG = "ACTION_LOG"
+        // FORK/JOIN 由 HabitatExecutor 内建处理（不注册 handler，仅声明常量供白名单/LLM）
+        const val ACTION_FORK = "ACTION_FORK"
+        const val ACTION_JOIN = "ACTION_JOIN"
         const val ACTION_SET_VARIABLE = "ACTION_SET_VARIABLE"
         const val ACTION_TEXT_OPERATION = "ACTION_TEXT_OPERATION"
         const val ACTION_MATH = "ACTION_MATH"

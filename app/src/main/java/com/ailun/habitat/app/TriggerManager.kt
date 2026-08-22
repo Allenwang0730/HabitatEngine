@@ -31,6 +31,9 @@ object TriggerManager {
     private val sourceInstances = mutableMapOf<String, ITriggerSource>()
     private var factory: NodeHandlerFactory? = null
 
+    /** on_busy=queue 的待补跑集合：旧实例完成后补跑一次 */
+    private val pendingRuns = mutableSetOf<String>()
+
     // ── Global workflow enable/disable ──
 
     /** 工作流是否允许执行（手动或触发），默认 false。 */
@@ -162,24 +165,58 @@ object TriggerManager {
             val vars = mutableMapOf<String, Any>("trigger_type" to event.type)
             event.params.forEach { (k, v) -> vars["trigger_$k"] = v }
 
-            if (HabitatExecutionService.isRunning(entry.workflowId) && entry.config.repeat) {
-                HabitatExecutionService.start(
-                    workflowId = entry.workflowId + "_" + System.currentTimeMillis(),
-                    jsonContent = entry.jsonContent,
-                    androidContext = context,
-                    factory = f,
-                    initialVars = vars,
-                )
+            val workflowId = entry.workflowId
+            val running = HabitatExecutionService.isRunning(workflowId)
+
+            if (running && entry.config.repeat) {
+                // repeat=true：始终启动新实例（带时间戳 id，永不碰撞）
+                startEntry(entry, workflowId + "_" + System.currentTimeMillis(), f, vars, context)
+            } else if (running) {
+                // 碰撞策略
+                when (entry.config.onBusy) {
+                    "abort_existing" -> {
+                        HabitatExecutionService.stop(workflowId)
+                        startEntry(entry, workflowId, f, vars, context)
+                    }
+                    "queue" -> {
+                        pendingRuns.add(workflowId)
+                        HabitatLogger.habitat("Trigger '${workflowId}' busy → queued")
+                    }
+                    else -> HabitatLogger.habitat("Trigger '${workflowId}' busy → ignored")
+                }
             } else {
-                HabitatExecutionService.start(
-                    workflowId = entry.workflowId,
-                    jsonContent = entry.jsonContent,
-                    androidContext = context,
-                    factory = f,
-                    initialVars = vars,
-                )
+                startEntry(entry, workflowId, f, vars, context)
             }
         }
+    }
+
+    private fun startEntry(
+        entry: TriggerEntry,
+        runId: String,
+        f: NodeHandlerFactory,
+        vars: Map<String, Any>,
+        context: Context,
+    ) {
+        HabitatExecutionService.start(
+            workflowId = runId,
+            jsonContent = entry.jsonContent,
+            androidContext = context,
+            factory = f,
+            initialVars = vars,
+            onComplete = {
+                // on_busy=queue：旧实例结束且有待补跑 → 补跑一次
+                if (pendingRuns.remove(entry.workflowId)) {
+                    HabitatLogger.habitat("Trigger '${entry.workflowId}' queued run starting")
+                    HabitatExecutionService.start(
+                        workflowId = entry.workflowId,
+                        jsonContent = entry.jsonContent,
+                        androidContext = context,
+                        factory = f,
+                        initialVars = vars,
+                    )
+                }
+            },
+        )
     }
 
     private fun matchEvent(config: TriggerConfig, event: TriggerEvent): Boolean {

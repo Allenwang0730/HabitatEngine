@@ -34,4 +34,13 @@ data class TriggerConfig(
 
     val keycode: Int?
         get() = (params["keycode"] as? Number)?.toInt()
+
+    /**
+     * 触发时若工作流已在运行的碰撞策略：
+     * - "ignore"（默认）：丢弃本次触发
+     * - "abort_existing"：停止旧实例，立即启动新的
+     * - "queue"：排队，旧实例完成后补跑一次
+     */
+    val onBusy: String
+        get() = params["on_busy"]?.toString()?.trim()?.lowercase() ?: "ignore"
 }

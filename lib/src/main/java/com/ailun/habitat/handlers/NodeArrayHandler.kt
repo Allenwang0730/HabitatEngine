@@ -23,7 +23,7 @@ class NodeArrayHandler : INodeHandler {
         val action = node.params?.get("action")?.toString()?.trim()?.lowercase() ?: ""
         val varName = node.params?.get("var")?.toString()?.trim().orEmpty()
         if (varName.isEmpty()) {
-            context.variables["array_result"] = null
+            context.variables.remove("array_result") // CHM 不允许 null value
             context.log("Array FAILED: no 'var'")
             return node.next
         }
@@ -88,13 +88,13 @@ class NodeArrayHandler : INodeHandler {
                 "contains" -> context.variables[outputVar] = list.any { it?.toString() == item }
 
                 else -> {
-                    context.variables[outputVar] = null
+                    context.variables.remove(outputVar) // CHM 不允许 null value
                     context.log("Array FAILED: unknown action '$action'")
                     return node.next
                 }
             }
         } catch (e: Exception) {
-            context.variables[outputVar] = null
+            context.variables.remove(outputVar)
             context.log("Array FAILED: ${e.message}")
         }
         return node.next

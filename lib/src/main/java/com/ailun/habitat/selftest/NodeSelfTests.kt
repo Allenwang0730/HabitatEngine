@@ -21,6 +21,12 @@ object NodeSelfTests {
         testLoop(),
         testTryCatch(),
         testLog(),
+        // ── 架构健壮性（v1.4.1 executor 加固）──
+        testOnErrorSkip(),
+        testOnErrorStop(),
+        testNodeTimeout(),
+        testTryCatchError(),
+        testForkJoin(),
         // ── 变量与数据 ──
         testSetVariable(),
         testTextOperation(),
@@ -71,6 +77,116 @@ object NodeSelfTests {
         testReadNotifications(),
         // ── 界面副作用节点（放最后：SET_ALARM 会打开系统时钟）──
         testSetAlarm(),
+    )
+
+    // ── 架构健壮性（executor 加固）──
+
+    private fun testOnErrorSkip() = SelfTestCase(
+        name = "on_error=skip·失败继续",
+        description = "require 失败应记 last_error 并跳过继续到下一节点",
+        workflowJson = """
+        {
+          "start_node_id": "fail",
+          "nodes": {
+            "fail":  {"id":"fail","type":"ACTION_FILE_OPERATION","params":{"action":"read","path":"${'$'}{filesDir}/no_such_file.txt","output_var":"x","require":"file_success"},"next":"after"},
+            "after": {"id":"after","type":"ACTION_SET_VARIABLE","params":{"name":"after_hit","value":true,"type":"bool"},"next":"done"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["after_hit"] == true &&
+                ((v["run_errors"] as? Number)?.toInt() ?: 0) >= 1 &&
+                !(v["last_error_any"] as? String).isNullOrBlank()
+        },
+    )
+
+    private fun testOnErrorStop() = SelfTestCase(
+        name = "on_error=stop·失败终止",
+        description = "on_error=stop 时失败节点后不应继续执行",
+        workflowJson = """
+        {
+          "start_node_id": "fail",
+          "nodes": {
+            "fail":  {"id":"fail","type":"ACTION_FILE_OPERATION","params":{"action":"read","path":"${'$'}{filesDir}/no_such_file.txt","output_var":"x","require":"file_success","on_error":"stop"},"next":"after"},
+            "after": {"id":"after","type":"ACTION_SET_VARIABLE","params":{"name":"after_hit","value":true,"type":"bool"},"next":"done"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == null && v["after_hit"] == null &&
+                !(v["last_error"] as? String).isNullOrBlank()
+        },
+    )
+
+    private fun testNodeTimeout() = SelfTestCase(
+        name = "节点超时·timeout_ms",
+        description = "DELAY 5s 配 timeout_ms=500 应在 ~0.5s 内被掐断并继续",
+        timeoutMs = 10_000L,
+        workflowJson = """
+        {
+          "start_node_id": "slow",
+          "nodes": {
+            "slow":  {"id":"slow","type":"ACTION_DELAY","params":{"millis":5000,"node_timeout_ms":500,"on_error":"skip"},"next":"after"},
+            "after": {"id":"after","type":"ACTION_SET_VARIABLE","params":{"name":"after_hit","value":true,"type":"bool"},"next":"done"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["after_hit"] == true &&
+                (v["last_error_any"] as? String)?.contains("超时") == true
+        },
+    )
+
+    private fun testTryCatchError() = SelfTestCase(
+        name = "ACTION_TRY_CATCH·error 分支",
+        description = "前一节点失败（require）时应走 error 分支",
+        workflowJson = """
+        {
+          "start_node_id": "fail",
+          "nodes": {
+            "fail":   {"id":"fail","type":"ACTION_FILE_OPERATION","params":{"action":"read","path":"${'$'}{filesDir}/no_such_file.txt","require":"file_success"},"next":"try"},
+            "try":    {"id":"try","type":"ACTION_TRY_CATCH","params":{"catch_var":"err"},"branches":{"success":"hit_ok","error":"hit_err"}},
+            "hit_ok": {"id":"hit_ok","type":"ACTION_SET_VARIABLE","params":{"name":"tc_success_hit","value":true,"type":"bool"},"next":"done"},
+            "hit_err":{"id":"hit_err","type":"ACTION_SET_VARIABLE","params":{"name":"tc_error_hit","value":true,"type":"bool"},"next":"done"},
+            "done":   {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["tc_error_hit"] == true &&
+                v["tc_success_hit"] == null && !(v["err"] as? String).isNullOrBlank()
+        },
+    )
+
+    private fun testForkJoin() = SelfTestCase(
+        name = "ACTION_FORK·JOIN 并行",
+        description = "两个 300ms 分支并行执行，总耗时应 < 600ms",
+        timeoutMs = 15_000L,
+        workflowJson = """
+        {
+          "start_node_id": "t0",
+          "nodes": {
+            "t0":   {"id":"t0","type":"ACTION_GET_TIME","params":{"timestamp":true,"output_var":"now0"},"next":"cp1"},
+            "cp1":  {"id":"cp1","type":"ACTION_MATH","params":{"operation":"add","a":"${'$'}{current_timestamp}","b":0,"output_var":"t0_ms"},"next":"fork"},
+            "fork": {"id":"fork","type":"ACTION_FORK","params":{"targets":"[\"b1\",\"b2\"]"},"next":"join"},
+            "join": {"id":"join","type":"ACTION_JOIN","params":{},"next":"t1"},
+            "t1":   {"id":"t1","type":"ACTION_GET_TIME","params":{"timestamp":true,"output_var":"now1"},"next":"cp2"},
+            "cp2":  {"id":"cp2","type":"ACTION_MATH","params":{"operation":"subtract","a":"${'$'}{current_timestamp}","b":"${'$'}{t0_ms}","output_var":"elapsed"},"next":"done"},
+            "b1":   {"id":"b1","type":"ACTION_DELAY","params":{"millis":300},"next":"b1set"},
+            "b1set":{"id":"b1set","type":"ACTION_SET_VARIABLE","params":{"name":"branch_a_done","value":true,"type":"bool"}},
+            "b2":   {"id":"b2","type":"ACTION_DELAY","params":{"millis":300},"next":"b2set"},
+            "b2set":{"id":"b2set","type":"ACTION_SET_VARIABLE","params":{"name":"branch_b_done","value":true,"type":"bool"}},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["branch_a_done"] == true && v["branch_b_done"] == true &&
+                ((v["elapsed"] as? Number)?.toDouble() ?: Double.MAX_VALUE) < 600.0
+        },
     )
 
     // ── 逻辑控制 ──
