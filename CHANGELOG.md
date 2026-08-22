@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.6.0] - 2026-08-22
+
+### Added — 引擎修复 + AI 工作流生成 + MCP Agent + 第二批节点
+- **引擎一致性/并发修复（本次重点）**：
+  - `on_error=stop` **树级终止**（新增 `WorkflowContext.stopRequested`，所有分支循环检查后真正停整棵树；原只停当前分支）
+  - `HabitatExecutionService.stop` **级联取消**（修复 stop 无效：executor 内部独立 scope 不随外层取消 → `execJob.join()` finally 级联 `execJob.cancel()`）
+  - FORK 分支改 `CoroutineScope(coroutineContext).launch`（挂到执行 job 下，随取消级联）+ 取消正确传播（不再用 `runCatching` 吞 CE）
+  - `activeJobs` `ConcurrentHashMap` + `start` `@Synchronized`（防双执行）；`TriggerManager` entries/sourceInstances/pendingRuns 并发安全；`HabitatStateStore.setRunning` 用 `update{}` 原子（防丢更新）+ `notifyLibraryChanged` 用 AtomicLong 递增（防同毫秒漏刷新）
+  - **触发器源审查修复**：Timer 双 start 泄漏/NPE、Key 触发器吞全部按键（改监听不拦截 + 仅 DOWN）、timer `interval_ms` 门控（修复 12 倍频率失控）、Notification/Sms/Clipboard 重复注册泄漏
+  - **开关修复**：Agent 服务开关乐观更新 + 失败反馈；悬浮窗 `isRunning` 真实生命周期（不再乐观虚假）+ 挂载幂等
+  - **FORK 树级终止回归用例**（自测 61 → 66 条）
+- **AI 工作流生成**（App，DeepSeek）：`WorkflowAIClient`（OpenAI 兼容 chat completions，key/baseUrl 可配置）+ `WorkflowAIGenerator`（节点白名单+few-shot+格式约束的 prompt；JSON 提取 + `HabitatJson.fromJson` 验证）+ 聊天 UI（自然语言→生成→编辑→多轮修正→保存→挂载悬浮窗）。**DeepSeek 10 典型场景正确率 100%**
+- **MCP Agent 服务**：`/mcp` JSON-RPC 2.0（initialize/tools/list/tools/call，82 工具 = 80 节点 + screen/ping）、端口可配置、Agent 控制页（开关/状态/IP/端口）、Dashboard Agent tab；电脑侧常驻 `agent_daemon.mjs`（一次握手长连接，**读屏 3.9s→277ms、节点调用 2s→54ms**）；`scripts/mcp_call.mjs`
+- **新节点 4 个**：`ACTION_GEOCODE`（Nominatim 地理编码，免 key）、`ACTION_SAY_TO_FILE`（TTS 合成到 .wav，离线）、`ACTION_GET_TRAFFIC`（累计流量）、`ACTION_GET_SETTING`（读系统设置项）
+- 引擎 **84 节点**；自测用例 **66 条**；后端白名单×2 + RAGService + 知识库 md 同步
+- `scripts/verify_workflow_gen.ps1`（DeepSeek 生成正确率验证）
+
+### Notes
+- SmartCS 完全不动；两份 `:lib` 暂不同步。真机回归（66 条）待设备授权。
+
 ## [1.5.0] - 2026-08-22
 
 ### Added — 模块化（阶段 B）+ 异常处理/通用节点

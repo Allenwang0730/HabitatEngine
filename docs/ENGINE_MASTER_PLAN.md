@@ -48,9 +48,11 @@
 | **SmartCS**（智能客服）| `C:\Users\wang\SmartCS` | 独立 App，嵌了引擎拷贝。版本 v0.3.3 |
 
 ### 引擎现状
-- **72 个节点**（`:lib` 注册 70 + 2 个 app 侧 SEND_NOTIFICATION/DYNAMIC_ISLAND）—— 51 个既有 + 阶段 C 16 个 + 第一批纯逻辑 5 个
+- **84 个节点**（`:lib` 注册 82 + 2 个 app 侧 SEND_NOTIFICATION/DYNAMIC_ISLAND）—— 51 个既有 + 阶段 C 16 个 + 第一批纯逻辑 5 个 + 第二批零权限 4 个（GEOCODE/SAY_TO_FILE/GET_TRAFFIC/GET_SETTING）
 - `HabitatExecutionService.start(...)` 支持 `initialVars / onComplete / onLog / onResult`（onResult 是"引擎返还内容"的正式通道）
-- 新增节点：`ACTION_CALL_DIRECT`、`ACTION_WAIT_CALL_END`、`ACTION_WAIT_CALL_ANSWER`、`ACTION_READ_CALL_LOG`、阶段 C 16 个、第一批数据节点 5 个（SQLITE_QUERY/ZIP/CRYPTO/ARRAY/PARSE_DATETIME）
+- 新增节点：`ACTION_CALL_DIRECT`、`ACTION_WAIT_CALL_END`、`ACTION_WAIT_CALL_ANSWER`、`ACTION_READ_CALL_LOG`、阶段 C 16 个、第一批数据节点 5 个、第二批 4 个（GEOCODE/SAY_TO_FILE/GET_TRAFFIC/GET_SETTING）
+- **本批健壮性/一致性修复（2026-08-22）**：`on_error=stop` 树级终止（`stopRequested`）、工作流 `stop` 级联取消（含 FORK 分支）、fork 取消正确传播不吞 CE、`HabitatExecutionService.activeJobs` 线程安全 + `@Synchronized` 防双执行、`TriggerManager`/`HabitatStateStore` 并发安全、触发器源 F1/F2/F3/F8（Timer 泄漏/NPE、Key 吞按键、timer 间隔门控、重复注册）
+- **App 新功能**：AI 工作流生成（DeepSeek，聊天→生成→编辑→多轮→保存→挂载；10 场景 100% 正确率）、MCP Agent 服务（/mcp JSON-RPC 2.0）+ Agent 控制页 + 常驻 MCP daemon（长连接提速 14×）
 - 两份 `:lib`（SmartCS + Habitat）**暂不同步**（测试架/新节点只在 Habitat，SmartCS 下次收引擎改动时一并拷入）
 
 ### 已交付（勿重复做）
