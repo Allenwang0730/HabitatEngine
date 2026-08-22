@@ -54,7 +54,13 @@ object HabitatExecutionService {
                 val executor = HabitatExecutor(factory)
                 val ctx = WorkflowContext(androidContext)
                 initialVars?.forEach { (k, v) -> ctx.variables[k] = v }
-                executor.execute(graph, ctx, onLog).join()
+                val execJob = executor.execute(graph, ctx, onLog)
+                try {
+                    execJob.join()
+                } finally {
+                    // 关键：外层取消（stop）时级联取消 executor 内部 job（含 FORK 分支），确保工作流真正停止
+                    if (coroutineContext.isActive == false) execJob.cancel()
+                }
                 // 工作流结束：把变量快照返还给调用方（在 onComplete 之前）
                 onResult?.invoke(HashMap(ctx.variables))
             } catch (_: CancellationException) {

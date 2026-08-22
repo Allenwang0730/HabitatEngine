@@ -118,8 +118,9 @@ class HabitatExecutor(
                 ACTION_FORK -> {
                     val targets = parseForkTargets(node, ctx)
                     ctx.log("Fork: ${targets.size} branches → $targets")
+                    // 分支用 CoroutineScope(coroutineContext) 挂到当前执行 job 下，使整棵树可被外部取消级联
                     val jobs = targets.map { t ->
-                        executorScope.launch {
+                        CoroutineScope(coroutineContext).launch {
                             runCatching {
                                 runBranch(t, index, ctx, maxSteps)
                             }.onFailure { e ->
