@@ -2,108 +2,60 @@ package com.ailun.habitat
 
 import com.ailun.habitat.api.IAccessibilityProvider
 import com.ailun.habitat.api.IShellExecutor
-import com.ailun.habitat.handlers.*
 
+/**
+ * 节点处理器工厂（阶段 B：模块化）。
+ *
+ * - `modules` 为 null（默认）→ 注册全部节点（向后兼容，老调用不传不变）；
+ *   传 Set → 只注册所选模块。
+ * - `extra` 可追加/覆盖单节点（宿主自定义实现，key=节点类型）。
+ * - 注册表存"工厂 lambda"（闭包捕获 a11y/shell 注入），get() 时懒实例化并缓存。
+ * - FORK/JOIN 由 HabitatExecutor 内建处理，不在此注册（常量见 companion）。
+ */
 class NodeHandlerFactory(
     private val a11y: IAccessibilityProvider? = null,
     private val shell: IShellExecutor? = null,
+    modules: Set<NodeModule>? = null,
+    extra: Map<String, NodeFactory> = emptyMap(),
 ) {
 
-    private val registry = mutableMapOf<String, INodeHandler>()
+    private val registry = mutableMapOf<String, NodeFactory>()
+    private val cache = mutableMapOf<String, INodeHandler>()
 
     init {
-        // ── 逻辑控制 ──
-        register(CONDITION_SWITCH, SwitchNodeHandler())
-        register(CONDITION_ADVANCED_SWITCH, NodeAdvancedSwitchHandler())
-        register(ACTION_DELAY, NodeDelayHandler())
-        register(ACTION_LOOP, NodeLoopHandler())
-        register(ACTION_TRY_CATCH, NodeTryCatchHandler())
-        register(ACTION_LOG, NodeLogHandler())
-
-        // ── 变量与数据 ──
-        register(ACTION_SET_VARIABLE, NodeSetVariableHandler())
-        register(ACTION_TEXT_OPERATION, NodeTextOperationHandler())
-        register(ACTION_MATH, NodeMathHandler())
-        register(ACTION_CLIPBOARD, NodeClipboardHandler())
-        register(ACTION_PARSE_JSON, NodeParseJsonHandler())
-        register(ACTION_PARSE_XML, NodeParseXmlHandler())
-        register(ACTION_BASE64, NodeBase64Handler())
-        register(ACTION_FILE_OPERATION, NodeFileOperationHandler())
-        register(ACTION_SQLITE_QUERY, NodeSqliteQueryHandler())
-        register(ACTION_ZIP, NodeZipHandler())
-        register(ACTION_CRYPTO, NodeCryptoHandler())
-        register(ACTION_ARRAY, NodeArrayHandler())
-        register(ACTION_PARSE_DATETIME, NodeParseDateTimeHandler())
-
-        // ── 交互 ──
-        register(ACTION_CLICK, NodeClickHandler(a11y))
-        register(ACTION_SWIPE, NodeSwipeHandler(a11y))
-        register(ACTION_LONG_PRESS, NodeLongPressHandler(a11y, shell))
-        register(ACTION_INPUT_TEXT, NodeInputTextHandler(a11y, shell))
-        register(ACTION_GLOBAL_KEY, NodeGlobalKeyHandler(a11y, shell))
-        register(ACTION_FIND_ELEMENT, NodeFindElementHandler(a11y, shell))
-
-        // ── 系统控制 ──
-        register(ACTION_SHELL, NodeShellHandler(shell))
-        register(ACTION_LAUNCH_APP, NodeLaunchAppHandler())
-        register(ACTION_FORCE_STOP_APP, NodeForceStopAppHandler(shellExecutor = shell))
-        register(ACTION_SCREEN_WAKE, NodeScreenWakeHandler(shellExecutor = shell))
-        register(ACTION_WIFI, NodeWifiHandler())
-        register(ACTION_BLUETOOTH, NodeBluetoothHandler())
-        register(ACTION_VOLUME, NodeVolumeHandler())
-        register(ACTION_BRIGHTNESS, NodeBrightnessHandler())
-        register(ACTION_FLASHLIGHT, NodeFlashlightHandler())
-        register(ACTION_CALL_PHONE, NodeCallHandler())
-        register(ACTION_CALL_DIRECT, NodeCallDirectHandler())
-        register(ACTION_WAIT_CALL_END, NodeWaitCallEndHandler())
-        register(ACTION_WAIT_CALL_ANSWER, NodeWaitCallAnswerHandler())
-        register(ACTION_SHARE, NodeShareHandler())
-        register(ACTION_GET_CALL_STATE, NodeGetCallStateHandler())
-        register(ACTION_GET_SIM_INFO, NodeGetSimInfoHandler())
-        register(ACTION_SET_ALARM, NodeSetAlarmHandler())
-        register(ACTION_DND_MODE, NodeDndModeHandler())
-        register(ACTION_GLOBAL_NAV, NodeGlobalNavHandler(a11y))
-        register(ACTION_WAIT_FOR_ELEMENT, NodeWaitForElementHandler(a11y))
-        register(ACTION_RECORD_AUDIO, NodeRecordAudioHandler())
-        register(ACTION_CAPTURE_PHOTO, NodeCapturePhotoHandler())
-        register(ACTION_GET_LOCATION, NodeGetLocationHandler())
-        register(ACTION_READ_NOTIFICATIONS, NodeReadNotificationsHandler())
-
-        // ── 媒体 ──
-        register(ACTION_SCREENSHOT, NodeScreenshotHandler(shell))
-        register(ACTION_TEXT_TO_SPEECH, NodeTtsHandler())
-
-        // ── 网络 ──
-        register(ACTION_HTTP_REQUEST, NodeHttpHandler())
-        register(ACTION_NETWORK_STATUS, NodeNetworkStatusHandler())
-
-        // ── 工具 ──
-        register(ACTION_GET_TIME, NodeGetTimeHandler())
-        register(ACTION_RANDOM, NodeRandomHandler())
-        register(ACTION_GET_BATTERY, NodeGetBatteryHandler())
-        register(ACTION_GET_DEVICE_INFO, NodeGetDeviceInfoHandler())
-        register(ACTION_GET_STORAGE_INFO, NodeGetStorageInfoHandler())
-        register(ACTION_PLAY_MEDIA, NodePlayMediaHandler())
-        register(ACTION_WAIT_UNTIL_TIME, NodeWaitUntilTimeHandler())
-        register(ACTION_GET_SENSOR, NodeGetSensorHandler())
-
-        // ── 感知 ──
-        register(ACTION_READ_SCREEN, NodeReadScreenHandler(a11y))
-        register(ACTION_READ_SMS, NodeReadSmsHandler(shell))
-        register(ACTION_READ_CALL_LOG, NodeReadCallLogHandler())
-        register(ACTION_GET_APP_INFO, NodeAppInfoHandler(a11y))
-        register(ACTION_FOREGROUND_APP, NodeForegroundAppHandler(a11y, shell))
-        register(ACTION_APP_SEARCH, NodeAppSearchHandler())
-
-        // ── UI ──
-        register(ACTION_TOAST, ToastNodeHandler())
-        register(ACTION_VIBRATE, VibrateNodeHandler())
-        // ── AI ──
-        register(ACTION_AI_CHAT, NodeLLMHandler(llmService = null))
+        val selected = modules ?: NodeModule.entries.toSet()
+        val merged = linkedMapOf<String, NodeFactory>()
+        for ((module, entries) in ALL_NODE_MODULES) {
+            if (module in selected) {
+                entries.forEach { (type, factory) -> merged.putIfAbsent(type, factory) }
+            }
+        }
+        // 宿主注入/覆盖（优先于内置）
+        extra.forEach { (type, factory) -> merged[type] = factory }
+        merged.forEach { (type, factory) -> registry[type] = factory }
     }
 
-    fun register(type: String, handler: INodeHandler) { registry[type] = handler }
-    fun get(type: String?): INodeHandler? = type?.let { registry[it] }
+    /** 注册（保留旧 API，app 侧 applyAppHandlers 使用；覆盖已存在类型）。 */
+    fun register(type: String, handler: INodeHandler) {
+        registry[type] = { _, _ -> handler }
+        cache.remove(type)
+    }
+
+    /** 懒实例化：首次 get 时创建并缓存。 */
+    fun get(type: String?): INodeHandler? {
+        if (type == null) return null
+        cache[type]?.let { return it }
+        val factory = registry[type] ?: return null
+        val handler = factory(a11y, shell)
+        cache[type] = handler
+        return handler
+    }
+
+    /** 当前注册的全部节点类型（调试/文档/LLM 生成可用）。 */
+    fun availableTypes(): Set<String> = registry.keys.toSet()
+
+    /** 当前注册的类型数量。 */
+    val size: Int get() = registry.size
 
     companion object {
         const val CONDITION_SWITCH = "CONDITION_SWITCH"
@@ -112,9 +64,6 @@ class NodeHandlerFactory(
         const val ACTION_LOOP = "ACTION_LOOP"
         const val ACTION_TRY_CATCH = "ACTION_TRY_CATCH"
         const val ACTION_LOG = "ACTION_LOG"
-        // FORK/JOIN 由 HabitatExecutor 内建处理（不注册 handler，仅声明常量供白名单/LLM）
-        const val ACTION_FORK = "ACTION_FORK"
-        const val ACTION_JOIN = "ACTION_JOIN"
         const val ACTION_SET_VARIABLE = "ACTION_SET_VARIABLE"
         const val ACTION_TEXT_OPERATION = "ACTION_TEXT_OPERATION"
         const val ACTION_MATH = "ACTION_MATH"
@@ -181,5 +130,19 @@ class NodeHandlerFactory(
         const val ACTION_SEND_NOTIFICATION = "ACTION_SEND_NOTIFICATION"
         const val ACTION_DYNAMIC_ISLAND = "ACTION_DYNAMIC_ISLAND"
         const val ACTION_AI_CHAT = "ACTION_AI_CHAT"
+        // 异常处理（v1.4.2）
+        const val ACTION_RETRY = "ACTION_RETRY"
+        const val ACTION_ASSERT = "ACTION_ASSERT"
+        // 通用查询（v1.4.2）
+        const val ACTION_GET_SCREEN_STATE = "ACTION_GET_SCREEN_STATE"
+        const val ACTION_GET_AUDIO_STATE = "ACTION_GET_AUDIO_STATE"
+        // 系统/媒体（v1.4.2）
+        const val ACTION_SEND_BROADCAST = "ACTION_SEND_BROADCAST"
+        const val ACTION_MEDIA_CONTROL = "ACTION_MEDIA_CONTROL"
+        const val ACTION_GET_WEATHER = "ACTION_GET_WEATHER"
+        const val ACTION_SET_WALLPAPER = "ACTION_SET_WALLPAPER"
+        // FORK/JOIN 由 HabitatExecutor 内建处理（不注册 handler，仅声明常量供白名单/LLM）
+        const val ACTION_FORK = "ACTION_FORK"
+        const val ACTION_JOIN = "ACTION_JOIN"
     }
 }

@@ -27,6 +27,17 @@ object NodeSelfTests {
         testNodeTimeout(),
         testTryCatchError(),
         testForkJoin(),
+        // ── 异常处理/通用查询/系统媒体（v1.4.2）──
+        testRetryFail(),
+        testRetrySuccess(),
+        testAssertPass(),
+        testAssertFail(),
+        testGetScreenState(),
+        testGetAudioState(),
+        testSendBroadcast(),
+        testGetWeather(),
+        testSetWallpaper(),
+        testMediaControl(),
         // ── 变量与数据 ──
         testSetVariable(),
         testTextOperation(),
@@ -187,6 +198,184 @@ object NodeSelfTests {
             v["wf_completed"] == true && v["branch_a_done"] == true && v["branch_b_done"] == true &&
                 ((v["elapsed"] as? Number)?.toDouble() ?: Double.MAX_VALUE) < 600.0
         },
+    )
+
+    // ── 异常处理/通用查询/系统媒体（v1.4.2）──
+
+    private fun testRetryFail() = SelfTestCase(
+        name = "ACTION_RETRY·重试耗尽",
+        description = "目标持续失败 3 次后应放弃继续",
+        timeoutMs = 20_000L,
+        workflowJson = """
+        {
+          "start_node_id": "retry",
+          "nodes": {
+            "retry": {"id":"retry","type":"ACTION_RETRY","params":{"target":"do","times":3,"interval_ms":100},"next":"done"},
+            "do":    {"id":"do","type":"ACTION_FILE_OPERATION","params":{"action":"read","path":"${'$'}{filesDir}/no_such_retry.txt","require":"file_success"},"next":"retry"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && ((v["run_errors"] as? Number)?.toInt() ?: 0) == 3
+        },
+    )
+
+    private fun testRetrySuccess() = SelfTestCase(
+        name = "ACTION_RETRY·一次成功",
+        description = "目标首次成功应直接继续（run_errors=0）",
+        workflowJson = """
+        {
+          "start_node_id": "retry",
+          "nodes": {
+            "retry": {"id":"retry","type":"ACTION_RETRY","params":{"target":"do","times":3,"interval_ms":100},"next":"done"},
+            "do":    {"id":"do","type":"ACTION_FILE_OPERATION","params":{"action":"write","path":"${'$'}{filesDir}/retry_ok.txt","content":"ok","require":"file_success"},"next":"retry"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && ((v["run_errors"] as? Number)?.toInt() ?: -1) == 0
+        },
+    )
+
+    private fun testAssertPass() = SelfTestCase(
+        name = "ACTION_ASSERT·条件通过",
+        description = "x=5 断言 'x == 5' 应继续执行",
+        workflowJson = """
+        {
+          "start_node_id": "set",
+          "nodes": {
+            "set":    {"id":"set","type":"ACTION_SET_VARIABLE","params":{"name":"x","value":5,"type":"int"},"next":"assert"},
+            "assert": {"id":"assert","type":"ACTION_ASSERT","params":{"condition":"x == 5"},"next":"done"},
+            "done":   {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && ((v["run_errors"] as? Number)?.toInt() ?: -1) == 0
+        },
+    )
+
+    private fun testAssertFail() = SelfTestCase(
+        name = "ACTION_ASSERT·条件失败",
+        description = "断言失败应记 last_error 并跳过继续（on_error 默认 skip）",
+        workflowJson = """
+        {
+          "start_node_id": "set",
+          "nodes": {
+            "set":    {"id":"set","type":"ACTION_SET_VARIABLE","params":{"name":"x","value":5,"type":"int"},"next":"assert"},
+            "assert": {"id":"assert","type":"ACTION_ASSERT","params":{"condition":"x == 6","message":"x should be 6"},"next":"done"},
+            "done":   {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && ((v["run_errors"] as? Number)?.toInt() ?: 0) == 1 &&
+                (v["last_error_any"] as? String)?.contains("x should be 6") == true
+        },
+    )
+
+    private fun testGetScreenState() = SelfTestCase(
+        name = "ACTION_GET_SCREEN_STATE·屏幕状态",
+        description = "应返回屏幕开关与锁定状态",
+        workflowJson = """
+        {
+          "start_node_id": "s",
+          "nodes": {
+            "s":    {"id":"s","type":"ACTION_GET_SCREEN_STATE","params":{},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["screen_state_success"] == true &&
+                v["screen_on"] is Boolean && v["screen_locked"] is Boolean
+        },
+    )
+
+    private fun testGetAudioState() = SelfTestCase(
+        name = "ACTION_GET_AUDIO_STATE·音频状态",
+        description = "应返回音乐播放与耳机状态",
+        workflowJson = """
+        {
+          "start_node_id": "a",
+          "nodes": {
+            "a":    {"id":"a","type":"ACTION_GET_AUDIO_STATE","params":{},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["audio_state_success"] == true &&
+                v["music_active"] is Boolean && v["headset_connected"] is Boolean
+        },
+    )
+
+    private fun testSendBroadcast() = SelfTestCase(
+        name = "ACTION_SEND_BROADCAST·发送广播",
+        description = "自定义 action 广播应发送成功",
+        workflowJson = """
+        {
+          "start_node_id": "b",
+          "nodes": {
+            "b":    {"id":"b","type":"ACTION_SEND_BROADCAST","params":{"action":"com.ailun.habitat.SELFTEST_BROADCAST","extras":"{\"k\":\"v\"}"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v -> v["wf_completed"] == true && v["broadcast_success"] == true },
+    )
+
+    private fun testGetWeather() = SelfTestCase(
+        name = "ACTION_GET_WEATHER·天气",
+        description = "Open-Meteo 查询北京天气应返回温度",
+        timeoutMs = 45_000L,
+        workflowJson = """
+        {
+          "start_node_id": "w",
+          "nodes": {
+            "w":    {"id":"w","type":"ACTION_GET_WEATHER","params":{"latitude":39.9,"longitude":116.4,"output_var":"wx"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["weather_success"] == true &&
+                v["weather_temperature"] is Number
+        },
+    )
+
+    private fun testSetWallpaper() = SelfTestCase(
+        name = "ACTION_SET_WALLPAPER·壁纸",
+        description = "设置主屏壁纸（需真实图片文件）",
+        skipReason = "需真实图片文件，真机手工验证",
+        workflowJson = """
+        {
+          "start_node_id": "p",
+          "nodes": {
+            "p":    {"id":"p","type":"ACTION_SET_WALLPAPER","params":{"path":"${'$'}{filesDir}/wallpaper.jpg"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v -> v["wf_completed"] == true && v["wallpaper_success"] == true },
+    )
+
+    private fun testMediaControl() = SelfTestCase(
+        name = "ACTION_MEDIA_CONTROL·媒体控制",
+        description = "play/pause/next（需 Shizuku 执行 input keyevent）",
+        skipReason = "需 Shizuku（input keyevent），真机手工验证",
+        workflowJson = """
+        {
+          "start_node_id": "m",
+          "nodes": {
+            "m":    {"id":"m","type":"ACTION_MEDIA_CONTROL","params":{"cmd":"play_pause"},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v -> v["wf_completed"] == true && v["media_success"] == true },
     )
 
     // ── 逻辑控制 ──

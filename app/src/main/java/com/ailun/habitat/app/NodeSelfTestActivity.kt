@@ -6,6 +6,7 @@ import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
 import com.ailun.habitat.NodeHandlerFactory
+import com.ailun.habitat.NodeModule
 import com.ailun.habitat.app.bridge.AppAccessibilityProvider
 import com.ailun.habitat.selftest.NodeSelfTestRunner
 import com.ailun.habitat.selftest.NodeSelfTests
@@ -70,6 +71,17 @@ class NodeSelfTestActivity : Activity() {
                 cases = cases,
                 accessibilityConnected = a11yConnected,
             ) { line -> Log.i(TAG, "WF: $line") }
+
+            // 模块化冒烟（阶段 B）：受限 factory 只注册 CORE；INTERACTION 节点应缺失
+            val moduleSmoke = runCatching {
+                val coreFactory = NodeHandlerFactory(AppAccessibilityProvider, shell = null, modules = setOf(NodeModule.CORE))
+                val coreOk = coreFactory.get(NodeHandlerFactory.CONDITION_SWITCH) != null &&
+                    coreFactory.get(NodeHandlerFactory.ACTION_MATH) != null
+                val interactionAbsent = coreFactory.get(NodeHandlerFactory.ACTION_CLICK) == null
+                val fullSize = factory.size
+                "moduleSmoke: CORE可用=$coreOk INTERACTION缺失=$interactionAbsent 全量大小=$fullSize CORE大小=${coreFactory.size}"
+            }.getOrElse { "moduleSmoke FAILED: ${it.message}" }
+            Log.i(TAG, "RESULT ${if (moduleSmoke.contains("FAILED")) "FAIL" else "PASS"} 模块化冒烟 (0ms) $moduleSmoke")
 
             val passCount = results.count { it.status == "PASS" }
             val failCount = results.count { it.status == "FAIL" }
