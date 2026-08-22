@@ -27,6 +27,7 @@ object NodeSelfTests {
         testNodeTimeout(),
         testTryCatchError(),
         testForkJoin(),
+        testForkStopPropagation(),
         // ── 异常处理/通用查询/系统媒体（v1.4.2）──
         testRetryFail(),
         testRetrySuccess(),
@@ -201,6 +202,31 @@ object NodeSelfTests {
         verify = { v ->
             v["wf_completed"] == true && v["branch_a_done"] == true && v["branch_b_done"] == true &&
                 ((v["elapsed"] as? Number)?.toDouble() ?: Double.MAX_VALUE) < 600.0
+        },
+    )
+
+    /** on_error=stop 应终止整棵树（含并行 FORK 分支），而非只停当前分支。 */
+    private fun testForkStopPropagation() = SelfTestCase(
+        name = "FORK+on_error=stop·树级终止",
+        description = "b1 失败 on_error=stop，b2 的写变量节点应被终止（branch_b_done 不应存在）",
+        timeoutMs = 15_000L,
+        workflowJson = """
+        {
+          "start_node_id": "fork",
+          "nodes": {
+            "fork":  {"id":"fork","type":"ACTION_FORK","params":{"targets":"[\"b1\",\"b2\"]"},"next":"join"},
+            "join":  {"id":"join","type":"ACTION_JOIN","params":{},"next":"done"},
+            "done":  {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}},
+            "b1":    {"id":"b1","type":"ACTION_FILE_OPERATION","params":{"action":"read","path":"${'$'}{filesDir}/no_such_b1.txt","output_var":"x","require":"file_success","on_error":"stop"}},
+            "b2":    {"id":"b2","type":"ACTION_DELAY","params":{"millis":800},"next":"b2set"},
+            "b2set": {"id":"b2set","type":"ACTION_SET_VARIABLE","params":{"name":"branch_b_done","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            // b1 失败 stop → stopRequested=true → b2 延迟后循环检查终止，b2set 未执行
+            v["wf_completed"] == true && v["branch_b_done"] == null &&
+                v["last_node"] != "b2set"
         },
     )
 
