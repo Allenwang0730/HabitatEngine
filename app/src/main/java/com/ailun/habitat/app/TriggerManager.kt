@@ -27,12 +27,13 @@ object TriggerManager {
         val jsonContent: String,
     )
 
-    private val entries = mutableMapOf<String, TriggerEntry>()
-    private val sourceInstances = mutableMapOf<String, ITriggerSource>()
+    private val entries = java.util.concurrent.ConcurrentHashMap<String, TriggerEntry>()
+    private val sourceInstances = java.util.concurrent.ConcurrentHashMap<String, ITriggerSource>()
+    @Volatile
     private var factory: NodeHandlerFactory? = null
 
     /** on_busy=queue 的待补跑集合：旧实例完成后补跑一次 */
-    private val pendingRuns = mutableSetOf<String>()
+    private val pendingRuns = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     // ── Global workflow enable/disable ──
 
