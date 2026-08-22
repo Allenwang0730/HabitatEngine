@@ -287,21 +287,49 @@ class AgentService : Service() {
         })
     }.toString()
 
-    /** 无障碍树文本快照（AI 的"眼睛"，替代截图省 token）。 */
+    /** 屏幕快照（AI 的"眼睛"）：返回屏幕状态 + 所有窗口文本（无障碍树，替代截图省 token）。 */
     private fun screenSnapshot(): Map<String, Any> {
         val service = AppAccessibilityProvider.getService()
-        val text = if (service != null) {
-            val root = service.rootInActiveWindow
-            if (root != null) {
-                try {
-                    collectText(root).joinToString("\n")
-                } finally {
-                    runCatching { root.recycle() }
+        val pm = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+        val km = getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+        val screenOn = pm?.isInteractive ?: false
+        val locked = km?.isKeyguardLocked ?: false
+
+        // 遍历所有窗口（对齐 NodeReadScreenHandler）：锁屏/悬浮层盖住时也能读到应用窗口
+        val windows = mutableListOf<Map<String, Any>>()
+        if (service != null && screenOn) {
+            try {
+                service.windows.forEach { w ->
+                    if (w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION ||
+                        w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM
+                    ) {
+                        val root = w.root ?: return@forEach
+                        try {
+                            val pkg = root.packageName?.toString() ?: ""
+                            val texts = collectText(root)
+                            if (texts.isNotEmpty() || pkg.isNotEmpty()) {
+                                windows.add(mapOf("package" to pkg, "text" to texts.joinToString("\n")))
+                            }
+                        } finally {
+                            runCatching { root.recycle() }
+                        }
+                    }
                 }
-            } else ""
-        } else ""
+            } catch (_: Exception) {
+            }
+        }
+
+        // 主窗口文本：优先非系统悬浮层
+        val main = windows.firstOrNull {
+            it["package"] != "com.android.systemui" && it["package"] != "com.vivo.systemuiplugin" &&
+                it["package"] != "com.vivo.doubleinstance"
+        } ?: windows.firstOrNull()
+
         return mapOf(
-            "screen_text" to text,
+            "screen_on" to screenOn,
+            "screen_locked" to locked,
+            "screen_text" to (main?.get("text") ?: ""),
+            "windows" to windows,
             "foreground_package" to (AppAccessibilityProvider.foregroundPackage ?: "unknown"),
         )
     }
