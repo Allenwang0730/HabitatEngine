@@ -113,6 +113,12 @@ dependencies {
     // OkHttp
     implementation(libs.okhttp)
 
+    // Ktor（Agent WebSocket server）
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.cio)
+    implementation(libs.ktor.server.netty)
+    implementation(libs.ktor.server.websockets)
+
     // EncryptedSharedPreferences
     implementation(libs.security.crypto)
 

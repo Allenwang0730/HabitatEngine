@@ -1,6 +1,7 @@
 package com.ailun.habitat.app
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
@@ -58,6 +59,14 @@ class NodeSelfTestActivity : Activity() {
         val auto = intent?.getBooleanExtra("auto", false) ?: false
         val only = intent?.getStringExtra("only") // 可选：只跑指定名称的用例
 
+        // 调试用：前台 Activity 启动 Agent 服务（Android 14+ 后台启动受限，由界面代启），启完即退
+        if (intent?.getBooleanExtra("start_agent", false) == true) {
+            startService(Intent(this, AgentService::class.java))
+            Log.i("HabitatAgent", "AgentService started via activity")
+            finish()
+            return
+        }
+
         testScope.launch {
             // shell=null → ACTION_SHELL 走 Runtime.exec 兜底（与 SmartCS 调试页一致，结果可复现）
             val factory = NodeHandlerFactory(AppAccessibilityProvider, shell = null)
@@ -110,7 +119,9 @@ class NodeSelfTestActivity : Activity() {
                 delay(1500) // 给 Logcat 一点刷新时间
                 finish()
             } else {
-                Toast.makeText(this@NodeSelfTestActivity, "自测完成：$passCount 通过 / $failCount 失败", Toast.LENGTH_LONG).show()
+                runOnUiThread {
+                    Toast.makeText(this@NodeSelfTestActivity, "自测完成：$passCount 通过 / $failCount 失败", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }

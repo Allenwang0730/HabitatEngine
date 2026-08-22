@@ -102,5 +102,10 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- Agent 服务：WebSocket 暴露节点为工具（AI 控制手机通道） -->
+        <service
+            android:name="com.ailun.habitat.app.AgentService"
+            android:exported="false" />
     </application>
 </manifest>
