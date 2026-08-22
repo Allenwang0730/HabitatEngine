@@ -28,6 +28,8 @@ object NodeSelfTests {
         testTryCatchError(),
         testForkJoin(),
         testForkStopPropagation(),
+        testWaitCallAnswerIdle(),
+        testWaitCallEndIdle(),
         // ── 异常处理/通用查询/系统媒体（v1.4.2）──
         testRetryFail(),
         testRetrySuccess(),
@@ -228,6 +230,40 @@ object NodeSelfTests {
             v["wf_completed"] == true && v["branch_b_done"] == null &&
                 v["last_node"] != "b2set"
         },
+    )
+
+    /** BUG-2 修复回归：WAIT_CALL_ANSWER 起始即 IDLE（无通话）应短观察后返回 false，不死等。 */
+    private fun testWaitCallAnswerIdle() = SelfTestCase(
+        name = "WAIT_CALL_ANSWER·起始IDLE",
+        description = "无通话（起始 IDLE）时应在 ~5s 内返回 call_answered=false，避免空转/误点录音",
+        timeoutMs = 20_000L,
+        workflowJson = """
+        {
+          "start_node_id": "w",
+          "nodes": {
+            "w":    {"id":"w","type":"ACTION_WAIT_CALL_ANSWER","params":{"timeout_ms":120000},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v -> v["wf_completed"] == true && v["call_answered"] == false },
+    )
+
+    /** BUG-2 修复回归：WAIT_CALL_END 起始即 IDLE 应短观察后返回 true（视为已结束），避免假"已接听 600s"。 */
+    private fun testWaitCallEndIdle() = SelfTestCase(
+        name = "WAIT_CALL_END·起始IDLE",
+        description = "无通话（起始 IDLE）时应在 ~3s 内返回 call_ended=true，避免死等 600s",
+        timeoutMs = 20_000L,
+        workflowJson = """
+        {
+          "start_node_id": "w",
+          "nodes": {
+            "w":    {"id":"w","type":"ACTION_WAIT_CALL_END","params":{"timeout_ms":600000},"next":"done"},
+            "done": {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v -> v["wf_completed"] == true && v["call_ended"] == true },
     )
 
     // ── 异常处理/通用查询/系统媒体（v1.4.2）──

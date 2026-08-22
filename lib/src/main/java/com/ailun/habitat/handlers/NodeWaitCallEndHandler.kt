@@ -36,6 +36,28 @@ class NodeWaitCallEndHandler : INodeHandler {
         val deadline = System.currentTimeMillis() + timeoutMs
         var wasInCall = false
 
+        // 起始态守卫：进入若已是 IDLE（通话未开始/已结束），短观察 3s 仍 IDLE 即视为"通话已结束"，
+        // 立即返回 true，避免无通话时死等 timeoutMs（600s）导致假"已接听 600s"（BUG-2）。
+        var startState = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) tm.callState else tm.getCallState()
+        }.getOrDefault(TelephonyManager.CALL_STATE_IDLE)
+        if (startState == TelephonyManager.CALL_STATE_IDLE) {
+            val latchEnd = System.currentTimeMillis() + 3000
+            while (System.currentTimeMillis() < latchEnd) {
+                val s = runCatching {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) tm.callState else tm.getCallState()
+                }.getOrDefault(TelephonyManager.CALL_STATE_IDLE)
+                if (s != TelephonyManager.CALL_STATE_IDLE) break // 又进入通话，走主循环
+                delay(1000)
+            }
+            val after = runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) tm.callState else tm.getCallState()
+            }.getOrDefault(TelephonyManager.CALL_STATE_IDLE)
+            if (after == TelephonyManager.CALL_STATE_IDLE) {
+                return true // 3s 仍 IDLE → 无通话可等，视为已结束
+            }
+        }
+
         while (System.currentTimeMillis() < deadline) {
             val state = runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) tm.callState else tm.getCallState()

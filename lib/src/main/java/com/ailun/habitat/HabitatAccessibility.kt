@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 无障碍手势派发工具，使用标准 Android [AccessibilityService] API。
@@ -38,10 +39,15 @@ object HabitatAccessibility {
         gesture: GestureDescription,
     ): Boolean {
         val deferred = CompletableDeferred<Boolean>()
-        service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+        val dispatched = service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
             override fun onCompleted(gesture: GestureDescription?) { deferred.complete(true) }
             override fun onCancelled(gesture: GestureDescription?) { deferred.complete(false) }
         }, null)
-        return deferred.await()
+        if (!dispatched) {
+            // 手势未派发（服务未就绪/队列忙/屏幕灭）→ 立即返回 false，避免 deferred 永挂
+            return false
+        }
+        // 超时兜底：正常派发但回调可能丢失（如屏幕瞬间变化）→ 5s 无回调也返回 false
+        return withTimeoutOrNull(5000) { deferred.await() } ?: false
     }
 }
