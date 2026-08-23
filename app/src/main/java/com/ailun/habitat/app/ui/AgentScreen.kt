@@ -141,11 +141,30 @@ fun AgentScreen() {
                     }) { Text("保存并重启") }
                 }
                 Text(
-                    "说明：启动服务后，局域网内任意 AI 客户端（MCP 或自定义 WS 协议）可调用 80 个节点操作手机。" +
-                        "当前无鉴权，请仅在可信网络使用。",
+                    "说明：启动服务后，局域网内 AI 客户端（MCP/WS）需带正确 token 连接（见下列访问令牌）才能调用 80 个节点操作手机。默认令牌 habitat-dev-token，请在生产环境修改。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            var tokenInput by remember { mutableStateOf(AgentService.getToken(context)) }
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("访问令牌（连接需 ?token=）", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = tokenInput,
+                        onValueChange = { tokenInput = it },
+                        label = { Text("token") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        AgentService.setToken(context, tokenInput)
+                        lastError = "令牌已更新（重启服务后生效）"
+                    }) { Text("保存") }
+                }
             }
         }
 

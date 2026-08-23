@@ -11,9 +11,10 @@ import http from 'node:http';
 
 const HOST = process.env.AGENT_HOST || '192.168.0.103';
 const PORT = process.env.AGENT_PORT || '8931';
+const TOKEN = process.env.AGENT_TOKEN || 'habitat-dev-token';
 const LOCAL_PORT = parseInt(process.env.LOCAL_PORT || '18080', 10);
 
-const ws = new WebSocket(`ws://${HOST}:${PORT}/mcp`);
+const ws = new WebSocket(`ws://${HOST}:${PORT}/mcp?token=${encodeURIComponent(TOKEN)}`);
 let nextId = 1;
 const pending = new Map();
 let initialized = false;

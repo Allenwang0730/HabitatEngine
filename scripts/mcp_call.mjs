@@ -11,7 +11,8 @@ const toolArgs = listOnly ? null : (args[1] ? JSON.parse(args[1]) : {});
 
 const HOST = process.env.AGENT_HOST || '192.168.0.103';
 const PORT = process.env.AGENT_PORT || '8931';
-const ws = new WebSocket(`ws://${HOST}:${PORT}/mcp`);
+const TOKEN = process.env.AGENT_TOKEN || 'habitat-dev-token';
+const ws = new WebSocket(`ws://${HOST}:${PORT}/mcp?token=${encodeURIComponent(TOKEN)}`);
 
 let nextId = 1;
 const pending = new Map();

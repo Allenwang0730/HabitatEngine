@@ -58,6 +58,15 @@ class AgentService : Service() {
             context.getSharedPreferences(PREFS, 0).edit().putInt("port", port.coerceIn(1024, 65535)).apply()
         }
 
+        /** 访问令牌（默认一个，可在控制页修改）。连接需带 ?token=xxx。 */
+        const val DEFAULT_TOKEN = "habitat-dev-token"
+        fun getToken(context: android.content.Context): String =
+            context.getSharedPreferences(PREFS, 0).getString("token", null) ?: DEFAULT_TOKEN
+
+        fun setToken(context: android.content.Context, token: String) {
+            context.getSharedPreferences(PREFS, 0).edit().putString("token", token.ifBlank { DEFAULT_TOKEN }).apply()
+        }
+
         /** 模块 → 节点类型（用于 /tools 分组展示）。 */
         val ALL_NODE_TYPES_BY_MODULE: Map<NodeModule, Set<String>> = run {
             val map = mutableMapOf<NodeModule, MutableSet<String>>()
@@ -98,7 +107,13 @@ class AgentService : Service() {
                 get("/tools") {
                     call.respondText(buildToolsJson(factory), ContentType.Application.Json)
                 }
+                // 鉴权：连接需带 ?token=（/ws 和 /mcp 都校验），不匹配则拒绝连接
                 webSocket("/ws") {
+                    if (!authorized(call)) {
+                        Log.w(TAG, "WS denied: bad token")
+                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "unauthorized"))
+                        return@webSocket
+                    }
                     Log.i(TAG, "WS connected")
                     for (frame in incoming) {
                         if (frame is Frame.Text) {
@@ -111,6 +126,11 @@ class AgentService : Service() {
                 }
                 // MCP（Model Context Protocol）端点：JSON-RPC 2.0 over WebSocket
                 webSocket("/mcp") {
+                    if (!authorized(call)) {
+                        Log.w(TAG, "MCP denied: bad token")
+                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "unauthorized"))
+                        return@webSocket
+                    }
                     Log.i(TAG, "MCP client connected")
                     for (frame in incoming) {
                         if (frame is Frame.Text) {
@@ -286,6 +306,12 @@ class AgentService : Service() {
             addProperty("message", message)
         })
     }.toString()
+
+    /** 鉴权：连接 URL 带 ?token=等于配置令牌。 */
+    private fun authorized(call: io.ktor.server.application.ApplicationCall): Boolean {
+        val given = call.request.queryParameters["token"]
+        return given != null && given == getToken(this@AgentService)
+    }
 
     /** 屏幕快照（AI 的"眼睛"）：返回屏幕状态 + 所有窗口文本（无障碍树，替代截图省 token）。 */
     private fun screenSnapshot(): Map<String, Any> {
