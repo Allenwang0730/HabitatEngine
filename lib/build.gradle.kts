@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    `maven-publish`
 }
 
 android {
@@ -13,6 +14,20 @@ android {
     }
     kotlin {
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11) }
+    }
+}
+
+// 独立发布：./gradlew :lib:publishReleasePublicationToMavenLocal → mavenLocal 出一个 habitat-engine AAR
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                groupId = "com.ailun"
+                artifactId = "habitat-engine"
+                version = "1.6.0"
+            }
+        }
     }
 }
 

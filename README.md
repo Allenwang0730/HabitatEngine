@@ -9,7 +9,8 @@
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-purple)]()
 [![Min SDK](https://img.shields.io/badge/API-29+-green)]()
-[![Nodes](https://img.shields.io/badge/Nodes-47-blue)]()
+[![Nodes](https://img.shields.io/badge/Nodes-84-blue)]()
+[![MCP](https://img.shields.io/badge/MCP-LM_accessible-green)]()
 [![Compose](https://img.shields.io/badge/UI-Compose_M3-orange)]()
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue)]()
 
@@ -76,7 +77,9 @@ automation drive the device.
 
 ---
 
-## Node Types (47)
+## Node Types (84)
+
+常用节点及参数/前置条件见 `NodeKnowledge`（App 内 AI 提示词数据源，一份即文档）。完整分类见各 NodeModules。
 
 ### Interaction (6)
 | Type | What it does |
@@ -251,6 +254,38 @@ EditorTab (Compose)
 
 ---
 
+## AI 工作流生成（LLM-friendly，核心卖点）
+
+**自然语言 → 工作流 JSON**，由 DeepSeek 生成（提示词从 `NodeKnowledge` 动态生成，含安卓操作指南）：
+
+```kotlin
+WorkflowAIGenerator.generate(context, "拨打10086并开启录音")  // → GeneratedWorkflow(workflowJson, ...)
+```
+
+- **13 个典型场景生成正确率 100%**（含"直接拨号用 CALL_DIRECT 而非 UI 模拟"、"多实例文本用 region"校验）
+- 提示词含：84 节点清单 + 常见包名映射 + 优先规则（直接 API 优先）+ 权限前置 + few-shot
+- 单次生成成本 ≈ 0.02-0.05 元（DeepSeek）
+
+## MCP 移动端 Agent（AI 控制手机）
+
+引擎暴露 **MCP server**（JSON-RPC 2.0，82 个工具）：
+
+```
+ws://<host>:8931/mcp?token=<token>   # token 鉴权（默认 habitat-dev-token，控制页可改同局域网）
+```
+
+- `initialize / tools/list / tools/call` 标准 MCP，任意 LLM 客户端可接入
+- 支持 `region`/`occurrence` 精准定位多实例文本（如点"下半屏的确定"）
+- App 内 **Agent 控制页**：服务开关/状态/局域网 IP/端口/token
+- 电脑侧 `scripts/agent_daemon.mjs`（常驻长连接，读屏 3.9s→277ms）/ `mcp_call.mjs`
+
+## 测试
+
+- 引擎自测：`scripts/run_selftest.ps1`（**68 条回归 = 53 PASS / 0 FAIL / 15 SKIP**，需真机）
+- LLM 生成正确率：`scripts/verify_workflow_gen.ps1`（13 场景）
+
+---
+
 ## Local AI (LiteRT-LM)
 
 Habitat bundles Google LiteRT-LM for on-device LLM inference — no network required.
@@ -295,10 +330,10 @@ Habitat/                          # Root project
 │   └── com/ailun/habitat/app/
 │       ├── ui/                   # ProfileTab, HabitatSettingsActivity
 │       ├── bridge/               # AppAccessibilityProvider, ShizukuShellExecutor
-│       ├── ai/                   # LLMServiceProvider, LiteRtLLMServiceImpl
+│       ├── ai/                   # NodeKnowledge(节点百科), WorkflowAIGenerator(LLM生成), WorkflowAIClient(DeepSeek), LLMServiceProvider, LiteRtLLMServiceImpl
 │       ├── dag/                  # DagView, DagLayoutEngine, DagModel
 │       ├── triggers/             # Notification, SMS, Timer, Clipboard, Key
-│       ├── HabitatDashboard.kt   # Main scaffold + 3-tab navigation
+│       ├── HabitatDashboard.kt   # Main scaffold + 编辑集成到主页卡片 + Agent 控制页入口
 │       ├── FloatWindowUI.kt      # Floating overlay ball + panel
 │       ├── HabitatFloatService.kt
 │       └── HabitatTheme.kt       # Material 3 teal color scheme
@@ -393,4 +428,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 47 node types · embeddable · LLM-generatable · accessibility + system API · `habitat-server` companion backend
+**Habitat** · 84 node types · LLM-friendly · MCP agent · embeddable · accessibility + system API · `habitat-server` companion backend
