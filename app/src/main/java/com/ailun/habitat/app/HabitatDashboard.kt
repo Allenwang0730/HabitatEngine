@@ -59,7 +59,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 // ── Bottom navigation tabs ──
-private enum class Tab(val label: String) { Workflows("工作流"), Editor("编辑器"), Agent("Agent"), Profile("个人主页") }
+private enum class Tab(val label: String) { Workflows("工作流"), Agent("Agent"), Profile("个人主页") }
 
 @Composable
 fun HabitatDashboard(activity: ComponentActivity) {
@@ -69,6 +69,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
         // ── Shared state ──
         var workflows by remember { mutableStateOf<List<HabitatWorkflow>>(emptyList()) }
         var editingBase by remember { mutableStateOf<HabitatWorkflow?>(null) }
+        var showEditor by remember { mutableStateOf(false) } // 工作流主页内嵌编辑器（点卡片"编辑"时显示，不再独立 editor tab）
         var editName by remember { mutableStateOf("") }
         var editDescription by remember { mutableStateOf("") }
         var editJson by remember { mutableStateOf("") }
@@ -205,7 +206,22 @@ fun HabitatDashboard(activity: ComponentActivity) {
         ) { innerPadding ->
             Box(modifier = Modifier.padding(innerPadding)) {
                 when (selectedTab) {
-                    Tab.Workflows -> WorkflowsTab(
+                    Tab.Workflows -> if (showEditor) {
+                        EditorTab(
+                            name = editName, description = editDescription, jsonBody = editJson, logs = editLogs,
+                            onNameChange = { editName = it }, onDescriptionChange = { editDescription = it },
+                            onJsonChange = { editJson = it },
+                            onBack = { showEditor = false },
+                            onSave = {
+                                val base = editingBase ?: return@EditorTab
+                                val saved = base.copy(name = editName.trim().ifEmpty { base.name }, description = editDescription.trim(), jsonContent = editJson)
+                                WorkflowRepository.upsert(activity, saved); editingBase = saved; reloadLibrary()
+                            },
+                            onTestRun = {
+                                runGraphJson(editJson, editLogs, null)
+                            },
+                        )
+                    } else WorkflowsTab(
                         workflows = workflows,
                         libraryLogs = libraryLogs,
                         mountedIds = mountedIds.value,
@@ -217,7 +233,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
                         onToggleMount = ::toggleMountWorkflow,
                         onEditWorkflow = { wf ->
                             editingBase = wf; editName = wf.name; editDescription = wf.description
-                            editJson = wf.jsonContent; editLogs.clear(); selectedTab = Tab.Editor
+                            editJson = wf.jsonContent; editLogs.clear(); showEditor = true
                         },
                         onNewWorkflow = {
                             editingBase = HabitatWorkflow(
@@ -225,7 +241,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
                                 jsonContent = HabitatSamples.MVP_THREE_NODE.trimIndent()
                             )
                             editName = editingBase!!.name; editDescription = editingBase!!.description
-                            editJson = editingBase!!.jsonContent; editLogs.clear(); selectedTab = Tab.Editor
+                            editJson = editingBase!!.jsonContent; editLogs.clear(); showEditor = true
                         },
                         onDeleteWorkflow = { wf ->
                             TriggerManager.setWorkflowEnabled(activity.applicationContext, wf.id, false)
@@ -236,21 +252,6 @@ fun HabitatDashboard(activity: ComponentActivity) {
                             if (on) ensureFloatServiceForMount() else turnOffFloatService()
                         },
                         isFloatServiceRunning = floatServiceRunning,
-                    )
-
-                    Tab.Editor -> EditorTab(
-                        name = editName, description = editDescription, jsonBody = editJson, logs = editLogs,
-                        onNameChange = { editName = it }, onDescriptionChange = { editDescription = it },
-                        onJsonChange = { editJson = it },
-                        onBack = { selectedTab = Tab.Workflows },
-                        onSave = {
-                            val base = editingBase ?: return@EditorTab
-                            val saved = base.copy(name = editName.trim().ifEmpty { base.name }, description = editDescription.trim(), jsonContent = editJson)
-                            WorkflowRepository.upsert(activity, saved); editingBase = saved; reloadLibrary()
-                        },
-                        onTestRun = {
-                            runGraphJson(editJson, editLogs, null)
-                        },
                     )
 
                     Tab.Agent -> com.ailun.habitat.app.ui.AgentScreen()
@@ -298,17 +299,6 @@ private fun HabitatBottomBar(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
                 )
             },
             label = { Text("工作流") }
-        )
-        NavigationBarItem(
-            selected = selectedTab == Tab.Editor,
-            onClick = { onTabSelected(Tab.Editor) },
-            icon = {
-                Icon(
-                    if (selectedTab == Tab.Editor) Icons.Filled.Edit else Icons.Outlined.Edit,
-                    contentDescription = null
-                )
-            },
-            label = { Text("编辑器") }
         )
         NavigationBarItem(
             selected = selectedTab == Tab.Profile,
