@@ -260,7 +260,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
                         var showWorkflowAI by remember { mutableStateOf(false) }
                         when {
                             showLLM -> HabitatLLMConsoleContent(activity = activity, onBack = { showLLM = false })
-                            showWorkflowAI -> com.ailun.habitat.app.ui.AIWorkflowScreen()
+                            showWorkflowAI -> com.ailun.habitat.app.ui.AIWorkflowScreen(onBack = { showWorkflowAI = false })
                             else -> ProfileTab(
                                 isFloatServiceRunning = floatServiceRunning,
                                 onFloatServiceToggle = { on ->

@@ -25,13 +25,26 @@ object WorkflowAIGenerator {
      * 生成工作流。
      * @param request 用户最新需求
      * @param baseWorkflow 已有工作流 JSON（用于"在现有基础上修改"的多轮对话），可为 null
+     * @param history 最近几轮对话（用户需求 → 生成结果描述），用于会话记忆，可为 null
      */
-    suspend fun generate(context: Context, request: String, baseWorkflow: String? = null): Result<GeneratedWorkflow> {
+    suspend fun generate(
+        context: Context,
+        request: String,
+        baseWorkflow: String? = null,
+        history: List<Pair<String, String>>? = null,
+    ): Result<GeneratedWorkflow> {
         val apiKey = WorkflowAIClient.getApiKey(context)
         val baseUrl = WorkflowAIClient.getBaseUrl(context)
         val systemPrompt = buildSystemPrompt()
 
         val userPrompt = buildString {
+            if (history != null && history.isNotEmpty()) {
+                append("【之前的对话】（用于会话记忆，保持连贯）\n")
+                history.takeLast(3).forEach { (u, a) ->
+                    append("用户: $u\n助手: $a\n")
+                }
+                append("\n")
+            }
             if (baseWorkflow != null) {
                 append("这是现有的 Habitat 工作流：\n$baseWorkflow\n\n")
                 append("请根据新的需求【修改】这个工作流，输出修改后的完整工作流 JSON（不要省略任何节点）。\n")

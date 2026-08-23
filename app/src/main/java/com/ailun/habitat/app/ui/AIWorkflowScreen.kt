@@ -13,9 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -56,16 +60,22 @@ class AIWorkflowViewModel(app: Application) : AndroidViewModel(app) {
     /** 最近一次成功生成的工作流（多轮对话时作为"在现有基础上修改"的基线）。 */
     private var lastGenerated: GeneratedWorkflow? = null
 
+    /** 会话记忆：记录 (用户需求 → 生成结果描述)，供下一轮生成连贯上下文。 */
+    private val history = mutableListOf<Pair<String, String>>()
+
     fun send(request: String) {
         val req = request.trim()
         if (req.isEmpty() || busy.value) return
         messages.add(ChatMsg(isUser = true, text = req))
         busy.value = true
         viewModelScope.launch {
-            val result = WorkflowAIGenerator.generate(getApplication(), req, lastGenerated?.workflowJson)
+            val result = WorkflowAIGenerator.generate(
+                getApplication(), req, lastGenerated?.workflowJson, history,
+            )
             busy.value = false
             result.onSuccess { gen ->
                 lastGenerated = gen
+                history.add(req to gen.description)
                 messages.add(ChatMsg(isUser = false, text = "", generated = gen))
             }.onFailure {
                 messages.add(ChatMsg(isUser = false, text = "❌ 生成失败：${it.message}"))
@@ -117,15 +127,18 @@ class AIWorkflowViewModel(app: Application) : AndroidViewModel(app) {
 }
 
 @Composable
-fun AIWorkflowScreen() {
+fun AIWorkflowScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val vm = remember { AIWorkflowViewModel(context.applicationContext as Application) }
     var input by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("AI 工作流生成", style = MaterialTheme.typography.headlineSmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
+            Text("AI 工作流生成", style = MaterialTheme.typography.headlineSmall)
+        }
         Text(
-            "用自然语言描述需求，AI（DeepSeek）自动生成 Habitat 工作流并可保存到库。",
+            "用自然语言描述需求，AI（DeepSeek）自动生成 Habitat 工作流并可保存到库。支持多轮对话记忆、编辑后保存、挂载悬浮窗。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
