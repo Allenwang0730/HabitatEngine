@@ -144,10 +144,10 @@ object WorkflowAIGenerator {
 - ACTION_PARSE_JSON: json, path(如 data.items[0]), output_var —— 解析 JSON
 - ACTION_HTTP_REQUEST: url, method=GET/POST, output_var, timeout —— HTTP 请求
 - ACTION_LAUNCH_APP: package_name —— 打开应用（com.android.settings 设置 / com.tencent.mm 微信 / com.tencent.mobileqq QQ / com.android.dialer 拨号）
-- ACTION_CLICK: target（"x,y"坐标 或 界面文字）—— 点击
+- ACTION_CLICK: target（"x,y"坐标 或 界面文字）, region=top/bottom/left/right/center 或归一化"x1,y1,x2,y2"（限定屏幕区域）, occurrence（第 N 个匹配,0 起）—— 点击
 - ACTION_INPUT_TEXT: text, mode=a11y —— 输入文字
 - ACTION_READ_SCREEN: keyword, output_var —— 读屏幕(变量 screen_data=是否找到)
-- ACTION_FIND_ELEMENT: selector, search_mode=text, timeout_ms, output_var —— 找元素(变量 element_found)
+- ACTION_FIND_ELEMENT: selector, search_mode=text, region（可选,限定区域）, timeout_ms, output_var —— 找元素(变量 element_found)
 - ACTION_GLOBAL_KEY: key=back/home/recents —— 全局按键
 - ACTION_SHELL: command, mode=auto —— shell 命令
 - ACTION_GET_BATTERY: output_var —— 电量(battery_level)
@@ -167,6 +167,12 @@ object WorkflowAIGenerator {
 【优先规则】
 - 能用"直接 API"节点就不用 UI 点击模拟。例如拨号用 ACTION_CALL_DIRECT，不要用 LAUNCH_APP+CLICK+INPUT_TEXT 一条龙点 UI。
 - 打开应用、发通知、截图、设备信息等都有直接节点；UI 点击（CLICK/SWIPE/INPUT_TEXT）只在没有专门节点（如填表单、点特殊按钮）时才用。
+
+【安卓操作指南】
+- 常见包名：设置 com.android.settings / 微信 com.tencent.mm / QQ com.tencent.mobileqq / 拨号 com.android.dialer / 相机 com.android.camera / 计算器 com.android.calculator2
+- UI 文本匹配：同一文本可能多处出现（如多处"确定"/"发送"/"联系"）。用 region 限定区域（"bottom"=下半屏 / "top"=上半屏 / 归一化"0,0.5,1,1"=下半屏）或 occurrence 取第 N 个（屏幕从上到下，0 起），避免点错。
+- 权限前置：READ_SCREEN / FIND_ELEMENT / CLICK / INPUT_TEXT / GLOBAL_KEY 需无障碍服务；CALL_DIRECT 需 CALL_PHONE；截图需截图权限；录音/相机需对应权限；shell 命令需 Shizuku/root（无则 Runtime.exec 兜底，部分命令可能失败）。
+- 网络节点（HTTP_REQUEST / GET_WEATHER / GEOCODE）需网络；对不稳定的第三方服务（如 Nominatim 地理编码）设合理 timeout 并用 on_error=skip 容错。
 
 【示例1】需求"启动应用并显示提示"
 {"name":"启动设置","description":"打开系统设置后弹提示","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_LAUNCH_APP","params":{"package_name":"com.android.settings"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":1500},"next":"s3"},"s3":{"id":"s3","type":"ACTION_TOAST","params":{"message":"已打开设置"}}}}}}
