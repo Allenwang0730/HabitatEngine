@@ -10,7 +10,7 @@ param(
     [string]$Adb = "C:\Users\wang\AppData\Local\Android\Sdk\platform-tools\adb.exe",
     [string]$Package = "com.ailun.habitat",
     [string]$Repo = "C:\Users\wang\Habitat",
-    [string]$Apk = "$Repo\app\build\outputs\apk\debug\app-debug.apk",
+    [string]$Apk = "$Repo\app\build\outputs\apk\debug\app-arm64-v8a-debug.apk",
     [switch]$Build,
     [switch]$SkipInstall,
     [string]$Only = "",

@@ -138,7 +138,22 @@ object NodeSelfTestRunner {
                 )
             }
 
-            val pass = runCatching { case.verify(ctx.variables) }.getOrDefault(false)
+            // verify 抛异常要记进 error（诊断可见），且不吞 CancellationException
+            val pass = try {
+                case.verify(ctx.variables)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "${case.name}: verify failed: ${e.message}")
+                return SelfTestResult(
+                    name = case.name,
+                    pass = false,
+                    detail = case.description.ifEmpty { "断言未通过" },
+                    durationMs = duration,
+                    error = e.message ?: e.javaClass.simpleName,
+                    logs = logs.takeLast(50),
+                )
+            }
             val detail = if (pass) case.description.ifEmpty { "OK" } else case.description.ifEmpty { "断言未通过" }
             return SelfTestResult(
                 name = case.name,
