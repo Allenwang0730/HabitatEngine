@@ -107,82 +107,25 @@ object WorkflowAIGenerator {
         return null
     }
 
-    /** 系统提示词：角色 + 工作流格式 + 节点白名单 + few-shot。 */
-    private fun buildSystemPrompt(): String = """
-你是 Habitat 安卓自动化引擎的工作流生成器。根据用户需求，生成一个 Habitat 工作流 JSON。
-
-【工作流格式】
-{
-  "name": "工作流名称（简短中文）",
-  "description": "一句话说明这个工作流做什么",
-  "workflow": {
-    "start_node_id": "起始节点id",
-    "nodes": {
-      "节点id": {"id":"节点id","type":"节点类型","params":{...},"next":"下一节点id"},
-      ...
+    /** 系统提示词：从 NodeKnowledge（节点百科）动态生成——加新节点只改 NodeKnowledge 一处。 */
+    private fun buildSystemPrompt(): String {
+        val sb = StringBuilder()
+        sb.append("你是 Habitat 安卓自动化引擎的工作流生成器。根据用户需求，生成一个 Habitat 工作流 JSON。\n\n")
+        sb.append("【工作流格式】\n")
+        sb.append("{\"name\":\"名称\",\"description\":\"说明\",\"workflow\":{\"start_node_id\":\"起始id\",\"nodes\":{\"节点id\":{\"id\":\"节点id\",\"type\":\"节点类型\",\"params\":{...},\"next\":\"下一id\"},...}}}\n")
+        sb.append("规则：start_node_id 必须指向已存在节点；节点有 id/type；params 可选；next 可选；变量用 \${变量名} 引用；节点 id 唯一；只输出这一个 JSON 对象。可选顶层 trigger（notification|timer|clipboard|sms|key）。\n\n")
+        sb.append("【可用节点类型与参数】（只用这些 type；优先用直接 API 节点，避免 UI 点击模拟）\n")
+        NodeKnowledge.nodes.forEach { n ->
+            val beforePart = if (n.before.isNotBlank()) "（${n.before}）" else ""
+            sb.append("- ${n.type}: ${n.params} —— ${n.usage}${beforePart}\n")
+        }
+        sb.append("\n【安卓操作指南】\n")
+        val pkgStr = NodeKnowledge.packageHints.entries.joinToString(" / ") { "${it.key}=${it.value}" }
+        sb.append("- 常见包名：$pkgStr\n")
+        NodeKnowledge.rules.forEach { r -> sb.append("- $r\n") }
+        sb.append("\n【示例】\n")
+        NodeKnowledge.examples.forEachIndexed { i, e -> sb.append("示例${i + 1}：$e\n") }
+        sb.append("\n只输出 JSON 对象。\n")
+        return sb.toString()
     }
-  }
-}
-规则：
-- start_node_id 必须指向一个已存在的节点
-- 节点必须有 id/type；params 可选；next 可选（最后一个节点可省略 next）
-- 变量用 ${'$'}{变量名} 引用（跨节点传值）
-- 每个节点 id 唯一，用 s1/s2/s3... 或语义化命名
-- 可选加顶层 "trigger"（自动触发）：{"trigger":{"type":"notification|timer|clipboard|sms|key",...}}，触发器相关变量 ${'$'}{trigger_package}/${'$'}{trigger_text}/${'$'}{trigger_title}
-- 只输出上面这一个 JSON 对象，不要多余文字
-
-【可用节点类型与参数】（只用这些 type；优先用"直接 API"节点，避免 UI 点击模拟）
-- ACTION_SET_VARIABLE: name, value, type=string/int/bool —— 设变量
-- ACTION_LOG: message（支持 ${'$'}{var}）—— 记录日志
-- ACTION_DELAY: millis —— 延时
-- CONDITION_SWITCH: expression(如 "screen_data == true"), branches={"true":id,"false":id} —— 条件分支
-- ACTION_TOAST: message —— 弹提示
-- ACTION_GET_TIME: format, output_var —— 取时间
-- ACTION_MATH: operation=add/subtract/multiply/divide, a, b, output_var —— 数学
-- ACTION_TEXT_OPERATION: action=uppercase/lowercase/trim/replace, input, output_var —— 文本处理
-- ACTION_CLIPBOARD: action=get/set, text, output_var —— 剪贴板
-- ACTION_PARSE_JSON: json, path(如 data.items[0]), output_var —— 解析 JSON
-- ACTION_HTTP_REQUEST: url, method=GET/POST, output_var, timeout —— HTTP 请求
-- ACTION_LAUNCH_APP: package_name —— 打开应用（com.android.settings 设置 / com.tencent.mm 微信 / com.tencent.mobileqq QQ / com.android.dialer 拨号）
-- ACTION_CLICK: target（"x,y"坐标 或 界面文字）, region=top/bottom/left/right/center 或归一化"x1,y1,x2,y2"（限定屏幕区域）, occurrence（第 N 个匹配,0 起）—— 点击
-- ACTION_INPUT_TEXT: text, mode=a11y —— 输入文字
-- ACTION_READ_SCREEN: keyword, output_var —— 读屏幕(变量 screen_data=是否找到)
-- ACTION_FIND_ELEMENT: selector, search_mode=text, region（可选,限定区域）, timeout_ms, output_var —— 找元素(变量 element_found)
-- ACTION_GLOBAL_KEY: key=back/home/recents —— 全局按键
-- ACTION_SHELL: command, mode=auto —— shell 命令
-- ACTION_GET_BATTERY: output_var —— 电量(battery_level)
-- ACTION_NETWORK_STATUS: action=all —— 网络(network_type)
-- ACTION_GET_DEVICE_INFO: —— 设备信息
-- ACTION_SCREENSHOT: format=base64, output_var —— 截图
-- ACTION_VIBRATE: duration —— 振动
-- ACTION_TEXT_TO_SPEECH: text, language —— 语音
-- ACTION_FILE_OPERATION: action=read/write/exists, path, content, output_var —— 文件
-- ACTION_AI_CHAT: prompt, output_var —— 本地 AI 对话
-- ACTION_CALL_DIRECT: phone_number, sim —— 直接拨号（无需 UI 模拟，最优先）
-- ACTION_CALL_PHONE: phone_number —— 拨打（走 Intent）
-- ACTION_SEND_NOTIFICATION: title, message, channel_id —— 发通知
-- ACTION_SWIPE: x1,y1,x2,y2,duration_ms —— 滑动
-- ACTION_MEDIA_CONTROL: cmd=play/pause/next —— 媒体控制
-
-【优先规则】
-- 能用"直接 API"节点就不用 UI 点击模拟。例如拨号用 ACTION_CALL_DIRECT，不要用 LAUNCH_APP+CLICK+INPUT_TEXT 一条龙点 UI。
-- 打开应用、发通知、截图、设备信息等都有直接节点；UI 点击（CLICK/SWIPE/INPUT_TEXT）只在没有专门节点（如填表单、点特殊按钮）时才用。
-
-【安卓操作指南】
-- 常见包名：设置 com.android.settings / 微信 com.tencent.mm / QQ com.tencent.mobileqq / 拨号 com.android.dialer / 相机 com.android.camera / 计算器 com.android.calculator2
-- UI 文本匹配：同一文本可能多处出现（如多处"确定"/"发送"/"联系"）。用 region 限定区域（"bottom"=下半屏 / "top"=上半屏 / 归一化"0,0.5,1,1"=下半屏）或 occurrence 取第 N 个（屏幕从上到下，0 起），避免点错。
-- 权限前置：READ_SCREEN / FIND_ELEMENT / CLICK / INPUT_TEXT / GLOBAL_KEY 需无障碍服务；CALL_DIRECT 需 CALL_PHONE；截图需截图权限；录音/相机需对应权限；shell 命令需 Shizuku/root（无则 Runtime.exec 兜底，部分命令可能失败）。
-- 网络节点（HTTP_REQUEST / GET_WEATHER / GEOCODE）需网络；对不稳定的第三方服务（如 Nominatim 地理编码）设合理 timeout 并用 on_error=skip 容错。
-
-【示例1】需求"启动应用并显示提示"
-{"name":"启动设置","description":"打开系统设置后弹提示","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_LAUNCH_APP","params":{"package_name":"com.android.settings"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":1500},"next":"s3"},"s3":{"id":"s3","type":"ACTION_TOAST","params":{"message":"已打开设置"}}}}}}
-
-【示例2】需求"读取网络状态，连上则提示"
-{"name":"网络检查","description":"读取网络类型，WiFi 则 Toast 提示","workflow":{"start_node_id":"n1","nodes":{"n1":{"id":"n1","type":"ACTION_NETWORK_STATUS","params":{"action":"all"},"next":"n2"},"n2":{"id":"n2","type":"CONDITION_SWITCH","params":{"expression":"network_type == wifi"},"branches":{"true":"n3","false":"n4"}},"n3":{"id":"n3","type":"ACTION_TOAST","params":{"message":"当前是 WiFi"}},"n4":{"id":"n4","type":"ACTION_TOAST","params":{"message":"当前不是 WiFi"}}}}}}
-
-【示例3】需求"拨打10086并开启录音"
-{"name":"拨号录音","description":"直接拨10086","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CALL_DIRECT","params":{"phone_number":"10086"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_TOAST","params":{"message":"已拨打10086"}}}}}}
-
-只输出 JSON 对象。
-""".trimIndent()
 }
