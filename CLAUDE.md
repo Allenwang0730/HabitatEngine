@@ -2,9 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 🔒 敏感信息铁律（反例：DeepSeek API key 硬编码导致泄露事故，已重写 git 历史清除）
-
-**绝不把任何密钥/token/机密硬编码进代码或提交到 git。** 这是本项目的硬性红线。
+## 🔒 敏感信息铁律（反例：DeepSeek API key 硬编码导致泄露事故，已重写 git 历史清除）**绝不把任何密钥/token/机密硬编码进代码或提交到 git。** 这是本项目的硬性红线。
 
 - **API key / token / password / secret** —— 一律：
   - 通过**环境变量**（如 `DEEPSEEK_API_KEY`）或在 App 内**运行时配置**（SharedPreferences/设置界面）注入，**不落代码**。
@@ -13,6 +11,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **提交前**：`git commit` 会触发 `scripts/scan_secrets.sh`（pre-commit hook），命中 `sk-...`/`BEGIN PRIVATE KEY`/`AKIA...`/`ghp_...` 等疑似密钥会**拒绝提交**。提交前可手动跑 `sh scripts/scan_secrets.sh` 自查。
 - **若发现密钥已提交/推送到远程**：立即用 `git filter-repo --replace-text` 清除**全部历史**并**强推覆盖远程**；同时**在服务方（如 DeepSeek 后台）作废该密钥**（git 清除不能使已泄露的 key 失效）。
 - 违反红线会重演"DeepSeek key 泄露 + 重写 52 个提交历史"的事故，**不可再犯**。
+
+## ⚙️ 权限声明铁律（反例：CALL_PHONE 漏声明导致直拨不可用，排查多轮）
+
+**任何 handler/节点用到的运行时权限，必须在 app `AndroidManifest.xml` 里 `<uses-permission>` 声明**，否则系统不认为 App 有该权限 → 运行时授权框不出现、`pm grant` 无效、功能**静默失败**。
+
+- 反例：`ACTION_CALL_DIRECT` 直拨需 `CALL_PHONE`，但 Habitit manifest 漏声明 → 系统给不了权限 → 直拨必败（而 SmartCS 声明了就能拨）。用户看到的"电话权限开"其实是 `READ_PHONE_STATE`（读状态），不是 `CALL_PHONE`（拨号）——**两个不同权限**。
+- **新增/改动节点时**：检查 handler 用到的权限是否已在 manifest 声明（CALL_PHONE / READ_CALL_LOG / SEND_SMS / RECORD_AUDIO / CAMERA / 定位 / 通知 等）。
+- **验证**：真机装后 `adb shell dumpsys package <pkg> | grep '<PERM>: granted'` 确认可授予；`pm grant`（debug 构建）可强制授予。
+- 危险权限（CALL_PHONE/READ_PHONE_STATE/CAMERA/RECORD_AUDIO/定位/READ_SMS 等）需运行时授权（弹框/设置页手授权）。
 
 ## Build commands
 
