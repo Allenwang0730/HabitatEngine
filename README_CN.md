@@ -56,7 +56,43 @@ HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
 
 ## 节点类型速览 (84)
 
-常用节点及参数/前置条件见 `NodeKnowledge`（App 内 AI 提示词数据源，一份即文档）。
+引擎共有 84 种节点，分多类。常用/核心节点如下（与 `README.md` 英文版为同一清单，`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源）：
+
+| 类型 | 参数 | 用途 | 前置条件 |
+|------|------|------|----------|
+| ACTION_SET_VARIABLE | name, value, type | 设变量 | |
+| ACTION_LOG | message | 记录日志 | |
+| ACTION_DELAY | millis | 延时 | |
+| CONDITION_SWITCH | expression, branches | 条件分支 | |
+| ACTION_TOAST | message | 弹提示 | |
+| ACTION_GET_TIME | format, output_var | 取时间 | |
+| ACTION_MATH | operation, a, b, output_var | 数学 | |
+| ACTION_TEXT_OPERATION | action, input, output_var | 文本处理 | |
+| ACTION_CLIPBOARD | action, text, output_var | 剪贴板 | |
+| ACTION_PARSE_JSON | json, path, output_var | 解析 JSON | |
+| ACTION_HTTP_REQUEST | url, method, output_var, timeout | HTTP 请求 | 需网络 |
+| ACTION_LAUNCH_APP | package_name | 打开应用 | |
+| ACTION_CLICK | target, region, occurrence | 点击 | 需无障碍 |
+| ACTION_INPUT_TEXT | text, mode | 输入文字 | 需无障碍 |
+| ACTION_READ_SCREEN | keyword, output_var | 读屏幕 | 需无障碍 |
+| ACTION_FIND_ELEMENT | selector, search_mode, region, timeout_ms, output_var | 找元素 | 需无障碍 |
+| ACTION_GLOBAL_KEY | key | 全局按键 | 需无障碍 |
+| ACTION_SHELL | command, mode | shell 命令 | 需 Shizuku/root |
+| ACTION_GET_BATTERY | output_var | 电量 | |
+| ACTION_NETWORK_STATUS | action | 网络 | |
+| ACTION_GET_DEVICE_INFO | | 设备信息 | |
+| ACTION_SCREENSHOT | format, output_var | 截图 | 需截图权限 |
+| ACTION_VIBRATE | duration | 振动 | |
+| ACTION_TEXT_TO_SPEECH | text, language | 语音 | |
+| ACTION_FILE_OPERATION | action, path, content, output_var | 文件 | |
+| ACTION_AI_CHAT | prompt, output_var | 本地 AI 对话 | |
+| ACTION_CALL_DIRECT | phone_number, sim | 直接拨号 | 需 CALL_PHONE |
+| ACTION_CALL_PHONE | phone_number | 拨打 | 需 CALL_PHONE |
+| ACTION_SEND_NOTIFICATION | title, message, channel_id | 发通知 | |
+| ACTION_SWIPE | x1,y1,x2,y2,duration_ms | 滑动 | 需无障碍 |
+| ACTION_MEDIA_CONTROL | cmd | 媒体控制 | |
+
+完整分类见各 `NodeModules`；`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源。
 
 ---
 

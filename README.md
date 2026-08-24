@@ -79,7 +79,43 @@ automation drive the device.
 
 ## Node Types (84)
 
-Common nodes and params are documented in `NodeKnowledge` (the AI prompt data source — doubles as docs). Full categories in each `NodeModules`.
+The engine has 84 node types across categories. Common / core ones below (same list is in `NodeKnowledge`, the single source used for LLM generation — documented once here and in `README_CN.md`):
+
+| Type | Params | Purpose | Requires |
+|------|--------|---------|----------|
+| ACTION_SET_VARIABLE | name, value, type | set variable | |
+| ACTION_LOG | message | log | |
+| ACTION_DELAY | millis | delay | |
+| CONDITION_SWITCH | expression, branches | conditional branch | |
+| ACTION_TOAST | message | toast | |
+| ACTION_GET_TIME | format, output_var | get time | |
+| ACTION_MATH | operation, a, b, output_var | math | |
+| ACTION_TEXT_OPERATION | action, input, output_var | text op | |
+| ACTION_CLIPBOARD | action, text, output_var | clipboard | |
+| ACTION_PARSE_JSON | json, path, output_var | parse JSON | |
+| ACTION_HTTP_REQUEST | url, method, output_var, timeout | HTTP request | needs network |
+| ACTION_LAUNCH_APP | package_name | launch app | |
+| ACTION_CLICK | target, region, occurrence | click | needs a11y |
+| ACTION_INPUT_TEXT | text, mode | input text | needs a11y |
+| ACTION_READ_SCREEN | keyword, output_var | read screen | needs a11y |
+| ACTION_FIND_ELEMENT | selector, search_mode, region, timeout_ms, output_var | find element | needs a11y |
+| ACTION_GLOBAL_KEY | key | global key | needs a11y |
+| ACTION_SHELL | command, mode | shell | needs Shizuku/root |
+| ACTION_GET_BATTERY | output_var | battery | |
+| ACTION_NETWORK_STATUS | action | network | |
+| ACTION_GET_DEVICE_INFO | | device info | |
+| ACTION_SCREENSHOT | format, output_var | screenshot | screenshot perm |
+| ACTION_VIBRATE | duration | vibrate | |
+| ACTION_TEXT_TO_SPEECH | text, language | TTS | |
+| ACTION_FILE_OPERATION | action, path, content, output_var | file | |
+| ACTION_AI_CHAT | prompt, output_var | local AI chat | |
+| ACTION_CALL_DIRECT | phone_number, sim | direct call | CALL_PHONE |
+| ACTION_CALL_PHONE | phone_number | call | CALL_PHONE |
+| ACTION_SEND_NOTIFICATION | title, message, channel_id | notification | |
+| ACTION_SWIPE | x1,y1,x2,y2,duration_ms | swipe | needs a11y |
+| ACTION_MEDIA_CONTROL | cmd | media control | |
+
+Full categories in each `NodeModules`; `NodeKnowledge` is the single source for the AI-generation prompt and the node reference.
 
 ### Interaction (6)
 | Type | What it does |
