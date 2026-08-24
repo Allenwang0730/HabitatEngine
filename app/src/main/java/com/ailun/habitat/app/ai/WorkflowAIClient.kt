@@ -71,19 +71,17 @@ object WorkflowAIClient {
             }
         }
 
-    // key 持久化（SharedPreferences，设置页可改）
+    // key 持久化（SharedPreferences，设置页/界面可改）——不硬编码，避免泄露
     private const val PREFS = "workflow_ai_prefs"
     private const val KEY_API = "deepseek_api_key"
     private const val KEY_BASE = "base_url"
 
-    // 默认 key（用户提供，可在设置页覆盖）
-    const val DEFAULT_API_KEY = "[REMOVED]"
-
-    fun getApiKey(context: Context): String =
-        context.getSharedPreferences(PREFS, 0).getString(KEY_API, null) ?: DEFAULT_API_KEY
+    /** 读取配置的 API key；未配置则返回 null（调用方应引导用户配置，不 fallback 到硬编码）。 */
+    fun getApiKey(context: Context): String? =
+        context.getSharedPreferences(PREFS, 0).getString(KEY_API, null)?.takeIf { it.isNotBlank() }
 
     fun setApiKey(context: Context, key: String) {
-        context.getSharedPreferences(PREFS, 0).edit().putString(KEY_API, key).apply()
+        context.getSharedPreferences(PREFS, 0).edit().putString(KEY_API, key.trim()).apply()
     }
 
     fun getBaseUrl(context: Context): String =

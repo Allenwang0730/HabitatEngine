@@ -34,6 +34,7 @@ object WorkflowAIGenerator {
         history: List<Pair<String, String>>? = null,
     ): Result<GeneratedWorkflow> {
         val apiKey = WorkflowAIClient.getApiKey(context)
+            ?: return Result.failure(IllegalArgumentException("未配置 DeepSeek API Key，请在「AI 生成」页顶部设置"))
         val baseUrl = WorkflowAIClient.getBaseUrl(context)
         val systemPrompt = buildSystemPrompt()
 

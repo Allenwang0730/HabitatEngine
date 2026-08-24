@@ -1,6 +1,9 @@
 # 验证 DeepSeek 生成 Habitat 工作流的正确率（对齐 WorkflowAIGenerator 最新提示词）
-# 用法: .\scripts\verify_workflow_gen.ps1
-param([string]$ApiKey = "[REMOVED]")
+# 用法: $env:DEEPSEEK_API_KEY="..." ; .\scripts\verify_workflow_gen.ps1
+param([string]$ApiKey = "")
+
+if (-not $ApiKey) { $ApiKey = $env:DEEPSEEK_API_KEY }
+if (-not $ApiKey) { Write-Host "请通过 -ApiKey 参数或 DEEPSEEK_API_KEY 环境变量提供 API Key（不硬编码）" -ForegroundColor Red; exit 1 }
 
 $sys = @'
 你是 Habitat 安卓自动化引擎的工作流生成器。根据用户需求，生成一个 Habitat 工作流 JSON。

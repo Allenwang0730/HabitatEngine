@@ -41,6 +41,7 @@ import androidx.lifecycle.viewModelScope
 import com.ailun.habitat.HabitatWorkflow
 import com.ailun.habitat.WorkflowRepository
 import com.ailun.habitat.app.ai.GeneratedWorkflow
+import com.ailun.habitat.app.ai.WorkflowAIClient
 import com.ailun.habitat.app.ai.WorkflowAIGenerator
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -142,6 +143,24 @@ fun AIWorkflowScreen(onBack: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // API Key 配置（不硬编码，用户在此输入保存）
+        var apiKeyInput by remember {
+            mutableStateOf(WorkflowAIClient.getApiKey(context) ?: "")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = apiKeyInput,
+                onValueChange = { apiKeyInput = it },
+                label = { Text("DeepSeek API Key") },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = {
+                WorkflowAIClient.setApiKey(context, apiKeyInput)
+                android.widget.Toast.makeText(context, "已保存 API Key", android.widget.Toast.LENGTH_SHORT).show()
+            }) { Text("保存") }
+        }
         Spacer(Modifier.height(8.dp))
 
         LazyColumn(
