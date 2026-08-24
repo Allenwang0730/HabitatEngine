@@ -1,10 +1,11 @@
 # Habitat — JSON 驱动的 Android 自动化工作流引擎
 
-> 轻量、AI 友好、40+ 节点类型。工作流定义为扁平 JSON——专为 LLM 生成设计，非手工编写。
+> 轻量、AI 友好、84+ 节点类型。工作流定义为扁平 JSON——专为 LLM 生成设计，非手工编写。
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-purple)]()
 [![Min SDK](https://img.shields.io/badge/API-29+-green)]()
-[![Nodes](https://img.shields.io/badge/Nodes-40+-blue)]()
+[![Nodes](https://img.shields.io/badge/Nodes-84-blue)]()
+[![MCP](https://img.shields.io/badge/MCP-LM_accessible-green)]()
 [![Compose](https://img.shields.io/badge/UI-Compose_M3-orange)]()
 
 ---
@@ -53,7 +54,52 @@ HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
 
 ---
 
-## 节点类型速览 (40+)
+## 节点类型速览 (84)
+
+常用节点及参数/前置条件见 `NodeKnowledge`（App 内 AI 提示词数据源，一份即文档）。
+
+---
+
+## AI 工作流生成（核心卖点，LLM-friendly）
+
+**自然语言 → 工作流 JSON**，由 DeepSeek 生成（提示词从 `NodeKnowledge` 动态生成，含安卓操作指南）：
+
+```kotlin
+WorkflowAIGenerator.generate(context, "拨打10086并开启录音")  // → GeneratedWorkflow(workflowJson, ...)
+```
+
+- **13 个典型场景生成正确率 100%**（含"直接拨号用 CALL_DIRECT 而非 UI 模拟"、"多实例文本用 region"校验）
+- 提示词含：84 节点清单 + 常见包名映射 + 优先规则（直接 API 优先）+ 权限前置 + few-shot
+- 单次生成成本 ≈ 0.02-0.05 元（DeepSeek）
+- App 内「AI 生成」独立底栏：多轮对话记忆（history）、编辑后保存、挂载悬浮窗
+
+## MCP 移动端 Agent（AI 控制手机）
+
+引擎暴露 **MCP server**（JSON-RPC 2.0，82 个工具）：
+
+```
+ws://<host>:8931/mcp?token=<token>   # token 鉴权（默认 habitat-dev-token，控制页可改同局域网）
+```
+
+- `initialize / tools/list / tools/call` 标准 MCP，任意 LLM 客户端可接入
+- 支持 `region`/`occurrence` 精准定位多实例文本（如"点下半屏的确定"）
+- App 内 **Agent 控制页**：服务开关/状态/局域网 IP/端口/token
+- 电脑侧 `scripts/agent_daemon.mjs`（常驻长连接，读屏 3.9s→277ms）/ `mcp_call.mjs`
+
+## 测试
+
+- 引擎自测：`scripts/run_selftest.ps1`（**68 条回归 = 53 PASS / 0 FAIL / 15 SKIP**，需真机）
+- LLM 生成正确率：`scripts/verify_workflow_gen.ps1`（13 场景）
+
+## 独立发布（AAR）
+
+`:lib` 已配置 maven-publish：
+```bash
+./gradlew :lib:publishReleasePublicationToMavenLocal   # 出 habitat-engine:1.6.0 AAR
+```
+三方接入见 `docs/ENGINE_USAGE.md`。
+
+---
 
 ### 交互 (6)
 | 类型 | 功能 |
@@ -252,7 +298,7 @@ Habitat/                          # 根项目
 ├── lib/                          # :lib — 引擎（零 Android UI 依赖）
 │   └── com/ailun/habitat/
 │       ├── api/                  # IAccessibilityProvider, IShellExecutor
-│       ├── handlers/             # 40+ INodeHandler 实现
+│       ├── handlers/             # 84 INodeHandler 实现
 │       ├── HabitatExecutor.kt    # 协程式执行循环
 │       ├── HabitatJson.kt        # JSON 解析 + 示例工作流
 │       ├── WorkflowGraph.kt      # 图模型 (start_node_id + nodes)
@@ -355,4 +401,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 40+ 节点类型 · AI 友好的扁平 JSON · `habitat-server` 配套后端
+**Habitat** · 84 节点类型 · AI 工作流生成（LLM-friendly）· MCP Agent · `habitat-server` 配套后端

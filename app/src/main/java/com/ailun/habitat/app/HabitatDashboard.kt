@@ -59,7 +59,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 // ── Bottom navigation tabs ──
-private enum class Tab(val label: String) { Workflows("工作流"), Agent("Agent"), Profile("个人主页") }
+private enum class Tab(val label: String) { Workflows("工作流"), AIGen("AI 生成"), Agent("Agent"), Profile("个人主页") }
 
 @Composable
 fun HabitatDashboard(activity: ComponentActivity) {
@@ -256,12 +256,13 @@ fun HabitatDashboard(activity: ComponentActivity) {
 
                     Tab.Agent -> com.ailun.habitat.app.ui.AgentScreen()
 
+                    // LLM 生成工作流独立一栏（返回键回工作流主页）
+                    Tab.AIGen -> com.ailun.habitat.app.ui.AIWorkflowScreen(onBack = { selectedTab = Tab.Workflows })
+
                     Tab.Profile -> {
                         var showLLM by remember { mutableStateOf(false) }
-                        var showWorkflowAI by remember { mutableStateOf(false) }
                         when {
                             showLLM -> HabitatLLMConsoleContent(activity = activity, onBack = { showLLM = false })
-                            showWorkflowAI -> com.ailun.habitat.app.ui.AIWorkflowScreen(onBack = { showWorkflowAI = false })
                             else -> ProfileTab(
                                 isFloatServiceRunning = floatServiceRunning,
                                 onFloatServiceToggle = { on ->
@@ -271,7 +272,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
                                 onNavigateToPermissions = {
                                     activity.startActivity(Intent(activity, com.ailun.habitat.app.ui.HabitatSettingsActivity::class.java))
                                 },
-                                onNavigateToWorkflowAI = { showWorkflowAI = true },
+                                onNavigateToWorkflowAI = { selectedTab = Tab.AIGen },
                             )
                         }
                     }
@@ -299,6 +300,17 @@ private fun HabitatBottomBar(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
                 )
             },
             label = { Text("工作流") }
+        )
+        NavigationBarItem(
+            selected = selectedTab == Tab.AIGen,
+            onClick = { onTabSelected(Tab.AIGen) },
+            icon = {
+                Icon(
+                    if (selectedTab == Tab.AIGen) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome,
+                    contentDescription = null
+                )
+            },
+            label = { Text("AI 生成") }
         )
         NavigationBarItem(
             selected = selectedTab == Tab.Profile,
