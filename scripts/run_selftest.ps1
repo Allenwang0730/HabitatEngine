@@ -7,9 +7,9 @@
 #   selftest_results\latest.json               # 本机结果报告
 #   /sdcard/Habitat/test_results.json          # 设备端结果（adb push）
 param(
-    [string]$Adb = "C:\Users\wang\AppData\Local\Android\Sdk\platform-tools\adb.exe",
+    [string]$Adb = "%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe",
     [string]$Package = "com.ailun.habitat",
-    [string]$Repo = "C:\Users\wang\Habitat",
+    [string]$Repo = "%USERPROFILE%\Habitat",
     [string]$Apk = "$Repo\app\build\outputs\apk\debug\app-arm64-v8a-debug.apk",
     [switch]$Build,
     [switch]$SkipInstall,

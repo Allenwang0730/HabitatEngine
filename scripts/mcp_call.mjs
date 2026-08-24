@@ -9,7 +9,7 @@ const listOnly = args.includes('--list');
 const tool = listOnly ? null : (args[0] || 'screen');
 const toolArgs = listOnly ? null : (args[1] ? JSON.parse(args[1]) : {});
 
-const HOST = process.env.AGENT_HOST || '192.168.0.103';
+const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = process.env.AGENT_PORT || '8931';
 const TOKEN = process.env.AGENT_TOKEN || 'habitat-dev-token';
 const ws = new WebSocket(`ws://${HOST}:${PORT}/mcp?token=${encodeURIComponent(TOKEN)}`);

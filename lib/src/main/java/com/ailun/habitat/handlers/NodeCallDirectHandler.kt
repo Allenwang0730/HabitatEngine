@@ -42,19 +42,19 @@ class NodeCallDirectHandler : INodeHandler {
         val phoneNumber = context.interpolate(rawNumber)
         val simPref = node.params?.get("sim")?.toString()?.trim()?.ifEmpty { "auto" } ?: "auto"
 
-        val uri = Uri.parse("tel:$phoneNumber")
-        val intent = Intent(Intent.ACTION_CALL, uri).apply {
-            // 从 application context 启动 Activity 必须带 NEW_TASK
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        resolvePhoneAccountHandle(context.appContext, simPref)?.let {
-            intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
-        }
-
-        val success = runCatching { context.appContext.startActivity(intent) }
-            .onSuccess { Log.i(TAG, "CallDirect placed: $phoneNumber (sim=$simPref)") }
-            .onFailure { Log.e(TAG, "CallDirect failed: ${it.message}", it) }
-            .isSuccess
+        // 用 TelecomManager.placeCall（系统底层拨号 API）：后台运行也能拨，不依赖前台 Activity，
+        // 避免 startActivity(ACTION_CALL) 在后台启动受限/被当 USSD 报"MMI 码无效"的问题。
+        val success = runCatching {
+            val tm = context.appContext.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+            val extras = android.os.Bundle()
+            resolvePhoneAccountHandle(context.appContext, simPref)?.let {
+                extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
+            }
+            val call = tm.placeCall(Uri.parse("tel:$phoneNumber"), extras)
+            call != null
+        }.onSuccess { Log.i(TAG, "CallDirect placed via placeCall: $phoneNumber (sim=$simPref)") }
+            .onFailure { Log.e(TAG, "CallDirect placeCall failed: ${it.message}", it) }
+            .getOrElse { false }
 
         context.variables["call_success"] = success
         return node.next

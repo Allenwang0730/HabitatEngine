@@ -65,6 +65,7 @@ object NodeKnowledge {
         "能用'直接 API'节点就不用 UI 点击模拟。例如拨号用 ACTION_CALL_DIRECT，不要用 LAUNCH_APP+CLICK+INPUT_TEXT 一条龙点 UI。",
         "打开应用、发通知、截图、设备信息等都有直接节点；UI 点击（CLICK/SWIPE/INPUT_TEXT）只在没有专门节点（如填表单、点特殊按钮）时才用。",
         "UI 文本可能多处出现（如多个'确定'/'发送'）。用 region 限定区域（\"bottom\"=下半屏 / \"top\"=上半屏 / 归一化\"0,0.5,1,1\"=下半屏）或 occurrence 取第 N 个（屏幕从上到下，0 起），避免点错。",
+        "拨号用 ACTION_CALL_DIRECT（直接拨出，最优先，走系统 TelecomManager.placeCall 可靠）；它需要 CALL_PHONE 权限。若不希望直拨（或权限受限）才用 ACTION_CALL_PHONE（打开拨号器填号再点'拨打'）。",
         "网络节点（HTTP_REQUEST/GET_WEATHER/GEOCODE）需网络；对不稳定第三方服务设合理 timeout 并用 on_error=skip 容错。",
     )
 
@@ -72,6 +73,6 @@ object NodeKnowledge {
     val examples: List<String> = listOf(
         """需求"启动应用并显示提示"→{"name":"启动设置","description":"打开系统设置后弹提示","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_LAUNCH_APP","params":{"package_name":"com.android.settings"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":1500},"next":"s3"},"s3":{"id":"s3","type":"ACTION_TOAST","params":{"message":"已打开设置"}}}}}""",
         """需求"读取网络状态，wifi则提示当前WiFi否则提示没有网络"→{"name":"网络检查","workflow":{"start_node_id":"n1","nodes":{"n1":{"id":"n1","type":"ACTION_NETWORK_STATUS","params":{"action":"all"},"next":"n2"},"n2":{"id":"n2","type":"CONDITION_SWITCH","params":{"expression":"network_type == wifi"},"branches":{"true":"n3","false":"n4"}},"n3":{"id":"n3","type":"ACTION_TOAST","params":{"message":"当前WiFi"}},"n4":{"id":"n4","type":"ACTION_TOAST","params":{"message":"没有网络"}}}}}""",
-        """需求"拨打10086并开启录音"→{"name":"拨号录音","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CALL_DIRECT","params":{"phone_number":"10086"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_TOAST","params":{"message":"已拨打10086"}}}}}""",
+        """需求"拨打10086并开启录音"→{"name":"拨号录音","description":"直拨10086并点录音","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CALL_DIRECT","params":{"phone_number":"10086"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":3000},"next":"s3"},"s3":{"id":"s3","type":"ACTION_CLICK","params":{"target":"录音"}}}}}}""",
     )
 }

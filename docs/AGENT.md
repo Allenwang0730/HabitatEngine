@@ -48,7 +48,7 @@ adb shell "ip -f inet addr show wlan0 | grep inet"
 
 ## 实测验证（2026-08-22）
 
-- WiFi 无线连接手机 `192.168.0.103:8931` ✅
+- WiFi 无线连接手机 `<ææº IP>:8931` ✅
 - `screen` 返回 Habitat 主界面文本 + 前台应用 ✅
 - `ACTION_LAUNCH_APP` 打开系统设置（`launch_success=True`），再 `screen` 确认设置页 ✅
 - 完整 Agent 循环：观察 → 操作 → 验证 ✅

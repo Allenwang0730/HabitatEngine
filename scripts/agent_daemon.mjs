@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Habitat Agent 常驻客户端（优化：一次握手，长连接复用，本地 HTTP 转发）
 // 用法：
-//   node scripts/agent_daemon.mjs                # 启动（默认连 192.168.0.103:8931，本地 18080）
+//   node scripts/agent_daemon.mjs                # 启动（默认连 127.0.0.1:8931，本地 18080）
 //   AGENT_HOST=IP AGENT_PORT=PORT LOCAL_PORT=18080 node scripts/agent_daemon.mjs
 // 本地接口：
 //   GET  http://127.0.0.1:18080/status          # 连接状态
@@ -9,7 +9,7 @@
 //   GET  http://127.0.0.1:18080/screen           # 快捷读屏
 import http from 'node:http';
 
-const HOST = process.env.AGENT_HOST || '192.168.0.103';
+const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = process.env.AGENT_PORT || '8931';
 const TOKEN = process.env.AGENT_TOKEN || 'habitat-dev-token';
 const LOCAL_PORT = parseInt(process.env.LOCAL_PORT || '18080', 10);

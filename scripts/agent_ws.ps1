@@ -4,7 +4,7 @@
 #   .\scripts\agent_ws.ps1 -Tool ACTION_LAUNCH_APP -Params '{"package_name":"com.android.settings"}'
 #   .\scripts\agent_ws.ps1 -Tool ACTION_READ_SCREEN -Params '{"keyword":""}'
 param(
-    [string]$DeviceIp = "192.168.0.103",
+    [string]$DeviceIp = "127.0.0.1",
     [int]$Port = 8931,
     [string]$Tool = "screen",
     [string]$Params = "{}",
