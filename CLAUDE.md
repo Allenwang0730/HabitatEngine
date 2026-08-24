@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🔒 敏感信息铁律（反例：DeepSeek API key 硬编码导致泄露事故，已重写 git 历史清除）
+
+**绝不把任何密钥/token/机密硬编码进代码或提交到 git。** 这是本项目的硬性红线。
+
+- **API key / token / password / secret** —— 一律：
+  - 通过**环境变量**（如 `DEEPSEEK_API_KEY`）或在 App 内**运行时配置**（SharedPreferences/设置界面）注入，**不落代码**。
+  - 示例：`WorkflowAIClient.getApiKey()` 从配置读、未配置返回 null 并引导用户；禁止 `const val DEFAULT_API_KEY = "sk-..."` 这类写法。
+- **`.gitignore`** 已包含 `.env`/`*.secret`/`*.pem`/`*.jks` 等敏感模式；**不要**用 `git add -f` 强制加入被忽略的敏感文件。
+- **提交前**：`git commit` 会触发 `scripts/scan_secrets.sh`（pre-commit hook），命中 `sk-...`/`BEGIN PRIVATE KEY`/`AKIA...`/`ghp_...` 等疑似密钥会**拒绝提交**。提交前可手动跑 `sh scripts/scan_secrets.sh` 自查。
+- **若发现密钥已提交/推送到远程**：立即用 `git filter-repo --replace-text` 清除**全部历史**并**强推覆盖远程**；同时**在服务方（如 DeepSeek 后台）作废该密钥**（git 清除不能使已泄露的 key 失效）。
+- 违反红线会重演"DeepSeek key 泄露 + 重写 52 个提交历史"的事故，**不可再犯**。
+
 ## Build commands
 
 ```bash

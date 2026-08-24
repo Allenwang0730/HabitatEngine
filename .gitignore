@@ -15,3 +15,16 @@ keystore.properties
 
 # 自跑测试架运行产物
 selftest_results/
+
+# ── 敏感信息：绝不提交任何密钥/token/机密（硬编码密钥是严重安全事故，曾泄露 DeepSeek key）──
+.env
+*.env
+.env.*
+*.secret
+secrets/
+keys.txt
+*.pem
+*.key
+id_rsa*
+*.api-key
+api_keys.json
