@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,6 +34,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.ViewModelProvider
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -52,6 +54,7 @@ data class ChatMsg(
     val text: String,
     val generated: GeneratedWorkflow? = null,
     var saved: Boolean = false,
+    var savedId: String? = null, // 保存后的工作流 id（复用同 id 更新，避免重复新增）
 )
 
 class AIWorkflowViewModel(app: Application) : AndroidViewModel(app) {
@@ -106,8 +109,10 @@ class AIWorkflowViewModel(app: Application) : AndroidViewModel(app) {
 
     fun save(msg: ChatMsg): String? {
         val gen = msg.generated ?: return null
+        // 复用已保存的 id 更新；否则新 id（避免重复新增）
+        val id = msg.savedId ?: UUID.randomUUID().toString().also { msg.savedId = it }
         val workflow = HabitatWorkflow(
-            id = UUID.randomUUID().toString(),
+            id = id,
             name = gen.name,
             description = gen.description,
             jsonContent = gen.workflowJson,
@@ -130,10 +135,14 @@ class AIWorkflowViewModel(app: Application) : AndroidViewModel(app) {
 @Composable
 fun AIWorkflowScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val vm = remember { AIWorkflowViewModel(context.applicationContext as Application) }
+    // 用 Activity 级 ViewModelProvider：切换 tab 后保留对话记忆（ViewModel 存于 Activity 生命周期，不随组合重建丢失）
+    val vm = remember {
+        val activity = context as androidx.activity.ComponentActivity
+        ViewModelProvider(activity)[AIWorkflowViewModel::class.java]
+    }
     var input by remember { mutableStateOf("") }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).imePadding()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
             Text("AI 工作流生成", style = MaterialTheme.typography.headlineSmall)

@@ -132,6 +132,14 @@ fun HabitatDashboard(activity: ComponentActivity) {
             syncTriggers()
         }
 
+        // 仅重载工作流列表（不通知悬浮窗/不触发 notify→循环）。监听 libraryVersion，
+        // 使 AI 页保存/挂载（notifyLibraryChanged）后主页列表自动刷新。
+        fun reloadWorkflowsOnly() {
+            workflows = WorkflowRepository.getAll(activity)
+        }
+        val libVersion by HabitatStateStore.libraryVersion.collectAsState()
+        LaunchedEffect(libVersion) { reloadWorkflowsOnly() }
+
         LaunchedEffect(Unit) { reloadLibrary() }
 
         val mountedIds = remember { mutableStateOf(WorkflowRepository.getFloatMountedWorkflowIds(activity)) }
@@ -177,6 +185,18 @@ fun HabitatDashboard(activity: ComponentActivity) {
         }
 
         fun runGraphJson(json: String, targetLogs: MutableList<String>, workflowId: String? = null) {
+            // 拨号类工作流需 CALL_PHONE 权限（B：运行前未授则自动请求授权，避免"拨号没反应"）
+            if ((json.contains("ACTION_CALL_DIRECT") || json.contains("ACTION_CALL_PHONE")) &&
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    activity, android.Manifest.permission.CALL_PHONE,
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                targetLogs.add("⚠️ 拨号需「通话」权限，正在请求授权（请允许后重新运行）")
+                androidx.core.app.ActivityCompat.requestPermissions(
+                    activity, arrayOf(android.Manifest.permission.CALL_PHONE), 1001,
+                )
+                return
+            }
             val id = workflowId ?: "adhoc_${System.currentTimeMillis()}"
             activity.lifecycleScope.launch(Dispatchers.IO) {
                 if (workflowId != null && !TriggerManager.isWorkflowEnabled(activity.applicationContext, workflowId)) {

@@ -69,7 +69,8 @@ object HabitatExecutionService {
                 Log.e(TAG, "Workflow '$workflowId' error: ${e.message}", e)
                 HabitatStateStore.setRunning(workflowId, false)
                 activeJobs.remove(workflowId)
-                throw e
+                // 不重抛：工作流解析/执行失败只记录 + 清理，避免协程未捕获异常导致进程崩溃。
+                onComplete?.invoke()
             } finally {
                 Log.i(TAG, "=== End workflow '$workflowId' ===")
                 HabitatStateStore.setRunning(workflowId, false)
