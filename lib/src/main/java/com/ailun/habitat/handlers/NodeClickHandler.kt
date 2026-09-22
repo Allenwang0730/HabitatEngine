@@ -38,8 +38,11 @@ class NodeClickHandler(
         val target = context.interpolate(raw)
         val regionSpec = context.interpolate(node.params?.get("region")?.toString()?.trim() ?: "")
         val occurrence = (node.params?.get("occurrence") as? Number)?.toInt() ?: 0
+        // 点击坐标偏移（相对目标中心，屏幕 Y 向下为正；offset_y 为负表示向上偏移）
+        val offsetX = node.params?.get("offset_x")?.toString()?.toIntOrNull() ?: 0
+        val offsetY = node.params?.get("offset_y")?.toString()?.toIntOrNull() ?: 0
         val selfPackage = context.appContext.packageName
-        Log.d(TAG, "Attempting to click target: '$target' region='$regionSpec' occurrence=$occurrence")
+        Log.d(TAG, "Attempting to click target: '$target' region='$regionSpec' occurrence=$occurrence offset=($offsetX,$offsetY)")
 
         val success = if (target.contains(",")) {
             val parts = target.split(",")
@@ -50,10 +53,10 @@ class NodeClickHandler(
                 HabitatAccessibility.dispatchTap(service, x, y)
             } else {
                 // 含逗号但非坐标 → 按文本（region/occurrence 不适用坐标，文本用）
-                performA11yClick(service, target, selfPackage, resolveRegionSpec(service, regionSpec), occurrence)
+                performA11yClick(service, target, selfPackage, resolveRegionSpec(service, regionSpec), occurrence, offsetX, offsetY)
             }
         } else {
-            performA11yClick(service, target, selfPackage, resolveRegionSpec(service, regionSpec), occurrence)
+            performA11yClick(service, target, selfPackage, resolveRegionSpec(service, regionSpec), occurrence, offsetX, offsetY)
         }
 
         Log.i(TAG, "Click result for '$target': $success")
@@ -67,6 +70,8 @@ class NodeClickHandler(
         selfPackage: String,
         region: Rect?,
         occurrence: Int,
+        offsetX: Int = 0,
+        offsetY: Int = 0,
     ): Boolean {
         val roots = mutableListOf<AccessibilityNodeInfo>()
         val foundNodes = mutableListOf<AccessibilityNodeInfo>()
@@ -100,9 +105,9 @@ class NodeClickHandler(
 
             val r = Rect()
             targetNode.getBoundsInScreen(r)
-            Log.d(TAG, "Target: text=${targetNode.text}, pkg=${targetNode.packageName}, bounds=$r")
+            Log.d(TAG, "Target: text=${targetNode.text}, pkg=${targetNode.packageName}, bounds=$r, offset=($offsetX,$offsetY)")
 
-            var ok = HabitatAccessibility.dispatchTap(service, r.centerX(), r.centerY())
+            var ok = HabitatAccessibility.dispatchTap(service, r.centerX() + offsetX, r.centerY() + offsetY)
             if (!ok) {
                 ok = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 if (!ok && !targetNode.isClickable) {

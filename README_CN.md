@@ -72,7 +72,7 @@ HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
 | ACTION_PARSE_JSON | json, path, output_var | 解析 JSON | |
 | ACTION_HTTP_REQUEST | url, method, output_var, timeout | HTTP 请求 | 需网络 |
 | ACTION_LAUNCH_APP | package_name | 打开应用 | |
-| ACTION_CLICK | target, region, occurrence | 点击 | 需无障碍 |
+| ACTION_CLICK | target, region, occurrence, offset_x, offset_y | 点击 | 需无障碍 |
 | ACTION_INPUT_TEXT | text, mode | 输入文字 | 需无障碍 |
 | ACTION_READ_SCREEN | keyword, output_var | 读屏幕 | 需无障碍 |
 | ACTION_FIND_ELEMENT | selector, search_mode, region, timeout_ms, output_var | 找元素 | 需无障碍 |
@@ -140,7 +140,7 @@ ws://<host>:8931/mcp?token=<token>   # token 鉴权（默认 habitat-dev-token�
 ### 交互 (6)
 | 类型 | 功能 |
 |------|------|
-| `ACTION_CLICK` | 点击坐标/无障碍元素 |
+| `ACTION_CLICK` | 点击坐标或无障碍元素（`offset_x`/`offset_y` 相对目标中心偏移） |
 | `ACTION_SWIPE` | 直线滑动 |
 | `ACTION_LONG_PRESS` | 长按 |
 | `ACTION_INPUT_TEXT` | 输入文字 (a11y / shell / clipboard) |

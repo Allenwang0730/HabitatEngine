@@ -95,7 +95,7 @@ The engine has 84 node types across categories. Common / core ones below (same l
 | ACTION_PARSE_JSON | json, path, output_var | parse JSON | |
 | ACTION_HTTP_REQUEST | url, method, output_var, timeout | HTTP request | needs network |
 | ACTION_LAUNCH_APP | package_name | launch app | |
-| ACTION_CLICK | target, region, occurrence | click | needs a11y |
+| ACTION_CLICK | target, region, occurrence, offset_x, offset_y | click | needs a11y |
 | ACTION_INPUT_TEXT | text, mode | input text | needs a11y |
 | ACTION_READ_SCREEN | keyword, output_var | read screen | needs a11y |
 | ACTION_FIND_ELEMENT | selector, search_mode, region, timeout_ms, output_var | find element | needs a11y |
@@ -120,7 +120,7 @@ Full categories in each `NodeModules`; `NodeKnowledge` is the single source for 
 ### Interaction (6)
 | Type | What it does |
 |------|-------------|
-| `ACTION_CLICK` | Click coordinates or accessibility element |
+| `ACTION_CLICK` | Click coordinates or accessibility element (`offset_x`/`offset_y` shift from the target center) |
 | `ACTION_SWIPE` | Linear swipe gesture |
 | `ACTION_LONG_PRESS` | Long press |
 | `ACTION_INPUT_TEXT` | Type text (a11y / shell / clipboard) |

@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.6.1] - 2026-09-22
+
+### Added
+- `ACTION_CLICK` 增加 `offset_x` / `offset_y`：相对目标中心偏移后再点击（屏幕 Y 向下为正，负值向上）。坐标形式的 `target`（`x,y`）不加偏移。
+- `HABITAT_API.md` 与中英文 README 同步点击参数（含已有的 `region` / `occurrence`）。
+
 ## [1.6.0] - 2026-08-22
 
 ### Added — 引擎修复 + AI 工作流生成 + MCP Agent + 第二批节点

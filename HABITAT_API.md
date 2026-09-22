@@ -154,9 +154,25 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 }
 ```
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `target` | String | 坐标 "x,y" 或无障碍文本/ID 选择器 |
+```json
+{
+  "type": "ACTION_CLICK",
+  "params": {
+    "target": "录音",
+    "region": "0,0.5,1,1",
+    "occurrence": 0,
+    "offset_y": -50
+  }
+}
+```
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `target` | String | — | 坐标 "x,y" 或无障碍文本/ID 选择器 |
+| `region` | String | 无 | 仅文本匹配：限定匹配节点所在屏幕区域，`"top"/"bottom"/"left"/"right"/"center"` 或归一化 `"x1,y1,x2,y2"`（0-1 相对屏幕，如 `0,0.5,1,1` = 下半屏） |
+| `occurrence` | Int | 0 | 仅文本匹配：region 过滤后取第几个匹配（按屏幕从上到下排序，0 起） |
+| `offset_x` | Int | 0 | 点击坐标相对目标中心的 X 偏移（px） |
+| `offset_y` | Int | 0 | 点击坐标相对目标中心的 Y 偏移（px，屏幕 Y 向下为正，负值=向上偏移） |
 
 输出: `click_success` (Boolean)
 
