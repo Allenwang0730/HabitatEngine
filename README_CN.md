@@ -111,7 +111,7 @@ WorkflowAIGenerator.generate(context, "拨打10086并开启录音")  // → Gene
 
 ## MCP 移动端 Agent（AI 控制手机）
 
-引擎暴露 **MCP server**（JSON-RPC 2.0，82 个工具）：
+引擎暴露 **MCP server**（JSON-RPC 2.0，85 个工具）：
 
 ```
 ws://<host>:8931/mcp?token=<token>   # token 鉴权（默认 habitat-dev-token，控制页可改同局域网）
@@ -120,6 +120,8 @@ ws://<host>:8931/mcp?token=<token>   # token 鉴权（默认 habitat-dev-token�
 - `initialize / tools/list / tools/call` 标准 MCP，任意 LLM 客户端可接入
 - 支持 `region`/`occurrence` 精准定位多实例文本（如"点下半屏的确定"）
 - App 内 **Agent 控制页**：服务开关/状态/局域网 IP/端口/token
+- **自主模式**：读屏 → 决策（Jev / DeepSeek / 本地，可切换）→ 执行节点 → 循环。决策只选题，执行仍走 Habitat 节点。MCP 工具 `agent_start` / `agent_stop` / `agent_status`
+- 微信读屏：另开「Habitat 微信读屏」（类名 `SelectToSpeakService`）；树为空时用 ML Kit 中文离线 OCR
 - 电脑侧 `scripts/agent_daemon.mjs`（常驻长连接，读屏 3.9s→277ms）/ `mcp_call.mjs`
 
 ## 测试

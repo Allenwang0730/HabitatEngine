@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -31,8 +31,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ailun.habitat.app.AgentService
+import com.ailun.habitat.app.agent.AgentLoopController
+import com.ailun.habitat.app.ai.WorkflowAIClient
 import kotlinx.coroutines.delay
 
 /**
@@ -46,6 +49,13 @@ fun AgentScreen() {
     var running by remember { mutableStateOf(AgentService.serverRunning) }
     var checking by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf<String?>(null) }
+    var provider by remember { mutableStateOf(AgentLoopController.getProvider(context)) }
+    var goal by remember { mutableStateOf("") }
+    var jevKey by remember { mutableStateOf(AgentLoopController.getJevKey(context)) }
+    var jevModel by remember { mutableStateOf(AgentLoopController.getJevModel(context)) }
+    var deepseekKey by remember { mutableStateOf(WorkflowAIClient.getApiKey(context).orEmpty()) }
+    var loopPhase by remember { mutableStateOf(AgentLoopController.phase) }
+    var loopLog by remember { mutableStateOf(AgentLoopController.logText()) }
 
     val checkHealth: suspend (Int) -> Boolean = { p ->
         try {
@@ -64,19 +74,120 @@ fun AgentScreen() {
     LaunchedEffect(Unit) {
         while (true) {
             running = AgentService.serverRunning || checkHealth(port)
+            loopPhase = AgentLoopController.phase
+            loopLog = AgentLoopController.logText()
             checking = false
-            delay(2000)
+            delay(1000)
         }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("AI Agent（手机工具服务）", style = MaterialTheme.typography.headlineSmall)
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("自主模式", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "读屏 → 决策 → 执行节点 → 再读屏。决策器只从当前屏幕的候选里选题，执行仍走 Habitat 节点。微信需要另开「Habitat 微信读屏」。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = goal,
+                    onValueChange = { goal = it },
+                    label = { Text("目标") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        AgentLoopController.PROVIDER_JEV to "Jev",
+                        AgentLoopController.PROVIDER_DEEPSEEK to "DeepSeek",
+                        AgentLoopController.PROVIDER_LOCAL to "本地",
+                    ).forEach { (id, label) ->
+                        Button(
+                            onClick = {
+                                provider = id
+                                AgentLoopController.setProvider(context, id)
+                            },
+                            enabled = provider != id,
+                        ) { Text(label) }
+                    }
+                }
+                if (provider == AgentLoopController.PROVIDER_JEV) {
+                    OutlinedTextField(
+                        value = jevKey,
+                        onValueChange = { jevKey = it },
+                        label = { Text("Jev API key") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = jevModel,
+                        onValueChange = { jevModel = it },
+                        label = { Text("Jev 模型") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(onClick = {
+                        AgentLoopController.setJevKey(context, jevKey)
+                        AgentLoopController.setJevModel(context, jevModel)
+                        lastError = "Jev 配置已保存"
+                    }) { Text("保存 Jev 配置") }
+                }
+                if (provider == AgentLoopController.PROVIDER_DEEPSEEK) {
+                    OutlinedTextField(
+                        value = deepseekKey,
+                        onValueChange = { deepseekKey = it },
+                        label = { Text("DeepSeek API key") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(onClick = {
+                        WorkflowAIClient.setApiKey(context, deepseekKey)
+                        lastError = "DeepSeek key 已保存"
+                    }) { Text("保存 DeepSeek key") }
+                }
+                if (provider == AgentLoopController.PROVIDER_LOCAL) {
+                    Text("本地策略不联网：点目标里出现的文字，否则打开点名的应用，再否则向下滚两次。", style = MaterialTheme.typography.bodySmall)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            if (provider == AgentLoopController.PROVIDER_JEV) {
+                                AgentLoopController.setJevKey(context, jevKey)
+                                AgentLoopController.setJevModel(context, jevModel)
+                            }
+                            if (provider == AgentLoopController.PROVIDER_DEEPSEEK) {
+                                WorkflowAIClient.setApiKey(context, deepseekKey)
+                            }
+                            val err = AgentLoopController.start(context, goal, provider, 12)
+                            lastError = err
+                            loopPhase = AgentLoopController.phase
+                            loopLog = AgentLoopController.logText()
+                        },
+                        enabled = loopPhase != "running" && goal.isNotBlank(),
+                    ) { Text("开始") }
+                    Button(
+                        onClick = {
+                            AgentLoopController.stop()
+                            loopPhase = AgentLoopController.phase
+                            loopLog = AgentLoopController.logText()
+                        },
+                        enabled = loopPhase == "running" || AgentLoopController.running,
+                    ) { Text("停止") }
+                }
+                StatusRow("循环", loopPhase)
+                if (loopLog.isNotBlank()) {
+                    Text(loopLog, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                }
+            }
+        }
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

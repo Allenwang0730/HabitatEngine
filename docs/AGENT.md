@@ -53,9 +53,20 @@ adb shell "ip -f inet addr show wlan0 | grep inet"
 - `ACTION_LAUNCH_APP` 打开系统设置（`launch_success=True`），再 `screen` 确认设置页 ✅
 - 完整 Agent 循环：观察 → 操作 → 验证 ✅
 
+## 自主模式（1.7.0）
+
+手机本机循环，Habitat 自己执行，不经过 Mobilerun：
+
+`读屏 → 决策（Jev / DeepSeek / 本地）→ 节点执行 → 再读屏`
+
+- 决策只从当前屏幕候选里选题。候选由代码生成（点击、滚动、输入目标原文、打开点名应用、返回、桌面、等待、完成、无法继续）。
+- Jev 走 `POST https://api.typesafe.ai/v1/systemone`，key 存在 Agent 页，不进代码、不进日志。
+- MCP/WS：`agent_start`（`goal` / `provider` / `max_steps`）、`agent_stop`、`agent_status`。启动后立即返回，不阻塞到循环结束。
+- 微信：系统设置另开「Habitat 微信读屏」。类名是 `SelectToSpeakService`，不要改。树为空才 OCR。
+
 ## 已知问题 / 待办
 
-- **无鉴权**：当前局域网裸奔，生产必须加 token（握手时校验）
+- **鉴权**：`/ws` `/mcp` 已要求 `?token=`。生产环境应改掉默认令牌
 - **服务生命周期**：Activity 代启后进程被系统回收则服务停（Android 后台限制）；长期运行需转前台服务（startForeground + 通知）
 - **端口**：8931（可配置）；Ktor Netty 在 Android 上绑 tcp6 双栈，IPv4 实测可连
-- **云端 Agent 循环**：目前是"人/LLM 手动发 WS 消息"；接 MCP 或自建 Agent 循环后即可让任意 AI 客户端调用（见 ENGINE_MASTER_PLAN 阶段 E 构想）
+- **微信读屏**：伪装服务 + OCR 已接入，具体 ROM / 微信版本是否放行要以真机为准。改无障碍配置后必须关掉再打开

@@ -304,7 +304,7 @@ WorkflowAIGenerator.generate(context, "call 10086 and record")  // → Generated
 
 ## MCP Mobile Agent (AI controls the phone)
 
-The engine exposes an **MCP server** (JSON-RPC 2.0, 82 tools):
+The engine exposes an **MCP server** (JSON-RPC 2.0, 85 tools):
 
 ```
 ws://<host>:8931/mcp?token=<token>   # token auth (default habitat-dev-token, change in control page, same LAN)
@@ -313,6 +313,8 @@ ws://<host>:8931/mcp?token=<token>   # token auth (default habitat-dev-token, ch
 - `initialize / tools/list / tools/call` standard MCP, any LLM client can connect
 - supports `region`/`occurrence` to precisely target repeated text (e.g. "tap the confirm button at the bottom")
 - App **Agent control page**: service switch / status / LAN IP / port / token
+- **Autonomous mode**: read screen → decide (Jev / DeepSeek / local) → run a node → loop. The model only picks a candidate; execution stays on Habitat nodes. MCP tools: `agent_start` / `agent_stop` / `agent_status`
+- WeChat reading: enable “Habitat 微信读屏” (`SelectToSpeakService`). If the tree is empty, ML Kit Chinese OCR runs on device
 - PC side `scripts/agent_daemon.mjs` (persistent long-connection, read-screen 3.9s→277ms) / `mcp_call.mjs`
 
 ## Testing

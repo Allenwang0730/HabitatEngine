@@ -94,26 +94,27 @@
 
 **已完成能力**
 - 引擎 **84 节点** + 68 条回归（最近一次真机：**53 PASS / 0 FAIL / 15 SKIP**，SKIP 为需权限/Shizuku/手工项）
-- **MCP server**（82 工具）+ **token 鉴权**（`/ws` `/mcp` 需 `?token=`）
+- **MCP server**（85 工具）+ **token 鉴权**（`/ws` `/mcp` 需 `?token=`）
+- **自主模式**（1.7.0）：读屏 → 决策（Jev / DeepSeek / 本地）→ 节点执行 → 循环。Agent 页可开；MCP `agent_start` / `agent_stop` / `agent_status`。Jev key 在 Agent 页填，不进代码
+- **微信读屏**：系统设置里另开「Habitat 微信读屏」（`SelectToSpeakService`）。树为空时 ML Kit 中文离线 OCR。改过无障碍配置后要关掉再开一次
 - **AI 生成工作流**：`NodeKnowledge` 动态提示词 → DeepSeek，**13 场景 100% 正确**；单次成本 ≈¥0.02–0.05
 - **CLICK/FIND_ELEMENT 支持 `region` + `occurrence`**（多实例文本精准定位，如"下半屏的确定"）
-- **独立 AAR 发布配置**（`:lib` maven-publish → `com.ailun:habitat-engine:1.6.0`）
+- **独立 AAR 发布配置**（`:lib` maven-publish → `com.ailun:habitat-engine:1.6.1`）
 - App UI：4 tab（工作流/AI 生成/Agent/个人主页），编辑器内嵌主页卡片
 - 直拨 `ACTION_CALL_DIRECT` 走 `TelecomManager.placeCall`（后台可拨）
 - 安全：API key 不硬编码、密钥扫描 hook、manifest 权限铁律
 
 **已知问题 / 待办**
-- ⚠️ **工作区有未提交改动**（截至本文件生成时）：`HABITAT_API.md` + `lib/.../handlers/NodeClickHandler.kt` —— 新增 **`offset_x`/`offset_y`（点击坐标偏移）**。**来源不明确（非本次会话所改），接手时先确认它是否要保留/提交/编译验证。**
-- **微信读屏失效**（无障碍树无内容）→ 可借鉴 `jev-chat/jev-chat-jarvis`：**伪装 `SelectToSpeakService` 读混淆节点 + ML Kit 离线 OCR 兜底**
+- **微信读屏**已接入伪装服务 + OCR 兜底；vivo/微信新版本是否仍放行节点，要以真机为准（开「Habitat 微信读屏」后进微信看 Agent 循环日志里的 `source`）
 - `GET_SETTING` 在该 vivo 上对 App 进程不可用（SKIP）
 - 部分 OEM（vivo）行为差异；`CALL_PHONE`/`READ_CALL_LOG` 已补声明
 - 未做：MCP 更强鉴权、开发者 README、ROM 兼容专项
 - SmartCS 侧仍有未修 app 级 bug（BUG-2/3/6/8–12，lib 不动）
 
 **下一步方向（用户关注）**
-1. **接 Jev（TypeSafe 决策模型）**：把 MCP 客户端决策层从 DeepSeek 换成/并列 Jev（`mobile-jev` 用 Jev+Mobilerun；**Habitat 可替代 Mobilerun 做本机执行**）
-2. **Habitat 加 agent loop（自主模式）**：`读屏 → 决策（provider 可插拔：Jev/DeepSeek/本地）→ 节点执行 → 循环`——补上"静态工作流不自适应"的短板
-3. 移植 jev-chat-jarvis 的微信读屏方案
+1. ~~接 Jev + 自主循环 + 微信读屏~~ 已在 1.7.0 落地（本机执行替代 Mobilerun）。真机还没拿 Jev key 跑通一整轮
+2. 自主循环的步数、失败恢复、更多动作（长按/等待元素）还粗
+3. MCP 更强鉴权、开发者 README、ROM 兼容专项仍未做
 
 ## 六、硬约束（务必遵守）
 

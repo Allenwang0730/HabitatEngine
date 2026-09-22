@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.0] - 2026-09-22
+
+### Added — 自主模式（Jev / DeepSeek / 本地）+ 微信读屏
+- **Agent loop**：读屏 → 决策 → Habitat 节点执行 → 再读屏。决策器只从当前屏幕候选里选题，不发明坐标或包名。同一动作连续三次、或点击目标已离开原位置，则停止。
+- 决策器可切换：
+  - **Jev**（TypeSafe `https://api.typesafe.ai/v1/systemone`，模型默认 `jev-latest`，key 在 Agent 页填写，不进代码）
+  - **DeepSeek**（复用 AI 生成页的 key）
+  - **本地**（不联网：点目标原文里出现的控件，否则打开点名应用，再否则向下滚两次）
+- 支付类按钮（转账/红包/付款/支付）默认不进入候选，除非目标原文写了同一个词。
+- MCP/WS 增加 `agent_start` / `agent_stop` / `agent_status`（85 个工具）。
+- **微信读屏**：新增无障碍服务，类名 `com.google.android.accessibility.selecttospeak.SelectToSpeakService`。树为空时用 ML Kit 捆绑中文模型离线 OCR（限频、失败退避）。升级后需把无障碍关掉再打开，截屏能力才生效。
+- App `versionName` 对齐到 `1.7.0`（`versionCode` 3）。引擎 AAR 仍为 `1.6.1`（本版无引擎 API 变更）。
+
 ## [1.6.1] - 2026-09-22
 
 ### Added

@@ -31,8 +31,8 @@ android {
         applicationId = "com.ailun.habitat"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.7.0"
     }
 
     buildTypes {
@@ -118,6 +118,11 @@ dependencies {
     implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.websockets)
+
+    // 微信读屏兜底：捆绑中文模型，不依赖 Google Play 下载
+    implementation(libs.mlkit.text.recognition.chinese)
+
+    testImplementation(libs.junit)
 
     // EncryptedSharedPreferences
     implementation(libs.security.crypto)

@@ -8,6 +8,7 @@ import com.ailun.habitat.NodeHandlerFactory
 import com.ailun.habitat.NodeModule
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.app.agent.AgentLoopController
 import com.ailun.habitat.app.bridge.AppAccessibilityProvider
 import com.ailun.habitat.app.bridge.ShizukuShellExecutor
 import com.ailun.habitat.app.bridge.applyAppHandlers
@@ -157,6 +158,12 @@ class AgentService : Service() {
 
         if (tool == "ping") return buildReplyJson(id, ok = true, outputs = mapOf("pong" to true))
         if (tool == "screen") return buildReplyJson(id, ok = true, outputs = screenSnapshot())
+        if (tool.startsWith("agent_")) {
+            val params = req.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
+            val (ok, text) = handleAgentControl(tool, params)
+            return if (ok) buildReplyJson(id, ok = true, outputs = mapOf("result" to text))
+            else buildReplyJson(id, ok = false, error = text)
+        }
 
         val params = req.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
         return executeNodeReply(factory, id, tool, params)
@@ -208,7 +215,7 @@ class AgentService : Service() {
                 add("capabilities", JsonObject().apply { add("tools", JsonObject()) })
                 add("serverInfo", JsonObject().apply {
                     addProperty("name", "habitat-agent")
-                    addProperty("version", "1.5.0")
+                    addProperty("version", "1.7.0")
                 })
             })
 
@@ -242,6 +249,7 @@ class AgentService : Service() {
     private suspend fun executeNodeAsText(factory: NodeHandlerFactory, tool: String, args: JsonObject): Pair<Boolean, String> {
         if (tool == "ping") return true to """{"pong":true}"""
         if (tool == "screen") return true to gson.toJson(screenSnapshot())
+        if (tool.startsWith("agent_")) return handleAgentControl(tool, args)
 
         val paramMap = mutableMapOf<String, Any>()
         args.entrySet().forEach { (k, v) -> paramMap[k] = gson.fromJson(v, Any::class.java) }
@@ -269,6 +277,9 @@ class AgentService : Service() {
         val arr = JsonArray()
         arr.add(mcpToolSchema("screen", "获取当前屏幕无障碍树文本 + 前台应用包名（AI 的眼睛）"))
         arr.add(mcpToolSchema("ping", "连通性测试"))
+        arr.add(mcpToolSchema("agent_start", "启动自主循环。arguments: goal（必填）, provider（jev/deepseek/local，可空）, max_steps（1-30，可空）"))
+        arr.add(mcpToolSchema("agent_stop", "停止自主循环"))
+        arr.add(mcpToolSchema("agent_status", "自主循环状态与最近步骤"))
         factory.availableTypes().sorted().forEach { type ->
             val module = ALL_NODE_TYPES_BY_MODULE.entries.firstOrNull { type in it.value }?.key?.name ?: "?"
             arr.add(
@@ -306,6 +317,25 @@ class AgentService : Service() {
             addProperty("message", message)
         })
     }.toString()
+
+    /** 自主循环控制。不在这里阻塞等待循环结束。 */
+    private fun handleAgentControl(tool: String, args: JsonObject): Pair<Boolean, String> {
+        return when (tool) {
+            "agent_status" -> true to gson.toJson(AgentLoopController.statusMap())
+            "agent_stop" -> {
+                AgentLoopController.stop()
+                true to gson.toJson(AgentLoopController.statusMap())
+            }
+            "agent_start" -> {
+                val goal = args.get("goal")?.asString?.trim().orEmpty()
+                val provider = args.get("provider")?.asString
+                val maxSteps = args.get("max_steps")?.let { runCatching { it.asInt }.getOrNull() }
+                val err = AgentLoopController.start(applicationContext, goal, provider, maxSteps)
+                if (err != null) false to err else true to gson.toJson(AgentLoopController.statusMap())
+            }
+            else -> false to "未知工具: $tool"
+        }
+    }
 
     /** 鉴权：连接 URL 带 ?token=等于配置令牌。 */
     private fun authorized(call: io.ktor.server.application.ApplicationCall): Boolean {
