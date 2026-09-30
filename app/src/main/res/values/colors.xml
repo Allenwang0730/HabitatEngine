@@ -1,24 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
+    <!-- 与 HabitatTheme.kt 保持一致；Compose 之外（启动窗口、系统栏）使用 -->
+    <color name="habitat_primary">#FF0B7A70</color>
+    <color name="habitat_on_primary">#FFFFFFFF</color>
+    <color name="habitat_primary_container">#FFC9F1EA</color>
+    <color name="habitat_secondary">#FF4A635F</color>
+    <color name="habitat_background">#FFF7F9FA</color>
+    <color name="habitat_on_background">#FF171C1F</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-
-    <color name="category_trigger">#607D8B</color>
-    <color name="category_ui_interaction">#F09076</color>
-    <color name="category_logic">#FFC107</color>
-    <color name="category_data">#AA86ED</color>
-    <color name="category_file">#4CAF50</color>
-    <color name="category_system">#03A9F4</color>
-    <color name="category_network">#E75EA9</color>
-    <color name="category_feishu">#00B96B</color>
-    <color name="category_shizuku">#3F4DAB</color>
-    <color name="category_user_module">#A8E066</color>
-    <color name="variable_pill_color">#93B1CF</color>
-    <color name="static_pill_color">#687E89</color>
-
 </resources>

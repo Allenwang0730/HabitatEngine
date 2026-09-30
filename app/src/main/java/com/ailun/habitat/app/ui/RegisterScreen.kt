@@ -4,11 +4,16 @@ import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -18,17 +23,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.ailun.habitat.app.Spacing
 import com.ailun.habitat.app.auth.AuthStateManager
 import com.ailun.habitat.app.network.ApiException
 import com.ailun.habitat.app.network.HabitatApiClient
+import com.ailun.habitat.app.ui.components.SecretField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,145 +53,110 @@ fun RegisterDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
 
+    val mismatch = confirmPassword.isNotEmpty() && confirmPassword != password
+
+    fun submit() {
+        val user = username.trim()
+        val mail = email.trim()
+        val pass = password.trim()
+        val confirm = confirmPassword.trim()
+        errorMessage = when {
+            user.length !in 3..50 -> "用户名需要 3-50 个字符"
+            !android.util.Patterns.EMAIL_ADDRESS.matcher(mail).matches() -> "请输入有效的邮箱地址"
+            pass.length < 6 -> "密码至少需要 6 个字符"
+            pass != confirm -> "两次密码不一致"
+            else -> null
+        }
+        if (errorMessage != null) return
+
+        isLoading = true
+        scope.launch {
+            try {
+                HabitatApiClient.init(ProfilePrefs.getServerUrl(context))
+                val result = withContext(Dispatchers.IO) { HabitatApiClient.register(user, mail, pass) }
+                result.fold(
+                    onSuccess = { auth ->
+                        AuthStateManager.setAuth(auth.token, auth.userId, auth.username)
+                        isLoading = false
+                        onDismiss()
+                        onSuccess()
+                    },
+                    onFailure = { e ->
+                        Log.w(TAG, "Register failed: ${e.message}")
+                        isLoading = false
+                        errorMessage = when (e) {
+                            is ApiException -> e.message
+                            else -> e.message ?: "网络连接失败"
+                        }
+                    },
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Register error: ${e.message}")
+                isLoading = false
+                errorMessage = e.message ?: "未知错误"
+            }
+        }
+    }
+
     AlertDialog(
         onDismissRequest = { if (!isLoading) onDismiss() },
+        icon = { Icon(Icons.Outlined.PersonAdd, contentDescription = null) },
         title = { Text("注册") },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
-                if (errorMessage != null) {
-                    Text(
-                        errorMessage!!,
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 13.sp,
-                    )
-                }
-
+                FormError(errorMessage)
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it; errorMessage = null },
-                    label = { Text("用户名 (3-50字符)") },
+                    label = { Text("用户名") },
+                    supportingText = { Text("3-50 个字符") },
+                    leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading,
                 )
-
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it; errorMessage = null },
                     label = { Text("邮箱") },
+                    leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null) },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Email,
-                        imeAction = ImeAction.Next,
-                    ),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading,
                 )
-
-                OutlinedTextField(
+                SecretField(
                     value = password,
                     onValueChange = { password = it; errorMessage = null },
-                    label = { Text("密码 (至少6字符)") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Next,
-                    ),
+                    label = "密码",
+                    supportingText = "至少 6 个字符",
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading,
+                    showPaste = false,
+                    monospace = false,
+                    leadingIcon = Icons.Outlined.Lock,
+                    imeAction = ImeAction.Next,
                 )
-
-                OutlinedTextField(
+                SecretField(
                     value = confirmPassword,
                     onValueChange = { confirmPassword = it; errorMessage = null },
-                    label = { Text("确认密码") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done,
-                    ),
+                    label = "确认密码",
+                    isError = mismatch,
+                    supportingText = if (mismatch) "两次密码不一致" else null,
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading,
+                    showPaste = false,
+                    monospace = false,
+                    leadingIcon = Icons.Outlined.Lock,
+                    onImeAction = ::submit,
                 )
-
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp),
-                    )
-                }
             }
         },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val user = username.trim()
-                    val mail = email.trim()
-                    val pass = password.trim()
-                    val confirm = confirmPassword.trim()
-
-                    if (user.length < 3 || user.length > 50) {
-                        errorMessage = "用户名需要 3-50 个字符"
-                        return@TextButton
-                    }
-                    if (!android.util.Patterns.EMAIL_ADDRESS.matcher(mail).matches()) {
-                        errorMessage = "请输入有效的邮箱地址"
-                        return@TextButton
-                    }
-                    if (pass.length < 6) {
-                        errorMessage = "密码至少需要 6 个字符"
-                        return@TextButton
-                    }
-                    if (pass != confirm) {
-                        errorMessage = "两次密码不一致"
-                        return@TextButton
-                    }
-
-                    isLoading = true
-                    errorMessage = null
-                    scope.launch {
-                        try {
-                            HabitatApiClient.init(ProfilePrefs.getServerUrl(context))
-                            val result = withContext(Dispatchers.IO) {
-                                HabitatApiClient.register(user, mail, pass)
-                            }
-                            result.fold(
-                                onSuccess = { auth ->
-                                    Log.d(TAG, "Register success: ${auth.username}")
-                                    AuthStateManager.setAuth(auth.token, auth.userId, auth.username)
-                                    isLoading = false
-                                    onDismiss()
-                                    onSuccess()
-                                },
-                                onFailure = { e ->
-                                    Log.e(TAG, "Register failed", e)
-                                    isLoading = false
-                                    errorMessage = when (e) {
-                                        is ApiException -> e.message
-                                        else -> e.message ?: "网络连接失败"
-                                    }
-                                },
-                            )
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Register error", e)
-                            isLoading = false
-                            errorMessage = e.message ?: "未知错误"
-                        }
-                    }
-                },
-                enabled = !isLoading,
-            ) { Text("注册") }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                enabled = !isLoading,
-            ) { Text("取消") }
-        },
+        confirmButton = { SubmitButton("注册", isLoading, onClick = ::submit) },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !isLoading) { Text("取消") } },
     )
 }

@@ -1,69 +1,120 @@
 package com.ailun.habitat.app
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.VerifiedUser
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.FlashOn
+import androidx.compose.material.icons.rounded.IntegrationInstructions
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.ailun.habitat.R
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.ailun.habitat.app.ui.PermissionItem
+import com.ailun.habitat.app.ui.buildPermissionItems
+import com.ailun.habitat.app.ui.components.IconTile
+import com.ailun.habitat.app.ui.components.PillStatus
+import com.ailun.habitat.app.ui.components.StatusPill
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-
-// ── Habitat brand palette ──
-private val Teal600 = Color(0xFF0D9488)
-private val Teal700 = Color(0xFF0F766E)
-private val Teal50 = Color(0xFFF0FDFA)
-private val Amber500 = Color(0xFFF59E0B)
-private val Amber50 = Color(0xFFFFFBEB)
-private val Slate50 = Color(0xFFF8FAFC)
-private val Slate100 = Color(0xFFF1F5F9)
-private val Slate600 = Color(0xFF475569)
-private val Slate800 = Color(0xFF1E293B)
+import kotlinx.coroutines.withContext
 
 class HabitatOnboardingActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
-            MaterialTheme(colorScheme = habitatColorScheme()) {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    OnboardingScreen(onFinish = { completeOnboarding() })
-                }
+            HabitatTheme {
+                OnboardingScreen(onFinish = { completeOnboarding() })
             }
         }
     }
@@ -72,62 +123,118 @@ class HabitatOnboardingActivity : ComponentActivity() {
         val prefs = getSharedPreferences(HabitatMainActivity.PREFS_NAME, MODE_PRIVATE)
         prefs.edit().putBoolean("is_first_run", false).apply()
         startActivity(Intent(this, HabitatMainActivity::class.java))
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_OPEN, android.R.anim.fade_in, android.R.anim.fade_out)
+        } else {
+            @Suppress("DEPRECATION")
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+        }
         finish()
     }
 }
 
-// ── Onboarding Screen ──
+private const val TOTAL_PAGES = 4
 
 @Composable
 private fun OnboardingScreen(onFinish: () -> Unit) {
-    var currentPage by remember { mutableIntStateOf(0) }
-    val totalPages = 4
+    var page by rememberSaveable { mutableIntStateOf(0) }
+    BackHandler(enabled = page > 0) { page-- }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        StepProgressBar(currentPage = currentPage, totalSteps = totalPages)
-
+    Scaffold(
+        topBar = {
+            if (page < TOTAL_PAGES - 1) {
+                Row(
+                    Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = Spacing.xl, vertical = Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PageIndicator(page, TOTAL_PAGES, Modifier.weight(1f))
+                    TextButton(onClick = { page = TOTAL_PAGES - 1 }) { Text("跳过") }
+                }
+            }
+        },
+    ) { padding ->
         AnimatedContent(
-            targetState = currentPage,
-            modifier = Modifier.weight(1f),
+            targetState = page,
+            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding),
             transitionSpec = {
                 val dir = if (targetState > initialState) 1 else -1
-                (slideInHorizontally(animationSpec = tween(400), initialOffsetX = { dir * it / 4 }) + fadeIn(tween(300)))
-                    .togetherWith(slideOutHorizontally(animationSpec = tween(400), targetOffsetX = { -dir * it / 4 }) + fadeOut(tween(200)))
+                (slideInHorizontally(Motion.offset) { dir * it / 5 } + fadeIn(Motion.fade()))
+                    .togetherWith(slideOutHorizontally(Motion.offset) { -dir * it / 5 } + fadeOut(Motion.exit()))
             },
-            label = "page"
-        ) { page ->
-            when (page) {
-                0 -> WelcomePage(onNext = { currentPage = 1 })
-                1 -> ShellSetupPage(onNext = { currentPage = 2 })
-                2 -> PermissionsSetupPage(onNext = { currentPage = 3 })
-                3 -> CompletionPage(onFinish = onFinish)
+            label = "onboarding",
+        ) { p ->
+            when (p) {
+                0 -> WelcomePage(onNext = { page = 1 })
+                1 -> ShellSetupPage(onNext = { page = 2 })
+                2 -> PermissionsSetupPage(onNext = { page = 3 })
+                else -> CompletionPage(onFinish = onFinish)
             }
-        }
-
-        if (currentPage < 3) {
-            BottomNavBar(currentPage = currentPage, onNext = { currentPage++ }, onSkip = { currentPage = 3 })
         }
     }
 }
 
-// ── Step Progress ──
+/** 分页指示器：当前页为胶囊，其余为圆点。 */
+@Composable
+private fun PageIndicator(current: Int, total: Int, modifier: Modifier = Modifier) {
+    Row(
+        modifier.semantics { contentDescription = "第 ${current + 1} 步，共 $total 步" },
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(total) { i ->
+            val w by animateDpAsState(if (i == current) 24.dp else 8.dp, Motion.emphasized(), label = "dotW")
+            val c by animateColorAsState(
+                when {
+                    i == current -> MaterialTheme.colorScheme.primary
+                    i < current -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                    else -> MaterialTheme.colorScheme.outlineVariant
+                },
+                label = "dotC",
+            )
+            Box(Modifier.height(8.dp).width(w).clip(CircleShape).background(c))
+        }
+    }
+}
+
+/** 插画式大图标：两层柔和同心圆。 */
+@Composable
+private fun HeroIllustration(icon: ImageVector, tint: Color = MaterialTheme.colorScheme.primary, size: Int = 132, modifier: Modifier = Modifier) {
+    Box(modifier.size(size.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(size.dp).clip(CircleShape).background(tint.copy(alpha = 0.08f)))
+        Box(Modifier.size((size * 0.7f).dp).clip(CircleShape).background(tint.copy(alpha = 0.14f)))
+        Box(Modifier.size((size * 0.46f).dp).clip(CircleShape).background(tint), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size((size * 0.24f).dp))
+        }
+    }
+}
+
+/** 可滚动页面主体；内容不足一屏时 weight 仍生效（把主按钮推到底部）。 */
+@Composable
+private fun PageBody(content: @Composable ColumnScope.() -> Unit) {
+    // 完成页没有顶栏，由这里补状态栏间距（有顶栏时 insets 已被消费，此处为 0）
+    BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding()) {
+        val minH = maxHeight
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(min = minH).padding(horizontal = Spacing.xl),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                content = content,
+            )
+        }
+    }
+}
 
 @Composable
-private fun StepProgressBar(currentPage: Int, totalSteps: Int) {
-    Column(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 24.dp, vertical = 20.dp)
+private fun PrimaryAction(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+        shape = MaterialTheme.shapes.large,
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(totalSteps) { i ->
-                Box(
-                    modifier = Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp))
-                        .background(when { i == currentPage -> Teal600; i < currentPage -> Teal600.copy(alpha = 0.5f); else -> Slate100 })
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text("${currentPage + 1}/$totalSteps", style = MaterialTheme.typography.labelSmall, color = Slate600)
+        Text(text, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.width(Spacing.sm))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
     }
 }
 
@@ -135,39 +242,38 @@ private fun StepProgressBar(currentPage: Int, totalSteps: Int) {
 
 @Composable
 private fun WelcomePage(onNext: () -> Unit) {
-    val pulse by rememberInfiniteTransition(label = "p").animateFloat(1f, 1.06f, infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "s")
-
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Spacer(Modifier.weight(0.6f))
-        Box(modifier = Modifier.size(130.dp).scale(pulse).clip(CircleShape).background(Brush.radialGradient(listOf(Teal700, Teal600, Color(0xFF14B8A6)))), contentAlignment = Alignment.Center) {
-            Text("H", fontSize = 52.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        }
-        Spacer(Modifier.height(40.dp))
-        Text("欢迎来到 Habitat", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = Slate800)
-        Spacer(Modifier.height(12.dp))
-        Text("智能自动化脚本引擎 — 轻松编排你的手机操作流程", style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = Slate600)
-        Spacer(Modifier.weight(0.4f))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            FeatureBadge(Icons.Rounded.FlashOn, "自动化")
+    val scale = remember { Animatable(0.85f) }
+    LaunchedEffect(Unit) { scale.animateTo(1f, spring(0.55f, Spring.StiffnessLow)) }
+    PageBody {
+        Spacer(Modifier.height(Spacing.xxxl))
+        HeroIllustration(Icons.Rounded.AutoAwesome, size = 160, modifier = Modifier.scale(scale.value))
+        Spacer(Modifier.height(Spacing.xxl))
+        Text("欢迎来到 Habitat", style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(Spacing.md))
+        Text(
+            "把重复的手机操作编排成工作流，\n让它按时、按事件自动完成。",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(Spacing.xxl))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            FeatureBadge(Icons.Rounded.FlashOn, "事件触发")
             FeatureBadge(Icons.Rounded.TouchApp, "模拟操作")
             FeatureBadge(Icons.Rounded.Security, "系统级")
         }
-        Spacer(Modifier.height(48.dp))
-        Button(onClick = onNext, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Teal600)) {
-            Text("开始配置", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.width(8.dp))
-            Icon(Icons.Default.ChevronRight, null, modifier = Modifier.size(20.dp))
-        }
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.weight(1f).heightIn(min = Spacing.xxl))
+        PrimaryAction("开始配置", onClick = onNext)
+        Spacer(Modifier.height(Spacing.xl))
     }
 }
 
 @Composable
 private fun FeatureBadge(icon: ImageVector, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(Teal50), contentAlignment = Alignment.Center) { Icon(icon, null, tint = Teal600, modifier = Modifier.size(24.dp)) }
-        Spacer(Modifier.height(6.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = Slate600)
+        IconTile(icon, size = 48)
+        Spacer(Modifier.height(Spacing.sm))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -178,156 +284,225 @@ private fun ShellSetupPage(onNext: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(HabitatMainActivity.PREFS_NAME, Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
-    var selectedMode by remember { mutableStateOf("none") }
-    var isVerified by remember { mutableStateOf(false) }
-    var autoEnableAcc by remember { mutableStateOf(false) }
-    var forceKeepAlive by remember { mutableStateOf(false) }
+    var mode by rememberSaveable { mutableStateOf("none") }
+    var verified by rememberSaveable { mutableStateOf(false) }
+    var verifying by remember { mutableStateOf(false) }
+    var autoEnableAcc by rememberSaveable { mutableStateOf(false) }
+    var keepAlive by rememberSaveable { mutableStateOf(false) }
+    val ext = HabitatTheme.extendedColors
 
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.height(16.dp))
-        Icon(Icons.Rounded.Terminal, null, modifier = Modifier.size(52.dp), tint = Teal600)
-        Spacer(Modifier.height(12.dp))
-        Text("选择 Shell 模式", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Slate800)
-        Text("Habitat 可通过 Shizuku 或 Root 执行系统级操作", style = MaterialTheme.typography.bodyMedium, color = Slate600, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(28.dp))
+    fun verify() {
+        verifying = true
+        scope.launch {
+            // isRootAvailable 会执行 su 并等待（Magisk 弹窗期间阻塞），必须在 IO 线程
+            val ok = withContext(Dispatchers.IO) {
+                if (mode == "shizuku") HabitatShellManager.isShizukuActive() else HabitatShellManager.isRootAvailable()
+            }
+            verifying = false
+            verified = ok
+            if (!ok) {
+                Toast.makeText(context, if (mode == "shizuku") "Shizuku 未运行或未授权" else "未检测到 Root 权限", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
-        ShellCard(Icons.Rounded.IntegrationInstructions, "Shizuku（推荐）", "安全高效，通过 Shizuku API 授权", selectedMode == "shizuku", Teal600) { selectedMode = "shizuku"; isVerified = false }
-        Spacer(Modifier.height(10.dp))
-        ShellCard(Icons.Rounded.Build, "Root 权限", "完整的系统访问能力", selectedMode == "root", Amber500) { selectedMode = "root"; isVerified = false }
-        Spacer(Modifier.height(10.dp))
-        ShellCard(Icons.Rounded.Block, "暂不配置", "仅使用无障碍服务", selectedMode == "none", Slate600) { selectedMode = "none"; isVerified = true }
+    PageBody {
+        Spacer(Modifier.height(Spacing.xl))
+        HeroIllustration(Icons.Outlined.Terminal, size = 112)
+        Spacer(Modifier.height(Spacing.xl))
+        Text("选择 Shell 模式", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(Spacing.sm))
+        Text(
+            "通过 Shizuku 或 Root 执行系统级操作（WiFi、截图、强制停止等）",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(Spacing.xl))
 
-        Spacer(Modifier.height(20.dp))
-        AnimatedVisibility(visible = selectedMode != "none" && !isVerified, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            OutlinedButton(onClick = {
-                if (selectedMode == "shizuku") {
-                    if (HabitatShellManager.isShizukuActive()) isVerified = true
-                    else Toast.makeText(context, "Shizuku 未运行或未授权", Toast.LENGTH_SHORT).show()
-                } else if (selectedMode == "root") {
-                    if (HabitatShellManager.isRootAvailable()) isVerified = true
-                    else Toast.makeText(context, "未检测到 Root 权限", Toast.LENGTH_SHORT).show()
-                }
-            }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Rounded.VerifiedUser, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("验证连接")
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            ShellCard(Icons.Rounded.IntegrationInstructions, "Shizuku（推荐）", "安全高效，无需 Root", mode == "shizuku", MaterialTheme.colorScheme.primary) {
+                mode = "shizuku"; verified = false
+            }
+            ShellCard(Icons.Rounded.Build, "Root", "完整的系统访问能力", mode == "root", ext.warning) {
+                mode = "root"; verified = false
+            }
+            ShellCard(Icons.Outlined.Block, "暂不配置", "仅使用无障碍服务", mode == "none", MaterialTheme.colorScheme.outline) {
+                mode = "none"; verified = true
             }
         }
 
-        AnimatedVisibility(visible = isVerified && selectedMode != "none", enter = expandVertically(tween(400)) + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Teal50)) {
-                Column(Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.CheckCircle, null, tint = Teal600); Spacer(Modifier.width(8.dp)); Text("连接验证成功", fontWeight = FontWeight.SemiBold, color = Teal700) }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Teal600.copy(alpha = 0.15f))
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { autoEnableAcc = !autoEnableAcc }.padding(vertical = 2.dp)) {
-                        Checkbox(checked = autoEnableAcc, onCheckedChange = { autoEnableAcc = it }, colors = CheckboxDefaults.colors(checkedColor = Teal600)); Spacer(Modifier.width(4.dp)); Text("自动维持无障碍服务开启", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(Spacing.lg))
+        AnimatedVisibility(mode != "none" && !verified, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            OutlinedButton(
+                onClick = ::verify,
+                enabled = !verifying,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                shape = MaterialTheme.shapes.large,
+            ) {
+                if (verifying) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(Spacing.sm))
+                    Text(if (mode == "root") "检测中…（如有授权弹窗请允许）" else "检测中…")
+                } else {
+                    Icon(Icons.Outlined.VerifiedUser, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(Spacing.sm))
+                    Text("验证连接")
+                }
+            }
+        }
+        AnimatedVisibility(verified && mode != "none", enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            Surface(shape = MaterialTheme.shapes.large, color = ext.successContainer, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(Spacing.lg)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = ext.success)
+                        Spacer(Modifier.width(Spacing.sm))
+                        Text("连接验证成功", style = MaterialTheme.typography.titleSmall, color = ext.onSuccessContainer)
                     }
-                    if (selectedMode == "shizuku") {
-                        Spacer(Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { forceKeepAlive = !forceKeepAlive }.padding(vertical = 2.dp)) {
-                            Checkbox(checked = forceKeepAlive, onCheckedChange = { forceKeepAlive = it }, colors = CheckboxDefaults.colors(checkedColor = Teal600)); Spacer(Modifier.width(4.dp)); Text("保持后台服务存活", style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
+                    Spacer(Modifier.height(Spacing.sm))
+                    CheckRow("自动维持无障碍服务开启", autoEnableAcc) { autoEnableAcc = it }
+                    if (mode == "shizuku") CheckRow("保持后台服务存活", keepAlive) { keepAlive = it }
                 }
             }
         }
 
-        Spacer(Modifier.height(32.dp))
-        val canProceed = selectedMode == "none" || isVerified
-        Button(onClick = {
-            prefs.edit().putString("default_shell_mode", selectedMode).putBoolean("autoEnableAccessibility", autoEnableAcc).putBoolean("forceKeepAliveEnabled", forceKeepAlive).apply()
+        Spacer(Modifier.weight(1f).heightIn(min = Spacing.xl))
+        val canProceed = mode == "none" || verified
+        PrimaryAction(if (mode == "none") "跳过，继续" else "保存并继续", enabled = canProceed) {
+            prefs.edit()
+                .putString("default_shell_mode", mode)
+                .putBoolean("autoEnableAccessibility", autoEnableAcc)
+                .putBoolean("forceKeepAliveEnabled", keepAlive)
+                .apply()
             onNext()
-        }, enabled = canProceed, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = if (canProceed) Teal600 else Slate100)) {
-            Text(if (selectedMode == "none") "跳过，继续下一步" else "保存并继续", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.width(6.dp))
-            Icon(Icons.Default.ChevronRight, null, modifier = Modifier.size(18.dp))
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(Spacing.xl))
     }
 }
 
 @Composable
-private fun ShellCard(icon: ImageVector, title: String, subtitle: String, isSelected: Boolean, accentColor: Color, onClick: () -> Unit) {
-    val borderColor by animateColorAsState(if (isSelected) accentColor else Color.Transparent, label = "b")
-    val bgColor by animateColorAsState(if (isSelected) accentColor.copy(alpha = 0.06f) else MaterialTheme.colorScheme.surface, label = "bg")
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = bgColor), border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) borderColor else MaterialTheme.colorScheme.outlineVariant)) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(accentColor.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = accentColor, modifier = Modifier.size(22.dp)) }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Slate600) }
-            RadioButton(selected = isSelected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = accentColor))
+private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Checkbox) { onChange(!checked) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null)
+        Spacer(Modifier.width(Spacing.sm))
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun ShellCard(icon: ImageVector, title: String, subtitle: String, selected: Boolean, accent: Color, onClick: () -> Unit) {
+    val border by animateColorAsState(if (selected) accent else MaterialTheme.colorScheme.outlineVariant, label = "b")
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.large,
+        color = if (selected) accent.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(if (selected) 2.dp else 1.dp, border),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(Spacing.lg), verticalAlignment = Alignment.CenterVertically) {
+            IconTile(icon, tint = accent, size = 44)
+            Spacer(Modifier.width(Spacing.md))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            RadioButton(selected = selected, onClick = null)
         }
     }
 }
 
 // ── Permissions ──
 
-private data class OnboardingPerm(
-    val id: String, val name: String, val desc: String,
-    val isGranted: (Context) -> Boolean,
-    val requestIntent: (Context) -> Intent?
-)
+private val ONBOARDING_PERMISSION_IDS = listOf("notification_listener", "post_notifications", "battery", "overlay")
 
 @Composable
 private fun PermissionsSetupPage(onNext: () -> Unit) {
     val context = LocalContext.current
-    val permissions = remember {
-        listOf(
-            OnboardingPerm("notifications", "通知权限", "监听系统通知作为工作流触发器",
-                isGranted = { ctx -> try { Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners")?.contains(ctx.packageName) == true } catch (_: Exception) { false } },
-                requestIntent = { ctx -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) } }
-            ),
-            OnboardingPerm("battery", "电池优化白名单", "防止系统在后台停止工作流执行",
-                isGranted = { ctx -> (ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isIgnoringBatteryOptimizations(ctx.packageName) ?: false },
-                requestIntent = { ctx -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${ctx.packageName}"); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) } }
-            ),
-            OnboardingPerm("overlay", "悬浮窗权限", "显示悬浮控制面板",
-                isGranted = { ctx -> Settings.canDrawOverlays(ctx) },
-                requestIntent = { ctx -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) } }
-            )
+    val scope = rememberCoroutineScope()
+    val items = remember {
+        val all = buildPermissionItems().associateBy { it.id }
+        ONBOARDING_PERMISSION_IDS.mapNotNull { all[it] }
+    }
+    var granted by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    var clickCount by remember { mutableIntStateOf(0) }
+    var lastClick by remember { mutableLongStateOf(0L) }
+
+    suspend fun refresh() { granted = items.associate { it.id to it.isGranted(context) } }
+
+    LifecycleResumeEffect(Unit) {
+        val job = scope.launch { refresh() }
+        onPauseOrDispose { job.cancel() }
+    }
+    val runtimeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        scope.launch { refresh() }
+    }
+
+    fun request(item: PermissionItem) {
+        val rt = item.runtimePermission
+        if (rt != null) { runtimeLauncher.launch(rt); return }
+        val intent = item.createRequestIntent(context) ?: return
+        try { context.startActivity(intent) } catch (_: Exception) {
+            Toast.makeText(context, "无法打开设置页，请手动前往系统设置", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val grantedCount = granted.count { it.value }
+    val allGranted = granted.size == items.size && grantedCount == items.size
+
+    PageBody {
+        Spacer(Modifier.height(Spacing.xl))
+        HeroIllustration(
+            Icons.Outlined.Shield,
+            tint = if (allGranted) HabitatTheme.extendedColors.success else MaterialTheme.colorScheme.primary,
+            size = 112,
+            modifier = Modifier.clickable(indication = null, interactionSource = null) {
+                // 隐藏入口：2 秒内连点 5 次直接进入下一步
+                val now = System.currentTimeMillis()
+                clickCount = if (now - lastClick > 2000) 1 else clickCount + 1
+                lastClick = now
+                if (clickCount >= 5) onNext()
+            },
         )
-    }
+        Spacer(Modifier.height(Spacing.xl))
+        Text("授予必要权限", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(Spacing.sm))
+        Text(
+            "授权后返回这里，状态会自动更新（$grantedCount/${items.size}）",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(Spacing.xl))
 
-    var grantedMap by remember { mutableStateOf(permissions.associate { it.id to it.isGranted(context) }) }
-    var clickCount by remember { mutableIntStateOf(0) }; var lastClick by remember { mutableLongStateOf(0L) }
-    val allGranted = grantedMap.all { it.value }
-
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        grantedMap = permissions.associate { it.id to it.isGranted(context) }
-    }
-
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.height(16.dp))
-        Box(modifier = Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(Amber50).clickable {
-            val now = System.currentTimeMillis(); clickCount = if (now - lastClick > 2000) 1 else clickCount + 1; lastClick = now; if (clickCount >= 5) onNext()
-        }, contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Shield, null, tint = Amber500, modifier = Modifier.size(28.dp)) }
-        Spacer(Modifier.height(12.dp))
-        Text("需要授权", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Slate800)
-        Text("以下权限是 Habitat 正常运行所必需的", style = MaterialTheme.typography.bodyMedium, color = Slate600, textAlign = TextAlign.Center)
-        if (allGranted) { Surface(shape = RoundedCornerShape(8.dp), color = Teal50) { Row(Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) { Icon(Icons.Default.CheckCircle, null, tint = Teal600, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("全部已授权", style = MaterialTheme.typography.labelMedium, color = Teal700) } } }
-        Spacer(Modifier.height(28.dp))
-
-        permissions.forEach { perm ->
-            val granted = grantedMap[perm.id] ?: false
-            val statusColor by animateColorAsState(if (granted) Teal600 else Amber500, label = "sc")
-            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = if (granted) Teal50.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface), border = if (!granted) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(10.dp).clip(CircleShape).background(statusColor))
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) { Text(perm.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold); Text(perm.desc, style = MaterialTheme.typography.bodySmall, color = Slate600) }
-                    if (!granted) {
-                        FilledTonalButton(onClick = { perm.requestIntent(context)?.let { launcher.launch(it) } }, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp), modifier = Modifier.height(36.dp), shape = RoundedCornerShape(10.dp)) { Text("去授权", fontSize = 13.sp, color = statusColor, fontWeight = FontWeight.SemiBold) }
-                    } else { Icon(Icons.Default.CheckCircle, null, tint = Teal600, modifier = Modifier.size(22.dp)) }
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            items.forEach { item ->
+                val ok = granted[item.id] == true
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = if (ok) HabitatTheme.extendedColors.successContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(Modifier.padding(Spacing.lg), verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(item.icon, tint = if (ok) HabitatTheme.extendedColors.success else MaterialTheme.colorScheme.primary, size = 40)
+                        Spacer(Modifier.width(Spacing.md))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.name, style = MaterialTheme.typography.titleSmall)
+                            Text(item.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(Modifier.width(Spacing.sm))
+                        if (ok) StatusPill(PillStatus.Success, "已授予")
+                        else FilledTonalButton(onClick = { request(item) }, contentPadding = PaddingValues(horizontal = Spacing.md)) { Text("去授权") }
+                    }
                 }
             }
         }
 
-        Spacer(Modifier.height(32.dp))
-        Button(onClick = onNext, enabled = allGranted, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = if (allGranted) Teal600 else Slate100)) {
-            if (allGranted) { Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("全部完成，继续", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
-            else Text("请先完成所有授权", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.weight(1f).heightIn(min = Spacing.xl))
+        PrimaryAction(if (allGranted) "全部完成，继续" else "稍后再说，继续", onClick = onNext)
+        Spacer(Modifier.height(Spacing.xl))
     }
 }
 
@@ -335,32 +510,22 @@ private fun PermissionsSetupPage(onNext: () -> Unit) {
 
 @Composable
 private fun CompletionPage(onFinish: () -> Unit) {
-    val scaleAnim = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { scaleAnim.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow)) }
-
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Box(modifier = Modifier.size(120.dp).scale(scaleAnim.value).clip(CircleShape).background(Brush.radialGradient(listOf(Teal600, Teal700))), contentAlignment = Alignment.Center) { Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(56.dp)) }
-        Spacer(Modifier.height(36.dp))
-        Text("引擎就绪！", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = Slate800)
-        Spacer(Modifier.height(14.dp))
-        Text("所有配置已完成。\n现在就开始探索吧。", style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = Slate600, lineHeight = 24.sp)
-        Spacer(Modifier.height(56.dp))
-        Button(onClick = onFinish, modifier = Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Teal600)) {
-            Text("进入 Habitat", fontSize = 18.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.width(8.dp)); Icon(Icons.Default.KeyboardArrowRight, null, modifier = Modifier.size(22.dp))
-        }
-    }
-}
-
-// ── Bottom nav ──
-
-@Composable
-private fun BottomNavBar(currentPage: Int, onNext: () -> Unit, onSkip: () -> Unit) {
-    Surface(modifier = Modifier.fillMaxWidth(), shadowElevation = 8.dp, color = MaterialTheme.colorScheme.surface) {
-        Row(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onSkip) { Text("跳过", color = Slate600) }
-            Button(onClick = onNext, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Teal600)) {
-                Text("继续", fontWeight = FontWeight.SemiBold); Spacer(Modifier.width(6.dp)); Icon(Icons.Default.ChevronRight, null, modifier = Modifier.size(18.dp))
-            }
-        }
+    val scale = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { scale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow)) }
+    PageBody {
+        Spacer(Modifier.weight(1f).heightIn(min = Spacing.xxxl))
+        HeroIllustration(Icons.Outlined.Check, tint = HabitatTheme.extendedColors.success, size = 160, modifier = Modifier.scale(scale.value))
+        Spacer(Modifier.height(Spacing.xxl))
+        Text("引擎就绪", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(Spacing.md))
+        Text(
+            "随时可以在「我的 › 权限管理」里补全授权。\n现在就开始创建第一个工作流吧。",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.weight(1f).heightIn(min = Spacing.xxl))
+        PrimaryAction("进入 Habitat", onClick = onFinish)
+        Spacer(Modifier.height(Spacing.xl))
     }
 }
