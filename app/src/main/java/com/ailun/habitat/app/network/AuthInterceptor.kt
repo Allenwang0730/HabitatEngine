@@ -14,7 +14,8 @@ object AuthInterceptor : Interceptor {
         }
 
         val token = AuthStateManager.token
-        if (token != null) {
+        // 令牌同样不走明文公网（规则同登录凭据）
+        if (token != null && HabitatApiClient.isCredentialTransportAllowed(original.url)) {
             val request = original.newBuilder()
                 .header("Authorization", "Bearer $token")
                 .build()

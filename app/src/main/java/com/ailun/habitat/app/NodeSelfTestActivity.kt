@@ -26,7 +26,9 @@ import java.io.File
  * 节点自测 Activity（阶段 A · 自跑测试架，宿主在 Habitat app）。
  *
  * adb 驱动：
- *   adb shell am start -n com.ailun.habitat/.NodeSelfTestActivity --ez auto true
+ *   adb shell am start -n com.ailun.habitat/.app.NodeSelfTestActivity --ez auto true
+ *
+ * 入口受 android.permission.DUMP 保护（adb shell 持有，普通 App 无法拿到），仅供 adb 调试使用。
  *
  * 行为：
  * - 依次跑完 [NodeSelfTests] 全部用例（无障碍未连接时相关用例 SKIP）
@@ -61,7 +63,7 @@ class NodeSelfTestActivity : Activity() {
 
         // 调试用：前台 Activity 启动 Agent 服务（Android 14+ 后台启动受限，由界面代启），启完即退
         if (intent?.getBooleanExtra("start_agent", false) == true) {
-            startService(Intent(this, AgentService::class.java))
+            AgentService.start(this)
             Log.i("HabitatAgent", "AgentService started via activity")
             finish()
             return

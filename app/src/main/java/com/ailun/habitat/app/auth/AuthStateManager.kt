@@ -2,6 +2,7 @@ package com.ailun.habitat.app.auth
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 object AuthStateManager {
+    private const val TAG = "AuthStateManager"
     private const val PREFS_NAME = "habitat_auth"
     private const val KEY_TOKEN = "jwt_token"
     private const val KEY_USER_ID = "user_id"
@@ -31,22 +33,35 @@ object AuthStateManager {
     val isInitialized: Boolean
         get() = ::prefs.isInitialized
 
+    @Synchronized
     fun init(context: Context) {
         if (::prefs.isInitialized) return
+        val app = context.applicationContext
+        prefs = try {
+            open(app)
+        } catch (e: Exception) {
+            // Keystore 密钥丢失（备份恢复到新设备等）：删旧文件重建，需重新登录，不崩溃
+            Log.w(TAG, "加密存储不可用，重建（需重新登录）: ${e.javaClass.simpleName}")
+            app.deleteSharedPreferences(PREFS_NAME)
+            open(app)
+        }
+        _token = prefs.getString(KEY_TOKEN, null)
+        _userId = prefs.getString(KEY_USER_ID, null)
+        _username = prefs.getString(KEY_USERNAME, null)
+        _isLoggedIn.value = _token != null
+    }
+
+    private fun open(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-        prefs = EncryptedSharedPreferences.create(
+        return EncryptedSharedPreferences.create(
             context,
             PREFS_NAME,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )
-        _token = prefs.getString(KEY_TOKEN, null)
-        _userId = prefs.getString(KEY_USER_ID, null)
-        _username = prefs.getString(KEY_USERNAME, null)
-        _isLoggedIn.value = _token != null
     }
 
     fun setAuth(token: String, userId: String, username: String) {
@@ -54,6 +69,7 @@ object AuthStateManager {
         _userId = userId
         _username = username
         _isLoggedIn.value = true
+        if (!::prefs.isInitialized) return
         prefs.edit()
             .putString(KEY_TOKEN, token)
             .putString(KEY_USER_ID, userId)
@@ -66,6 +82,6 @@ object AuthStateManager {
         _userId = null
         _username = null
         _isLoggedIn.value = false
-        prefs.edit().clear().apply()
+        if (::prefs.isInitialized) prefs.edit().clear().apply()
     }
 }

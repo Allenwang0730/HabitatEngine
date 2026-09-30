@@ -1,6 +1,7 @@
 package com.ailun.habitat.app.ai
 
 import android.content.Context
+import com.ailun.habitat.app.auth.SecretStore
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
@@ -71,17 +72,17 @@ object WorkflowAIClient {
             }
         }
 
-    // key 持久化（SharedPreferences，设置页/界面可改）——不硬编码，避免泄露
+    // key 加密存储（SecretStore，自动从旧明文 prefs 迁移）——不硬编码，避免泄露
     private const val PREFS = "workflow_ai_prefs"
     private const val KEY_API = "deepseek_api_key"
     private const val KEY_BASE = "base_url"
 
     /** 读取配置的 API key；未配置则返回 null（调用方应引导用户配置，不 fallback 到硬编码）。 */
     fun getApiKey(context: Context): String? =
-        context.getSharedPreferences(PREFS, 0).getString(KEY_API, null)?.takeIf { it.isNotBlank() }
+        SecretStore.get(context, SecretStore.DEEPSEEK_API_KEY, legacyPrefs = PREFS, legacyKey = KEY_API)
 
     fun setApiKey(context: Context, key: String) {
-        context.getSharedPreferences(PREFS, 0).edit().putString(KEY_API, key.trim()).apply()
+        SecretStore.put(context, SecretStore.DEEPSEEK_API_KEY, key)
     }
 
     fun getBaseUrl(context: Context): String =

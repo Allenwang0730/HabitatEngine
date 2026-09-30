@@ -63,7 +63,9 @@ object AppAccessibilityProvider : IAccessibilityProvider {
                 try {
                     val root = service.rootInActiveWindow
                     if (root != null) {
-                        return root.packageName?.toString()
+                        val pkg = root.packageName?.toString()
+                        runCatching { root.recycle() }
+                        return pkg
                     }
                 } catch (_: Exception) {}
             }
