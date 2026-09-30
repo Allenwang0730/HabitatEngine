@@ -40,11 +40,15 @@ data class ParsedChoice(val choice: String, val confidence: Double)
 /** TypeSafe choice 答案：choice 必须在候选里；若带了概率，被选中的项必须是最大项。 */
 fun parseChoice(answer: JsonObject?, allowed: Set<String>): ParsedChoice? {
     if (answer == null || allowed.isEmpty()) return null
-    val type = answer.get("type")?.asString
+    val type = answer.get("type").stringOrNull()
     if (type != null && type != "choice") return null
-    val choice = answer.get("choice")?.asString ?: return null
+    val choice = answer.get("choice").stringOrNull() ?: return null
     if (choice !in allowed) return null
-    val confidence = answer.get("confidence")?.let { runCatching { it.asDouble }.getOrNull() } ?: 1.0
+    val rawConfidence = answer.get("confidence")
+    val confidence = when {
+        rawConfidence == null || rawConfidence.isJsonNull -> 1.0
+        else -> runCatching { rawConfidence.asDouble }.getOrNull() ?: return null
+    }
     if (confidence < 0.0 || confidence > 1.0) return null
     val probs = answer.get("probabilities")?.takeIf { it.isJsonObject }?.asJsonObject
     if (probs != null) {
@@ -94,8 +98,8 @@ fun parseModelDecision(raw: String, catalog: ActionCatalog): Decision {
     val obj = runCatching {
         com.google.gson.JsonParser.parseString(raw.substring(start, end + 1)).asJsonObject
     }.getOrNull() ?: return Decision("error", "", detail = "决策 JSON 无法解析")
-    val operation = obj.get("operation")?.asString?.trim().orEmpty()
-    val target = obj.get("target")?.asString?.trim()?.takeIf { it.isNotEmpty() }
+    val operation = obj.get("operation").stringOrNull()?.trim().orEmpty()
+    val target = obj.get("target").stringOrNull()?.trim()?.takeIf { it.isNotEmpty() }
     if (operation !in catalog.operations) {
         return Decision("error", operation, target, detail = "操作不在候选中: $operation")
     }

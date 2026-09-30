@@ -94,4 +94,95 @@ class AgentPolicyTest {
         val unfocused = Catalogs.build("在搜索框输入「你好」", screen().copy(focusedIndex = null), emptyList())
         assertTrue(unfocused.textValues.isEmpty())
     }
+
+    @Test
+    fun remoteGoalCannotUnlockSensitiveTap() {
+        val remote = Catalogs.build("去确认支付", screen(), emptyList(), allowGoalUnlock = false)
+        assertTrue(remote.tapTargets.values.none { it.contains("支付") })
+        assertTrue(remote.tapTargets.values.contains("设置"))
+    }
+
+    @Test
+    fun paymentPasswordScreenAllowsOnlyNavigation() {
+        val pin = screen().copy(
+            elements = (1..9).map { ScreenElement("$it", "$it", 100 * it, 1800, clickable = true, editable = false, focused = false) },
+            visibleText = "请输入支付密码\n1\n2\n3",
+            focusedIndex = null,
+        )
+        val catalog = Catalogs.build("给张三转账 1 元并确认支付", pin, emptyList())
+        assertTrue(catalog.guard != null)
+        assertTrue(catalog.tapTargets.isEmpty())
+        assertTrue("TAP" !in catalog.operations)
+        assertTrue("BACK" in catalog.operations)
+    }
+
+    @Test
+    fun permissionDialogNeedsExplicitLocalGoal() {
+        val dialog = screen().copy(
+            packageName = "com.android.permissioncontroller",
+            elements = listOf(ScreenElement("1", "允许", 540, 1600, clickable = true, editable = false, focused = false)),
+            visibleText = "要允许 X 访问位置信息吗？\n允许",
+            focusedIndex = null,
+        )
+        assertTrue(Catalogs.build("打开地图导航", dialog, emptyList()).tapTargets.isEmpty())
+        assertTrue(Catalogs.build("给地图授权定位并允许", dialog, emptyList(), allowGoalUnlock = false).tapTargets.isEmpty())
+        assertEquals("允许", Catalogs.build("给地图授权定位并允许", dialog, emptyList()).tapTargets["1"])
+    }
+
+    @Test
+    fun passwordFieldIsNeverATypeTarget() {
+        val pwd = screen().copy(
+            elements = listOf(ScreenElement("1", ScreenObserver.PASSWORD_PLACEHOLDER, 100, 80, clickable = true, editable = true, focused = true, password = true)),
+            visibleText = ScreenObserver.PASSWORD_PLACEHOLDER,
+            focusedIndex = "1",
+        )
+        assertTrue(Catalogs.build("输入「hunter2」", pwd, emptyList()).textValues.isEmpty())
+    }
+
+    @Test
+    fun activeWindowWinsOverStatusBar() {
+        fun node(text: String, y: Int, pkg: String, rank: Int) = ScreenObserver.RawNode(
+            text = text, x = 100 + y % 7, y = y, clickable = true, editable = false, focused = false,
+            viewId = "", pkg = pkg, password = false, rank = rank,
+        )
+        val statusBar = (0 until 50).map { node("icon$it", it, "com.android.systemui", ScreenObserver.RANK_SYSTEM) }
+        val settings = listOf("隐私", "电池", "关于手机").mapIndexed { i, t ->
+            node(t, 500 + i * 200, "com.android.settings", ScreenObserver.RANK_ACTIVE)
+        }
+        val obs = ScreenObserver.select(statusBar + settings, 1440, 3200, "a11y")
+        assertEquals("com.android.settings", obs.packageName)
+        assertTrue(obs.elements.map { it.text }.containsAll(listOf("隐私", "电池", "关于手机")))
+        assertEquals(40, obs.elements.size)
+        assertEquals((1..40).map { it.toString() }, obs.elements.map { it.index })
+    }
+
+    @Test
+    fun jevAnswerWithWrongFieldTypesIsRejectedNotThrown() {
+        val catalog = Catalogs.build("打开设置", screen(), emptyList())
+        assertEquals("error", parseJevAnswer("""{"answers":[]}""", catalog).status)
+        assertEquals("error", parseJevAnswer("""{"answers":{"operation":null}}""", catalog).status)
+        assertEquals("error", parseJevAnswer("""{"answers":{"operation":{"choice":null}}}""", catalog).status)
+        assertEquals("error", parseJevAnswer("""{"answers":{"operation":{"choice":"TAP"},"tap_target":"1"}}""", catalog).status)
+        assertEquals("error", parseJevAnswer("not json", catalog).status)
+        assertEquals("error", parseJevAnswer("""{"answers":{"operation":{"choice":"TAP","confidence":"high"}}}""", catalog).status)
+    }
+
+    @Test
+    fun jevAnswerResolvesTapAndKeepsConfidence() {
+        val catalog = Catalogs.build("打开设置", screen(), emptyList())
+        val d = parseJevAnswer(
+            """{"answers":{"operation":{"type":"choice","choice":"TAP","confidence":0.8},"tap_target":{"choice":"1"}}}""",
+            catalog,
+        )
+        assertEquals("action", d.status)
+        assertEquals("设置", d.action?.matchText)
+        assertEquals(0.8, d.confidence, 1e-9)
+    }
+
+    @Test
+    fun modelDecisionWithNullTargetDoesNotThrow() {
+        val catalog = Catalogs.build("打开设置", screen(), emptyList())
+        assertEquals("error", parseModelDecision("""{"operation":"TAP","target":null}""", catalog).status)
+        assertEquals("action", parseModelDecision("""好的 {"operation":"BACK"}""", catalog).status)
+    }
 }

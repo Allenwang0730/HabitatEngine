@@ -34,12 +34,16 @@ object WeChatOcr {
         return try {
             val result = suspendCancellableCoroutine { cont ->
                 recognizer.process(InputImage.fromBitmap(bitmap, 0))
-                    .addOnSuccessListener { cont.resume(it) }
-                    .addOnFailureListener { cont.resume(null) }
+                    .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
+                    .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+            }
+            if (result == null) {
+                backoff()
+                return null
             }
             backoffMs = 1_000L
             nextAllowedAt = System.currentTimeMillis() + 1_000L
-            if (result == null || result.textBlocks.isEmpty()) return null
+            if (result.textBlocks.isEmpty()) return null
             val scaleX = if (bitmap.width > 0) screenWidth.toFloat() / bitmap.width else 1f
             val scaleY = if (bitmap.height > 0) screenHeight.toFloat() / bitmap.height else 1f
             val elements = result.textBlocks.mapNotNull { block ->
@@ -83,19 +87,23 @@ object WeChatOcr {
             executor,
             object : AccessibilityService.TakeScreenshotCallback {
                 override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
-                    val soft = runCatching {
-                        val buffer = screenshot.hardwareBuffer
+                    val buffer = screenshot.hardwareBuffer
+                    val soft = try {
                         val hardware = Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
                         val copy = hardware?.copy(Bitmap.Config.ARGB_8888, false)
                         hardware?.recycle()
-                        buffer.close()
                         copy
-                    }.getOrNull()
-                    cont.resume(soft)
+                    } catch (_: Exception) {
+                        null
+                    } finally {
+                        buffer.close()
+                    }
+                    // 协程已取消时回调才到：直接回收，不然这张整屏位图就泄漏了
+                    if (cont.isActive) cont.resume(soft) else soft?.recycle()
                 }
 
                 override fun onFailure(errorCode: Int) {
-                    cont.resume(null)
+                    if (cont.isActive) cont.resume(null)
                 }
             },
         )

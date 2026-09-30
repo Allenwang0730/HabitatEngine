@@ -1,10 +1,31 @@
 package com.ailun.habitat.app.agent
 
 /**
- * 从当前屏幕生成候选动作。支付类按钮默认不进入候选，除非目标原文里写了同一个词。
+ * 从当前屏幕生成候选动作。
+ *
+ * 三道闸：
+ * - 敏感按钮（支付/删除/卸载/授权…）默认不进候选；本机发起且目标原文写了同一个词才放行。
+ *   远程发起（allowGoalUnlock=false）的目标一律不能解锁。
+ * - 支付密码、指纹/人脸验证等页面：不给任何点击和输入，只剩返回/桌面/等待/完成/无法继续。
+ * - 系统权限弹窗、安装器：只有本机发起且目标里明确写了"授权/允许/权限/安装"才给点击。
  */
 object Catalogs {
-    val sensitiveWords = listOf("转账", "红包", "付款", "支付", "确认支付", "确认转账")
+    val sensitiveWords = listOf(
+        "转账", "红包", "付款", "支付", "确认支付", "确认转账", "收款",
+        "购买", "下单", "提交订单", "立即支付", "充值", "提现",
+        "删除", "清空", "卸载", "恢复出厂", "重置", "注销", "退出登录",
+        "允许", "授权", "始终允许", "仅在使用中允许", "同意",
+    )
+    /** 出现这些文字说明是验证/支付凭据页，模型不能碰任何控件。 */
+    val lockedScreenWords = listOf("支付密码", "请输入6位", "验证指纹", "指纹支付", "面容支付", "人脸验证", "刷脸", "银行卡号")
+    val guardedPackages = setOf(
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
+        "com.android.packageinstaller",
+        "com.google.android.packageinstaller",
+    )
+    private val guardedUnlockWords = listOf("授权", "允许", "权限", "安装")
+
     private const val MAX_TAPS = 24
     private const val MAX_APPS = 8
     private const val MAX_TEXTS = 6
@@ -30,6 +51,7 @@ object Catalogs {
         goal: String,
         observation: ScreenObservation,
         apps: List<AppEntry>,
+        allowGoalUnlock: Boolean = true,
     ): ActionCatalog {
         val actions = mutableListOf<CatalogAction>()
         val operations = linkedMapOf<String, String>()
@@ -37,8 +59,9 @@ object Catalogs {
         val textValues = linkedMapOf<String, String>()
         val appTargets = linkedMapOf<String, String>()
 
-        val taps = observation.elements
-            .filter { it.clickable && it.text.isNotBlank() && allowedTap(goal, it.text) }
+        val guard = guardOf(goal, observation, allowGoalUnlock)
+        val taps = if (guard != null) emptyList() else observation.elements
+            .filter { it.clickable && it.text.isNotBlank() && allowedTap(goal, it.text, allowGoalUnlock) }
             .take(MAX_TAPS)
         if (taps.isNotEmpty()) {
             operations["TAP"] = "点击一个当前可见控件，用来打开、聚焦或选择。"
@@ -60,8 +83,10 @@ object Catalogs {
             }
         }
 
-        val focused = observation.elements.firstOrNull { it.index == observation.focusedIndex && it.editable }
-        val texts = if (focused != null) textCandidates(goal) else emptyList()
+        val focused = observation.elements.firstOrNull {
+            it.index == observation.focusedIndex && it.editable && !it.password
+        }
+        val texts = if (focused != null && guard == null) textCandidates(goal) else emptyList()
         if (texts.isNotEmpty()) {
             operations["TYPE_TEXT"] = "把当前焦点输入框替换成目标里给出的原文，不要编造。"
             texts.forEachIndexed { i, value ->
@@ -119,12 +144,24 @@ object Catalogs {
         actions.add(CatalogAction(id = "done", operation = "DONE", label = "完成"))
         actions.add(CatalogAction(id = "blocked", operation = "BLOCKED", label = "无法继续"))
 
-        return ActionCatalog(actions, operations, tapTargets, textValues, appTargets)
+        return ActionCatalog(actions, operations, tapTargets, textValues, appTargets, guard)
     }
 
-    fun allowedTap(goal: String, label: String): Boolean {
+    fun allowedTap(goal: String, label: String, allowGoalUnlock: Boolean = true): Boolean {
         val hit = sensitiveWords.firstOrNull { label.contains(it) } ?: return true
-        return goal.contains(hit)
+        return allowGoalUnlock && goal.contains(hit)
+    }
+
+    /** 当前屏幕需要整体收紧时返回原因，否则 null。 */
+    fun guardOf(goal: String, observation: ScreenObservation, allowGoalUnlock: Boolean): String? {
+        lockedScreenWords.firstOrNull { observation.visibleText.contains(it) }?.let {
+            return "验证/支付凭据页（$it），不点击也不输入"
+        }
+        if (observation.packageName in guardedPackages) {
+            val unlocked = allowGoalUnlock && guardedUnlockWords.any { goal.contains(it) }
+            if (!unlocked) return "系统权限/安装界面，目标未要求授权，不点击"
+        }
+        return null
     }
 
     private fun scrollAction(observation: ScreenObservation, down: Boolean): CatalogAction {

@@ -10,6 +10,8 @@ data class ScreenElement(
     val editable: Boolean,
     val focused: Boolean,
     val viewId: String = "",
+    /** 密码框：文字已替换成占位，不向决策器暴露原文，也不作为输入目标。 */
+    val password: Boolean = false,
 )
 
 data class ScreenObservation(
@@ -57,6 +59,8 @@ data class ActionCatalog(
     val tapTargets: Map<String, String>,
     val textValues: Map<String, String>,
     val apps: Map<String, String>,
+    /** 非空表示本屏被收紧（验证页/权限弹窗），只剩导航类动作。 */
+    val guard: String? = null,
 ) {
     fun resolve(operation: String, target: String?): CatalogAction? = when (operation) {
         "TAP" -> actions.find { it.operation == "TAP" && it.target == target }
@@ -81,4 +85,8 @@ data class StepNote(
     val actionId: String,
     val operation: String,
     val label: String,
+    /** 执行后屏幕是否有变化；null 表示未知。告诉决策器上一步是否起效。 */
+    val changed: Boolean? = null,
+    /** 同一动作的判重签名（操作 + 控件文字 + 前台包），不用序号，序号换屏就变。 */
+    val signature: String = actionId,
 )
