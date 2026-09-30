@@ -23,6 +23,10 @@ object HabitatStateStore {
     private val _runningStates = MutableStateFlow<Map<String, WorkflowRunState>>(emptyMap())
     val runningStates: StateFlow<Map<String, WorkflowRunState>> = _runningStates.asStateFlow()
 
+    /** 正在运行的工作流 id 集合（runningStates 的 key 视图，与之同步更新）。 */
+    private val _running = MutableStateFlow<Set<String>>(emptySet())
+    val running: StateFlow<Set<String>> = _running.asStateFlow()
+
     /** 工作流列表版本号 — 每次增删改工作流时递增，悬浮窗观察此值自动刷新 */
     private val _libraryVersion = MutableStateFlow(0L)
     private val libraryVersionCounter = AtomicLong(0)
@@ -43,6 +47,7 @@ object HabitatStateStore {
             }
             m
         }
+        _running.update { if (isRunning) it + workflowId else it - workflowId }
     }
 
     fun setFloatServiceActive(active: Boolean) {

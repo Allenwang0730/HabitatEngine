@@ -99,13 +99,17 @@ object HabitatJson {
         }
 
         private fun narrowNumber(raw: String): Number {
-            return raw.toDoubleOrNull()?.let { d ->
-                if (d == d.toLong().toDouble() && !raw.contains('.')) {
-                    val longVal = d.toLong()
-                    if (longVal in Int.MIN_VALUE..Int.MAX_VALUE) longVal.toInt()
-                    else longVal
-                } else d
-            } ?: 0.0
+            // 整数字面量先走 Long，避免大整数（> 2^53）经 Double 丢精度
+            raw.toLongOrNull()?.let { l ->
+                return if (l in Int.MIN_VALUE..Int.MAX_VALUE) l.toInt() else l
+            }
+            val d = raw.toDoubleOrNull() ?: return 0.0
+            // 保持旧行为：无小数点的整值（如 1e3）仍收窄为整数
+            if (!raw.contains('.') && d == Math.rint(d) && d >= Long.MIN_VALUE.toDouble() && d < Long.MAX_VALUE.toDouble()) {
+                val l = d.toLong()
+                return if (l in Int.MIN_VALUE..Int.MAX_VALUE) l.toInt() else l
+            }
+            return d
         }
     }
 
@@ -148,4 +152,16 @@ object HabitatJson {
         graph.validate()
         return graph
     }
+
+    /**
+     * 静态检查工作流图（不抛异常）：悬空 next/branches/参数引用、FORK targets 不存在、
+     * 未注册类型（[knownTypes] 非 null 时；FORK/JOIN 视为已知）、不可达节点、key 与 id 不一致。
+     * 通常传 `factory.availableTypes()` 作为 knownTypes。
+     */
+    fun lint(graph: WorkflowGraph, knownTypes: Set<String>? = null): List<LintIssue> =
+        try {
+            WorkflowLint.lint(graph, knownTypes)
+        } catch (e: Exception) {
+            listOf(LintIssue(null, "检查失败: ${e.message ?: e.javaClass.simpleName}", LintIssue.ERROR))
+        }
 }

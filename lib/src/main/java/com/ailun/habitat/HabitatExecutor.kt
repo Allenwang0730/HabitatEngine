@@ -2,6 +2,8 @@ package com.ailun.habitat
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,7 +18,8 @@ import kotlin.coroutines.coroutineContext
  * 工作流执行器。
  *
  * 健壮性机制（v1.4.1）：
- * - **节点级超时**：每个 handler 包 withTimeout（默认 120s，节点 params 可 `timeout_ms` 覆盖）；
+ * - **节点级超时**：每个 handler 包 withTimeout（默认 [NODE_TIMEOUT_DEFAULT_MS] = 30 分钟，
+ *   节点 params 可 `node_timeout_ms` 覆盖；`node_timeout_ms = 0` 表示不设节点超时）；
  *   超时按节点失败处理。注意：超时不能中断 handler 内的阻塞调用（如 Runtime.exec.waitFor），
  *   但工作流会继续前进，阻塞线程由系统回收。
  * - **require 声明式成功条件**：节点 params 可加 `require: "xxx_success"`，
@@ -25,7 +28,9 @@ import kotlin.coroutines.coroutineContext
  * - **错误变量**：失败时写 last_error / last_error_msg / last_node / last_node_type；
  *   节点成功时清空 last_error —— ACTION_TRY_CATCH 据此走 error/success 分支。
  * - **FORK/JOIN 并行**：ACTION_FORK 声明 targets 启动多个分支协程（共享 context.variables），
- *   ACTION_JOIN 等待所有分支完成。分支各自有步数上限与节点超时护栏。
+ *   ACTION_JOIN 等待**本分支**此前 fork 出的全部分支完成（嵌套 FORK 各自独立记录，互不覆盖）。
+ *   分支结束时仍未 join 的 fork 会被隐式等待——工作流"结束"时不留孤儿协程。
+ *   分支各自有步数上限与节点超时护栏。
  * - **1000 步上限**：主流程与每个分支各自计数。
  */
 class HabitatExecutor(
@@ -36,16 +41,25 @@ class HabitatExecutor(
     companion object {
         private const val TAG = "HabitatExecutor"
 
-        /** 节点级默认执行超时（毫秒，30 分钟兜底）。可用节点 params `node_timeout_ms` 覆盖。
+        /** 节点级默认执行超时（毫秒，30 分钟兜底）。可用节点 params `node_timeout_ms` 覆盖，
+         *  `node_timeout_ms = 0` 表示不设超时（WAIT_UNTIL_TIME 等长等待节点用）。
          *  注意：`timeout_ms` 是节点自身语义参数（如 WAIT_FOR_ELEMENT 的等待超时），executor 不读取。 */
         const val NODE_TIMEOUT_DEFAULT_MS = 1_800_000L
 
         /** FORK/JOIN 由 executor 内建处理（不经过 NodeHandlerFactory）。 */
         const val ACTION_FORK = "ACTION_FORK"
         const val ACTION_JOIN = "ACTION_JOIN"
-    }
 
-    private val executorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        /**
+         * 所有 executor 实例共享的顶层 scope（进程级，不需要 cancel；各次执行的 Job 由调用方持有并取消）。
+         * runNode 已捕获 Throwable，这里的 handler 只兜底记录漏网异常，避免 SupervisorJob 下未捕获异常直接杀进程。
+         */
+        private val executorScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e ->
+                Log.e(TAG, "uncaught in workflow coroutine: ${e.message}", e)
+            }
+        )
+    }
 
     fun execute(
         graph: WorkflowGraph,
@@ -92,7 +106,8 @@ class HabitatExecutor(
 
     /**
      * 从 startId 沿 next/branches 执行。主流程与 FORK 分支共用。
-     * 遇到 FORK 启动子分支；遇到 JOIN 等待子分支。
+     * 遇到 FORK 启动子分支并记入本分支的 pendingForks；遇到 JOIN 等待本分支已 fork 的全部子分支。
+     * 分支结束（含 break/步数上限/stop）时隐式 join 剩余子分支，保证返回即整棵子树已结束。
      */
     private suspend fun runBranch(
         startId: String,
@@ -103,6 +118,8 @@ class HabitatExecutor(
         var currentId: String? = startId
         var step = 0
         var errorCount = 0
+        // 本分支 fork 出、尚未 join 的子分支（局部变量：嵌套/连续 FORK 不会互相覆盖）
+        val pendingForks = ArrayList<Job>()
 
         while (currentId != null && step < maxSteps) {
             coroutineContext.ensureActive()
@@ -124,28 +141,26 @@ class HabitatExecutor(
                     val targets = parseForkTargets(node, ctx)
                     ctx.log("Fork: ${targets.size} branches → $targets")
                     // 分支用 CoroutineScope(coroutineContext) 挂到当前执行 job 下，使整棵树可被外部取消级联
-                    val jobs = targets.map { t ->
+                    targets.mapTo(pendingForks) { t ->
                         CoroutineScope(coroutineContext).launch {
                             try {
                                 runBranch(t, index, ctx, maxSteps)
-                            } catch (e: kotlinx.coroutines.CancellationException) {
+                            } catch (e: CancellationException) {
                                 throw e // 取消必须向上传播（分支 job 已随父取消）
-                            } catch (e: Exception) {
-                                ctx.log("✗ Branch '$t' failed: ${e.message}")
+                            } catch (e: Throwable) {
+                                ctx.log("✗ Branch '$t' failed: ${e.message ?: e.javaClass.simpleName}")
                             }
                         }
                     }
-                    ctx.forkJobs = jobs
                     currentId = node.next
                     step++
                 }
 
                 ACTION_JOIN -> {
-                    val jobs = ctx.forkJobs
-                    if (jobs != null) {
-                        ctx.log("Join: waiting for ${jobs.size} branches...")
-                        jobs.forEach { it.join() }
-                        ctx.forkJobs = null
+                    if (pendingForks.isNotEmpty()) {
+                        ctx.log("Join: waiting for ${pendingForks.size} branches...")
+                        pendingForks.forEach { it.join() }
+                        pendingForks.clear()
                         ctx.log("Join: all branches done")
                     }
                     currentId = node.next
@@ -176,6 +191,12 @@ class HabitatExecutor(
                 }
             }
         }
+        // 未显式 JOIN 的子分支：分支正常结束（含 break/步数上限/stop）时等待它们完成——
+        // 工作流"结束"= 整棵树结束，不留孤儿协程。取消时循环已抛出，子分支作为子 job 随父级一并取消。
+        if (pendingForks.isNotEmpty()) {
+            ctx.log("Habitat: implicit join of ${pendingForks.size} un-joined branches")
+            pendingForks.forEach { it.join() }
+        }
 
         if (step >= maxSteps) {
             Log.w(TAG, "=== Branch aborted after $maxSteps steps ===")
@@ -197,15 +218,20 @@ class HabitatExecutor(
         handler: INodeHandler,
         ctx: WorkflowContext,
     ): NodeResult {
-        val timeoutMs = (node.params?.get("node_timeout_ms") as? Number)?.toLong()
-            ?.coerceAtLeast(100L) ?: NODE_TIMEOUT_DEFAULT_MS
+        // node_timeout_ms：缺省 → 默认 30 分钟；0 → 不设超时；其余最小 100ms
+        val timeoutMs = when (val raw = (node.params?.get("node_timeout_ms") as? Number)?.toLong()) {
+            null -> NODE_TIMEOUT_DEFAULT_MS
+            0L -> 0L
+            else -> raw.coerceAtLeast(100L)
+        }
 
         var next: String? = null
         var failed = false
         var errorMsg: String? = null
 
         try {
-            next = withTimeout(timeoutMs) { handler.handle(node, ctx) }
+            next = if (timeoutMs == 0L) handler.handle(node, ctx)
+            else withTimeout(timeoutMs) { handler.handle(node, ctx) }
 
             // 声明式成功条件：require 指定的变量必须为 true
             val require = node.params?.get("require")?.toString()?.takeIf { it.isNotBlank() }
@@ -220,9 +246,11 @@ class HabitatExecutor(
             failed = true
             errorMsg = "节点超时（${timeoutMs}ms）"
             Log.e(TAG, "node ${node.id} ${node.type} TIMEOUT after ${timeoutMs}ms")
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (e: CancellationException) {
             throw e // 外部取消必须传播
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // 捕获 Throwable：handler 抛出的 Error（OOM、NoSuchMethodError/LinkageError 等）也按节点失败处理，
+            // 不让它逃逸到 executorScope 杀死整个 App
             failed = true
             errorMsg = e.message ?: e.javaClass.simpleName
             Log.e(TAG, "node ${node.id} ${node.type} FAILED: ${e.message}", e)
@@ -258,7 +286,11 @@ class HabitatExecutor(
 
     /** 解析 FORK 的 targets（JSON 数组字符串或逗号分隔）。 */
     private fun parseForkTargets(node: WorkflowNode, ctx: WorkflowContext): List<String> {
-        val raw = node.params?.get("targets")?.toString()?.trim().orEmpty()
+        val param = node.params?.get("targets")
+        if (param is List<*>) {
+            return param.mapNotNull { it?.toString()?.let(ctx::interpolate)?.trim() }.filter { it.isNotBlank() }
+        }
+        val raw = param?.toString()?.trim().orEmpty()
         if (raw.isEmpty()) {
             ctx.log("⚠ Fork: no 'targets' param")
             return emptyList()

@@ -2,7 +2,6 @@ package com.ailun.habitat
 
 import android.content.Context
 import android.util.Log
-import kotlinx.coroutines.Job
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -12,25 +11,34 @@ import java.util.concurrent.ConcurrentHashMap
  * variables 使用 ConcurrentHashMap 保证线程安全。
  * log() 输出时会附带当前工作流实例的唯一 ID (workflowId)，以便区分并发执行。
  */
-class WorkflowContext(
-    context: Context,
+class WorkflowContext internal constructor(
+    private val boundAppContext: Context?,
     /**
      * 当前工作流实例的唯一标识，由 HabitatExecutor 在创建时分配。
      * 用于日志隔离，区分不同并发工作流的输出。
      */
-    val workflowId: String = UUID.randomUUID().toString(),
+    val workflowId: String,
+    @Suppress("UNUSED_PARAMETER") detached: Boolean,
 ) {
-    val appContext: Context = context.applicationContext
+    constructor(
+        context: Context,
+        workflowId: String = UUID.randomUUID().toString(),
+    ) : this(context.applicationContext, workflowId, false)
+
+    companion object {
+        /** `${name}`：name 允许 \w 与 `.`（整体作为变量名查找，不做路径解析）。 */
+        private val VAR_PATTERN = Regex("""\$\{([\w.]+)\}""")
+
+        /** 不绑定 android Context 的上下文（仅 JVM 单测 / 纯逻辑节点用；访问 appContext 会抛异常）。 */
+        internal fun detached(workflowId: String = UUID.randomUUID().toString()): WorkflowContext =
+            WorkflowContext(null, workflowId, true)
+    }
+
+    val appContext: Context
+        get() = boundAppContext ?: throw IllegalStateException("WorkflowContext 未绑定 android Context")
 
     /** 线程安全的变量存储 */
     val variables: MutableMap<String, Any?> = ConcurrentHashMap()
-
-    /**
-     * ACTION_FORK 产生的分支 Job 列表，ACTION_JOIN 等待其完成。
-     * 由 HabitatExecutor 内建处理（不经过 handler）。
-     */
-    @Volatile
-    var forkJobs: List<Job>? = null
 
     /**
      * 整棵树终止标志：on_error=stop 时由 executor 置 true，
@@ -50,25 +58,15 @@ class WorkflowContext(
     fun getVariable(key: String): Any? = variables[key]
 
     /**
-     * 将字符串中的 ${var_name} 替换为变量的实际值
+     * 将字符串中的 ${var_name} 替换为变量的实际值；未定义变量替换为 "null"。
+     * 只做**单次**替换，替换进来的值不再扫描——变量内容（短信/通知/剪贴板等外部文本）
+     * 中的 `${xxx}` 原样保留，不会被二次展开而泄露其他变量。
      */
     fun interpolate(text: String): String {
         if (!text.contains("\${")) return text
-
-        var result = text
-        val regex = """\$\{(\w+)\}""".toRegex()
-        var pass = 0
-
-        // Loop until no more ${var} patterns remain (handles nested references)
-        while (result.contains("\${") && pass < 5) {
-            pass++
-            result = regex.replace(result) { match ->
-                val varName = match.groupValues[1]
-                getVariable(varName)?.toString() ?: "null"
-            }
+        return VAR_PATTERN.replace(text) { match ->
+            getVariable(match.groupValues[1])?.toString() ?: "null"
         }
-
-        return result
     }
 
     /**
