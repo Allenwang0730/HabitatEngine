@@ -33,7 +33,7 @@ object NodeKnowledge {
         NodeDoc("ACTION_READ_SCREEN", "keyword, output_var", "读屏幕(变量 screen_data=是否找到)", "需无障碍"),
         NodeDoc("ACTION_FIND_ELEMENT", "selector, search_mode=text, region(可选), timeout_ms, output_var", "找元素(变量 element_found)", "需无障碍"),
         NodeDoc("ACTION_GLOBAL_KEY", "key=back/home/recents", "全局按键", "需无障碍"),
-        NodeDoc("ACTION_SHELL", "command, mode=auto", "shell 命令", "需 Shizuku/root，无则 Runtime.exec 兜底"),
+        NodeDoc("ACTION_SHELL", "command, mode=auto", "shell 命令", "需 Shizuku/root，无则 Runtime.exec 兜底；command 里的 \${var} 会自动单引号转义，不要再给它加引号"),
         NodeDoc("ACTION_GET_BATTERY", "output_var", "电量(battery_level)"),
         NodeDoc("ACTION_NETWORK_STATUS", "action=all", "网络(network_type)"),
         NodeDoc("ACTION_GET_DEVICE_INFO", "", "设备信息"),

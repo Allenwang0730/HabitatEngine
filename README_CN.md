@@ -133,7 +133,7 @@ ws://<host>:8931/mcp?token=<token>   # token 鉴权（默认 habitat-dev-token�
 
 `:lib` 已配置 maven-publish：
 ```bash
-./gradlew :lib:publishReleasePublicationToMavenLocal   # 出 habitat-engine:1.6.0 AAR
+./gradlew :lib:publishReleasePublicationToMavenLocal   # 出 habitat-engine:1.7.0 AAR
 ```
 三方接入见 `docs/ENGINE_USAGE.md`。
 

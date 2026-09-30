@@ -24,5 +24,8 @@
 
 - `lib` 引擎零依赖 app；handler 跑在 `Dispatchers.Default`（无 Looper），别用依赖 Looper 的 API（会崩）。
 - 直拨 `ACTION_CALL_DIRECT` 走 `TelecomManager.placeCall`（后台可拨，比 `startActivity(ACTION_CALL)` 稳）。
-- MCP/WS 连接需 `?token=`（AgentService 鉴权）。
+- MCP/WS 连接需令牌（`Authorization: Bearer` 或 `?token=`）。令牌每台设备首次启动随机生成，在 Agent 页查看；服务默认只监听 127.0.0.1（电脑侧先 `adb forward tcp:8931 tcp:8931`）。远程调用高危节点默认拒绝。
+- 拼 shell 命令的参数一律走 `ShellQuote`；`ACTION_SHELL` 的 `${var}` 会自动转义，别再手动加引号。
+- 机密（API key / 令牌）存 `SecretStore`（加密），不要用普通 SharedPreferences。
+- 单测：`./gradlew :lib:testDebugUnitTest :app:testDebugUnitTest`；自测脚本用 PowerShell 7 跑：`pwsh -File scripts/run_selftest.ps1`（Windows PowerShell 5 读 UTF-8 无 BOM 脚本会乱码报错）。
 - 引擎改动后跑自测回归（`scripts/run_selftest.ps1`）验证。

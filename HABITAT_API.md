@@ -36,6 +36,9 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 
 在 JSON 参数中可使用 `${var_name}` 引用工作流上下文中的变量，引擎会自动插值替换。
 
+- 只替换一轮，变量值里的 `${...}` 不会再被展开；未定义变量替换为 `"null"`。
+- `ACTION_SHELL` 的 `command` 中，每个变量值会被单引号转义为一个独立参数（防注入），不要自己再加引号；`raw_interpolation: true` 可恢复原样拼接。
+
 ---
 
 ## 节点类型索引
@@ -287,8 +290,12 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 |------|------|------|------|
 | `command` | String | — | Shell 命令 |
 | `mode` | String | "auto" | auto / shizuku / root |
+| `raw_interpolation` | Boolean | false | true 时变量原样拼进命令（有注入风险） |
+| `timeout_ms` | Number | 60000 | 无 Shizuku 时本地执行的超时 |
 
 输出: `shell_output`, `shell_success`
+
+`${var}` 会被自动转义成一个参数：`"command": "am force-stop ${pkg}"` 是对的，`"echo '${x}'"` 会得到带引号的输出。
 
 ### ACTION_LAUNCH_APP
 

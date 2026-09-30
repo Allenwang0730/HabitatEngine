@@ -15,7 +15,7 @@ Habitat 是**LLM 友好的安卓自动化引擎**：把 84 个"节点"（操作�
 ```kotlin
 repositories { mavenLocal() }
 
-dependencies { implementation("com.ailun:habitat-engine:1.6.0") }
+dependencies { implementation("com.ailun:habitat-engine:1.7.0") }
 ```
 
 或直接用 `:lib` 的 AAR 产物（`lib/build/outputs/aar/lib-release.aar`）文件依赖。

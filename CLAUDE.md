@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew :lib:assembleRelease
 ```
 
-Output APKs land in `app/build/outputs/apk/<variant>/`. The debug build uses the default debug keystore automatically. The release build reads signing config from `keystore.properties` at the project root — this file and `*.keystore`/`*.jks` are git-ignored. To set up release signing, generate a keystore and create `keystore.properties`:
+Output APKs land in `app/build/outputs/apk/<variant>/`. The debug build uses the default debug keystore automatically. The release build reads signing config from `keystore.properties` at the project root (if the file is missing, no release signing config is created — debug builds still work) — this file and `*.keystore`/`*.jks` are git-ignored. To set up release signing, generate a keystore and create `keystore.properties`:
 
 ```
 storePassword=<password>
@@ -28,7 +28,14 @@ keyAlias=<alias>
 storeFile=app/<name>.keystore
 ```
 
-There is no test suite to run. The project has `junit` in the version catalog but no test source files exist.
+Unit tests (JVM, no device needed):
+
+```bash
+./gradlew :lib:testDebugUnitTest   # engine: JSON parsing, lint, interpolation, executor
+./gradlew :app:testDebugUnitTest   # agent policy / catalog / Jev answer parsing
+```
+
+In lib tests, build a `WorkflowContext` with `WorkflowContext.detached()` (no Android Context); `unitTests.isReturnDefaultValues = true` stubs `android.util.Log`. On-device node self-tests: see `docs/SELFTEST.md`.
 
 ## Module architecture
 
@@ -37,7 +44,7 @@ There is no test suite to run. The project has `junit` in the version catalog bu
 :lib (com.ailun.habitat)         ← Pure engine library, handlers, model, API interfaces
 ```
 
-**`lib` is the core engine** — it defines the workflow model, execution runtime, handler interfaces, and 40+ node handlers. It has zero dependency on the app module.
+**`lib` is the core engine** — it defines the workflow model, execution runtime, handler interfaces, and ~80 node handlers. It has zero dependency on the app module (it does depend on the Android framework).
 
 **`:app` is the host** — it provides Compose UI (dashboard, DAG editor, float window, settings), Shizuku bridge, accessibility service, LLM service, and notification handling.
 
@@ -53,13 +60,14 @@ JSON string → HabitatJson.fromJson() → WorkflowGraph
 
 Key classes (all in `lib/src/main/java/com/ailun/habitat/`):
 
-- **`HabitatExecutor`** — Coroutine-based executor. Iterates nodes via `next`/`branches` references, catches handler exceptions, has a 1000-step limit. Exposes `execute(graph, context, onLog)` returning a `Job`.
+- **`HabitatExecutor`** — Coroutine-based executor. Iterates nodes via `next`/`branches` references, catches handler throwables (a failing node never crashes the app), has a 1000-step limit per branch. Per-node timeout defaults to 30 min (`node_timeout_ms`, `0` = none); `on_error` = `skip`/`stop`; `require` = success-flag check. `ACTION_FORK`/`ACTION_JOIN` are built into the executor. Exposes `execute(graph, context, onLog)` returning a `Job`.
 - **`WorkflowGraph`** — Container with `startNodeId: String` and `nodes: Map<String, WorkflowNode>`. Also holds optional `name`/`description`/`category`/`tags` metadata.
 - **`WorkflowNode`** — Single node: `id`, `type`, `params`, `next`, `branches`, plus optional `label`/`description` for DAG display.
-- **`WorkflowContext`** — Per-execution state. `variables` is a `ConcurrentHashMap` (thread-safe). `interpolate(text)` replaces `${var}` patterns recursively (max 5 passes). `log()` emits to both Logcat and an optional callback.
+- **`WorkflowContext`** — Per-execution state. `variables` is a `ConcurrentHashMap` (thread-safe; rejects null values — use `putVariable`, which treats null as remove). `interpolate(text)` replaces `${var}` in a single pass (substituted values are not re-scanned). `log()` emits to both Logcat and an optional callback.
 - **`INodeHandler`** — Single-method interface: `suspend fun handle(node: WorkflowNode, context: WorkflowContext): String?`. Returns the next node ID or `null` to stop.
-- **`NodeHandlerFactory`** — Registry of `String → INodeHandler`. All 40+ type constants are defined in its companion object. Handlers receive `IAccessibilityProvider` and/or `IShellExecutor` via constructor injection. New handlers are registered with `factory.register("TYPE", handler)`.
-- **`HabitatJson`** — Parses JSON strings into `WorkflowGraph`, applies default values for missing fields.
+- **`NodeHandlerFactory`** — Registry of `String → INodeHandler`. Built from `ALL_NODE_MODULES` in `NodeModules.kt` (8 modules), instantiated lazily; type constants live in its companion object. New built-in nodes go into `NodeModules.kt`. Handlers receive `IAccessibilityProvider` and/or `IShellExecutor` via constructor injection. `factory.register("TYPE", handler)` is for host overrides (see `app/.../bridge/HabitatFactoryExt.kt`).
+- **`HabitatJson`** — Parses JSON strings into `WorkflowGraph` (numbers narrowed to Int/Long/Double). `fromJson` only rejects structurally broken graphs; `HabitatJson.lint(graph, knownTypes)` reports dangling `next`/`branches`/param references, unknown types and unreachable nodes without throwing.
+- **`ShellQuote`** — `quote()` / `isPackageName()`. Any parameter/variable value concatenated into a shell command must go through it. `ACTION_SHELL` auto-quotes each `${var}` in `command` (`raw_interpolation: true` opts out).
 
 ## Decoupling interfaces (in `lib/.../api/`)
 
@@ -72,13 +80,13 @@ Handlers that need neither interface (pure data/logic nodes) receive `null`. Thi
 
 ## Handler categories
 
-All handlers live in `lib/src/main/java/com/ailun/habitat/handlers/`. They're organized into 10 categories registered in `NodeHandlerFactory`'s `init` block: Logic control (6), Variables & data (8), Interaction (6), System control (12), Media (2), Network (2), Utilities (2), Sensors (5), UI (4), AI (1).
+All handlers live in `lib/src/main/java/com/ailun/habitat/handlers/`. They're grouped into the `NodeModule` entries in `NodeModules.kt`. Shared helpers: `ParamUtils.kt` (`paramInt/paramLong/...` — interpolate then parse, accept numeric strings), `FilePathGuard.kt` (every file-touching node), `HttpUtil.kt`, `LocalShell.kt`. Blocking IO runs on `Dispatchers.IO`; always rethrow `CancellationException`.
 
 ## Variable system
 
-- Variables are set via `ACTION_SET_VARIABLE` (params: `name`, `value`, optional `type` for coercion) or automatically by any handler that writes to `context.variables[outputVar]`.
+- Variables are set via `ACTION_SET_VARIABLE` (params: `name`, `value`, optional `type` for coercion) or automatically by any handler that writes `context.putVariable(outputVar, value)`. `ACTION_SET_VARIABLE` interpolates string values before coercion.
 - Referenced in JSON as `${varName}`. Interpolation happens at execution time via `context.interpolate()` on all string params. Undefined variables resolve to the string `"null"`.
-- Many handlers write both a primary output variable and a `<type>_success` boolean (e.g., `wifi_success`, `screenshot_success`).
+- Many handlers write both a primary output variable and a `<type>_success` boolean (e.g., `wifi_success`, `screenshot_success`). Handlers set their `_success` to false on entry so a stale `true` can't satisfy `require`.
 
 ## DAG visualization
 
@@ -86,7 +94,7 @@ The app renders workflow graphs as a directed acyclic graph on a Canvas-based `D
 
 1. `HabitatDagConverter` → converts `WorkflowGraph` (engine model) to `DagGraph` (render model: `DagNode`/`DagEdge`)
 2. `DagLayoutEngine` → Sugiyama-style layered layout, positions nodes/edges automatically
-3. `DagView` → custom `View` with Canvas drawing, pinch-to-zoom (0.3×–3.0×), pan, double-tap reset, tap-to-select. Edge types: gray solid (next), green solid (true branch), red solid (false branch), orange dashed (loop back).
+3. `DagView` → custom `View` with Canvas drawing, pinch-to-zoom, pan, double-tap reset, tap-to-select. Edge types: gray solid (next), green solid (true branch), red solid (false branch), orange dashed (loop back — detected by DFS in the converter).
 
 All in `app/src/main/java/com/ailun/habitat/app/dag/`.
 
@@ -97,7 +105,15 @@ All in `app/src/main/java/com/ailun/habitat/app/dag/`.
 - **Compose BOM** (2025.12.01) — UI framework with Material 3
 - **AGP 9.0.1, Kotlin 2.3.20** — Build toolchain targeting SDK 36, min SDK 29
 - **Gson** (v2.13.2) — JSON parsing for workflow definitions and handler params
+- **Ktor (Netty)** — `AgentService` MCP/WS server; **ML Kit** text recognition (WeChat OCR); **OkHttp**; **androidx.security-crypto** (`SecretStore`, `AuthStateManager`)
 
 ## Permission model
 
-Handlers use automatic degradation: `ACTION_READ_SMS` falls back from `READ_SMS` content provider to Shizuku shell commands. `ACTION_WIFI` falls back from `WifiManager` API to `svc wifi` shell command. `ACTION_SHELL` prefers Shizuku, falls back to `Runtime.exec()`.
+Handlers use automatic degradation: `ACTION_READ_SMS` falls back from `READ_SMS` content provider to Shizuku shell commands. `ACTION_WIFI` / `ACTION_BLUETOOTH` use `svc wifi|bluetooth` via the injected shell (the framework toggles are no-ops on modern Android). `ACTION_SHELL` prefers Shizuku, falls back to `Runtime.exec()`; `HabitatShellManager` only falls back to `su` when the user picked root mode.
+
+## Security model
+
+- Secrets (API keys, agent token) go through `app/.../auth/SecretStore` (EncryptedSharedPreferences, auto-migrates old plaintext prefs). Never log them.
+- `AgentService` (Ktor, port 8931) binds 127.0.0.1 unless the user enables LAN access, requires a random per-install token, and refuses remote calls to `REMOTE_DANGEROUS_TOOLS` unless the user opts in. `NodeSelfTestActivity` is protected by the `DUMP` permission (adb only).
+- Autonomous agent (`app/.../agent/`): the model only picks from code-built candidates (`ActionCatalog`). Sensitive buttons, credential/payment screens and permission dialogs are gated in `Catalogs`; remote-origin goals can never unlock them. Cover new gates in `AgentPolicyTest`.
+- Process-level init lives in `HabitatApp` (Application): auth, API client, restoring enabled triggers. Don't reset trigger state from Activity `onCreate`.

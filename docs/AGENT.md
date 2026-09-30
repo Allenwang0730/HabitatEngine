@@ -1,6 +1,6 @@
 # Habitat Agent 服务（AI 控制手机通道）
 
-> 把 Habitat 引擎的 80 个节点通过 WebSocket 暴露为工具，让云端 LLM / AI 客户端实时控制手机。
+> 把 Habitat 引擎的节点通过 WebSocket 暴露为工具，让云端 LLM / AI 客户端实时控制手机。
 > 状态：✅ 链路已跑通（2026-08-22，无线 WiFi 实测成功）
 
 ## 架构
@@ -8,7 +8,7 @@
 ```
 云端 LLM / AI Agent ──WebSocket（WiFi 无线）──► 手机 Habitat AgentService（:8931）
                                                   ├─ /health  健康检查
-                                                  ├─ /tools   80 节点清单（按 NodeModule 分组）
+                                                  ├─ /tools   节点清单（按 NodeModule 分组）
                                                   └─ /ws      工具调用协议
 ```
 
@@ -28,23 +28,32 @@
 - `ping` → 连通性
 - `screen` → 无障碍树全屏文本 + 前台包名（AI 的"眼睛"，替代截图省 token）
 
-## 启动
+## 启动与鉴权
 
 ```bash
-# Android 14+ 后台启动受限：由前台 Activity 代启
+# Android 14+ 后台启动受限：由前台 Activity 代启（该 Activity 需 DUMP 权限，只有 adb shell 能调）
 adb shell am start -n com.ailun.habitat/.app.NodeSelfTestActivity --ez start_agent true
-# 查手机 WiFi IP
-adb shell "ip -f inet addr show wlan0 | grep inet"
+# 默认只监听 127.0.0.1：用 adb forward 从电脑访问
+adb forward tcp:8931 tcp:8931
 ```
+
+- AgentService 是前台服务（常驻通知），进后台不会被回收。
+- **令牌**：首次启动随机生成 32 字节 hex，存加密存储，在 Agent 页查看/复制/重新生成。旧的 `habitat-dev-token` 已作废。
+  连接时带 `Authorization: Bearer <token>`（或兼容的 `?token=`）。`/health` 免鉴权，`/tools` `/ws` `/mcp` 都要。
+- **局域网访问**：默认关闭（只绑 127.0.0.1）。在 Agent 页打开后重启服务，才会监听 0.0.0.0。
+- **高危节点**：`AgentService.REMOTE_DANGEROUS_TOOLS`（Shell、文件、拨号、短信/通话记录、加解密、压缩、SQLite、强停、广播、壁纸、录音、拍照、写语音文件）远程调用默认拒绝，`tools/list` 也不列出；需在 Agent 页手动开启。
 
 ## 客户端
 
 ```powershell
+$env:AGENT_TOKEN = "<Agent 页复制的令牌>"
 # 读屏（眼睛）
 .\scripts\agent_ws.ps1 -Tool screen
 # 打开设置（手）
 .\scripts\agent_ws.ps1 -Tool ACTION_LAUNCH_APP -Params '{"package_name":"com.android.settings"}'
 ```
+
+`scripts/agent_daemon.mjs` 需要 `--token` 或 `AGENT_TOKEN`；它的本地 HTTP 口要求请求头 `X-Habitat-Key`（启动时打印，或用 `HABITAT_KEY` 指定），并拒绝带 `Origin` 的浏览器请求。
 
 ## 实测验证（2026-08-22）
 
@@ -60,13 +69,23 @@ adb shell "ip -f inet addr show wlan0 | grep inet"
 `读屏 → 决策（Jev / DeepSeek / 本地）→ 节点执行 → 再读屏`
 
 - 决策只从当前屏幕候选里选题。候选由代码生成（点击、滚动、输入目标原文、打开点名应用、返回、桌面、等待、完成、无法继续）。
-- Jev 走 `POST https://api.typesafe.ai/v1/systemone`，key 存在 Agent 页，不进代码、不进日志。
+- Jev 走 `POST https://api.typesafe.ai/v1/systemone`，key 存在加密存储（Agent 页填写），不进代码、不进日志。429/5xx/网络错误重试一次；停止按钮会立即取消在途请求。
 - MCP/WS：`agent_start`（`goal` / `provider` / `max_steps`）、`agent_stop`、`agent_status`。启动后立即返回，不阻塞到循环结束。
 - 微信：系统设置另开「Habitat 微信读屏」。类名是 `SelectToSpeakService`，不要改。树为空才 OCR。
 
+### 安全闸（ActionCatalog）
+
+- 敏感按钮（支付、转账、购买、删除、卸载、重置、允许/授权…）默认不进候选；**本机发起**且目标原文写了同一个词才放行。**远程发起**（MCP `agent_start`）的目标一律不能解锁。
+- 验证/支付凭据页（出现"支付密码""验证指纹""人脸验证"等）不给任何点击和输入，只剩返回/桌面/等待/完成/无法继续。
+- 系统权限弹窗与安装器（permissioncontroller / packageinstaller）：只有本机发起且目标里写了"授权/允许/权限/安装"才给点击。
+- 密码框的文字不发给决策器（替换为"（密码框）"），也不作为输入目标。
+- 注意：屏幕文字（包括微信聊天内容）会发给所选的云端决策器（Jev / DeepSeek）；本地决策器不联网。
+
+### 循环停止条件
+
+同一动作（操作 + 控件文字 + 前台包）连续三次、连续 3 次等待、点击目标在决策期间离开原位两次、连续两次置信度 < 0.3、步数上限（1–30，默认 12）。每步执行后比较屏幕是否变化，并把结果带给决策器，避免重复无效操作。
+
 ## 已知问题 / 待办
 
-- **鉴权**：`/ws` `/mcp` 已要求 `?token=`。生产环境应改掉默认令牌
-- **服务生命周期**：Activity 代启后进程被系统回收则服务停（Android 后台限制）；长期运行需转前台服务（startForeground + 通知）
 - **端口**：8931（可配置）；Ktor Netty 在 Android 上绑 tcp6 双栈，IPv4 实测可连
-- **微信读屏**：伪装服务 + OCR 已接入，具体 ROM / 微信版本是否放行要以真机为准。改无障碍配置后必须关掉再打开
+- **微信读屏**：伪装服务 + OCR 已接入，具体 ROM / 微信版本是否放行要以真机为准。改无障碍配置后必须关掉再打开。该服务冒用 Google 包名，不能上架 Google Play
