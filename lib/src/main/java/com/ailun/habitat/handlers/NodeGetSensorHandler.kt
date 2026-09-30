@@ -10,6 +10,7 @@ import android.os.HandlerThread
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -33,8 +34,8 @@ class NodeGetSensorHandler : INodeHandler {
 
         val sm = context.appContext.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         if (sm == null) {
-            context.variables["sensor_success"] = false
-            context.variables["sensor_error"] = "SensorManager not available"
+            context.putVariable("sensor_success", false)
+            context.putVariable("sensor_error", "SensorManager not available")
             return node.next
         }
 
@@ -46,8 +47,8 @@ class NodeGetSensorHandler : INodeHandler {
         }
         val sensor = if (sensorType >= 0) sm.getDefaultSensor(sensorType) else null
         if (sensor == null) {
-            context.variables["sensor_success"] = false
-            context.variables["sensor_error"] = "No ${typeStr} sensor on this device"
+            context.putVariable("sensor_success", false)
+            context.putVariable("sensor_error", "No ${typeStr} sensor on this device")
             context.log("GetSensor FAILED: no $typeStr sensor")
             return node.next
         }
@@ -67,19 +68,21 @@ class NodeGetSensorHandler : INodeHandler {
             sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL, handler)
             val value = withTimeoutOrNull(3000) { deferred.await() }
             if (value != null) {
-                context.variables[outputVar] = value
-                context.variables["sensor_value"] = value
-                context.variables["sensor_type"] = typeStr
-                context.variables["sensor_success"] = true
+                context.putVariable(outputVar, value)
+                context.putVariable("sensor_value", value)
+                context.putVariable("sensor_type", typeStr)
+                context.putVariable("sensor_success", true)
                 context.log("GetSensor $typeStr = $value")
             } else {
-                context.variables["sensor_success"] = false
-                context.variables["sensor_error"] = "no reading within 3s"
+                context.putVariable("sensor_success", false)
+                context.putVariable("sensor_error", "no reading within 3s")
                 context.log("GetSensor $typeStr TIMEOUT (no reading)")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            context.variables["sensor_success"] = false
-            context.variables["sensor_error"] = e.message ?: "Unknown error"
+            context.putVariable("sensor_success", false)
+            context.putVariable("sensor_error", e.message ?: "Unknown error")
             context.log("GetSensor FAILED: ${e.message}")
         } finally {
             runCatching { sm.unregisterListener(listener) }

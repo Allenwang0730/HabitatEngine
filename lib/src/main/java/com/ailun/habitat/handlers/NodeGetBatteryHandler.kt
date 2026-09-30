@@ -39,14 +39,14 @@ class NodeGetBatteryHandler : INodeHandler {
                 false
             }
 
-            context.variables["battery_level"] = level
-            context.variables["battery_charging"] = charging
-            if (outputVar != null) context.variables[outputVar] = level
-            context.variables["battery_success"] = true
+            context.putVariable("battery_level", level)
+            context.putVariable("battery_charging", charging)
+            if (outputVar != null) context.putVariable(outputVar, level)
+            context.putVariable("battery_success", true)
             context.log("Battery level=$level charging=$charging")
         } catch (e: Exception) {
-            context.variables["battery_success"] = false
-            context.variables["battery_error"] = e.message ?: "Unknown error"
+            context.putVariable("battery_success", false)
+            context.putVariable("battery_error", e.message ?: "Unknown error")
             context.log("Battery FAILED: ${e.message}")
         }
         return node.next

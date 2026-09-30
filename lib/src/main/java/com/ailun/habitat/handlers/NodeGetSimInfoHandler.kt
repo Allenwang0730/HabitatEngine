@@ -39,19 +39,19 @@ class NodeGetSimInfoHandler : INodeHandler {
             }
 
             val summary = "SIM×$count: carriers=[${carriers.joinToString(",")}] numbers=[${numbers.joinToString(",")}]"
-            context.variables["sim_count"] = count
-            context.variables["sim_carriers"] = carriers.joinToString(",")
-            context.variables["sim_numbers"] = numbers.joinToString(",")
-            context.variables[outputVar] = summary
-            context.variables["sim_success"] = true
+            context.putVariable("sim_count", count)
+            context.putVariable("sim_carriers", carriers.joinToString(","))
+            context.putVariable("sim_numbers", numbers.joinToString(","))
+            context.putVariable(outputVar, summary)
+            context.putVariable("sim_success", true)
             context.log("SimInfo $summary")
         } catch (e: SecurityException) {
-            context.variables["sim_success"] = false
-            context.variables["sim_error"] = "缺少 READ_PHONE_STATE 权限: ${e.message}"
+            context.putVariable("sim_success", false)
+            context.putVariable("sim_error", "缺少 READ_PHONE_STATE 权限: ${e.message}")
             context.log("SimInfo FAILED (READ_PHONE_STATE missing)")
         } catch (e: Exception) {
-            context.variables["sim_success"] = false
-            context.variables["sim_error"] = e.message ?: "Unknown error"
+            context.putVariable("sim_success", false)
+            context.putVariable("sim_error", e.message ?: "Unknown error")
             context.log("SimInfo FAILED: ${e.message}")
         }
         return node.next

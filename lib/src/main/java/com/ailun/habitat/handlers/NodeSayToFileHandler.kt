@@ -5,6 +5,7 @@ import android.speech.tts.UtteranceProgressListener
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,8 +27,8 @@ class NodeSayToFileHandler : INodeHandler {
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         val text = context.interpolate(node.params?.get("text")?.toString() ?: "")
         if (text.isEmpty()) {
-            context.variables["say_success"] = false
-            context.variables["say_error"] = "缺少 text"
+            context.putVariable("say_success", false)
+            context.putVariable("say_error", "缺少 text")
             return node.next
         }
         val lang = node.params?.get("language")?.toString()?.trim()?.lowercase() ?: "zh"
@@ -46,52 +47,62 @@ class NodeSayToFileHandler : INodeHandler {
             else -> Locale.getDefault()
         }
 
-        // TTS 初始化（异步）+ 合成到文件（同步等待合成完成或超时）
-        val ttsReady = CompletableDeferred<TextToSpeech?>()
-        val tts = TextToSpeech(context.appContext) { status ->
-            ttsReady.complete(if (status == TextToSpeech.SUCCESS) null else null)
-        }
-        val ready = withTimeoutOrNull(5000) { ttsReady.await() }
-        val ttsService = try {
-            if (ready != null) {
-                @Suppress("DEPRECATION")
-                tts.setLanguage(locale)
-                tts
-            } else tts
-        } catch (e: Exception) {
-            tts
+        FilePathGuard.check(context.appContext, path, FilePathGuard.Access.WRITE)?.let { reason ->
+            context.putVariable("say_success", false)
+            context.putVariable("say_error", reason)
+            return node.next
         }
 
-        val done = CompletableDeferred<Boolean>()
-        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) { done.complete(true) }
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) { done.complete(false) }
-            override fun onError(utteranceId: String?, errorCode: Int) { done.complete(false) }
-        })
-
+        // TTS 初始化（异步）+ 合成到文件（等待合成完成或超时）
+        val ttsReady = CompletableDeferred<Int>()
+        val tts = TextToSpeech(context.appContext) { status -> ttsReady.complete(status) }
         try {
-            val result = withContext(Dispatchers.IO) {
-                tts.synthesizeToFile(text, null, File(path), "habitat_tts")
-                true
+            val status = withTimeoutOrNull(5000) { ttsReady.await() }
+            if (status != TextToSpeech.SUCCESS) {
+                context.putVariable("say_success", false)
+                context.putVariable(
+                    "say_error",
+                    if (status == null) "TTS 初始化超时" else "TTS 初始化失败（status=$status，可能无 TTS 引擎）",
+                )
+                return node.next
+            }
+            tts.setLanguage(locale)
+
+            val done = CompletableDeferred<Boolean>()
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) { done.complete(true) }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) { done.complete(false) }
+                override fun onError(utteranceId: String?, errorCode: Int) { done.complete(false) }
+            })
+
+            val outFile = File(path)
+            val rc = withContext(Dispatchers.IO) {
+                outFile.absoluteFile.parentFile?.mkdirs()
+                tts.synthesizeToFile(text, null, outFile, "habitat_tts")
+            }
+            if (rc != TextToSpeech.SUCCESS) {
+                context.putVariable("say_success", false)
+                context.putVariable("say_error", "synthesizeToFile 失败（rc=$rc）")
+                return node.next
             }
             val completed = withTimeoutOrNull(30_000) { done.await() } ?: false
-            tts.shutdown()
 
-            if (completed && File(path).length() > 0) {
-                context.variables[outputVar] = path
-                context.variables["tts_file"] = path
-                context.variables["say_success"] = true
+            if (completed && outFile.length() > 0) {
+                context.putVariable(outputVar, path)
+                context.putVariable("tts_file", path)
+                context.putVariable("say_success", true)
                 context.log("SayToFile OK: $path")
             } else {
-                context.variables["say_success"] = false
-                context.variables["say_error"] = "TTS 合成失败（可能无 TTS 引擎）"
+                context.putVariable("say_success", false)
+                context.putVariable("say_error", if (completed) "输出文件为空" else "TTS 合成失败或超时")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            context.variables["say_success"] = false
-            context.variables["say_error"] = e.message ?: "Unknown error"
-            runCatching { tts.shutdown() }
+            context.putVariable("say_success", false)
+            context.putVariable("say_error", e.message ?: "Unknown error")
         } finally {
             runCatching { tts.shutdown() }
         }

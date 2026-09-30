@@ -15,20 +15,20 @@ class NodeGetDeviceInfoHandler : INodeHandler {
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         try {
             val dm = context.appContext.resources.displayMetrics
-            context.variables["device_model"] = Build.MODEL
-            context.variables["device_manufacturer"] = Build.MANUFACTURER
-            context.variables["device_brand"] = Build.BRAND
-            context.variables["device_android_version"] = Build.VERSION.RELEASE
-            context.variables["device_sdk"] = Build.VERSION.SDK_INT
-            context.variables["device_screen_width"] = dm.widthPixels
-            context.variables["device_screen_height"] = dm.heightPixels
-            context.variables["device_density"] = dm.density
-            context.variables["device_success"] = true
+            context.putVariable("device_model", Build.MODEL)
+            context.putVariable("device_manufacturer", Build.MANUFACTURER)
+            context.putVariable("device_brand", Build.BRAND)
+            context.putVariable("device_android_version", Build.VERSION.RELEASE)
+            context.putVariable("device_sdk", Build.VERSION.SDK_INT)
+            context.putVariable("device_screen_width", dm.widthPixels)
+            context.putVariable("device_screen_height", dm.heightPixels)
+            context.putVariable("device_density", dm.density)
+            context.putVariable("device_success", true)
             context.log("Device: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}, " +
                 "${dm.widthPixels}x${dm.heightPixels}")
         } catch (e: Exception) {
-            context.variables["device_success"] = false
-            context.variables["device_error"] = e.message ?: "Unknown error"
+            context.putVariable("device_success", false)
+            context.putVariable("device_error", e.message ?: "Unknown error")
             context.log("DeviceInfo FAILED: ${e.message}")
         }
         return node.next

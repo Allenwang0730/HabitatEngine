@@ -4,6 +4,11 @@ import android.util.Log
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.handlers.FilePathGuard.Access
+import com.ailun.habitat.paramBool
+import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -17,21 +22,44 @@ import java.io.File
  * - `content`（write 时必填）：要写入的内容
  * - `output_var`（可选）：存储结果的变量名
  * - `append`（write 时可选）：true 表示追加，默认 false 覆盖
+ * - `recursive`（delete 目录时必填 true）：显式允许递归删除目录
+ *
+ * 路径守卫见 [FilePathGuard]：拒绝系统目录/其它应用私有目录；存储根不可写删；
+ * 公共一级目录（DCIM、Download…）与存储根下一级目录不可被整体删除。
  */
 class NodeFileOperationHandler : INodeHandler {
 
-    override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
+    private val gson = Gson()
+
+    override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? =
+        withContext(Dispatchers.IO) { handleIo(node, context) }
+
+    private fun denied(context: WorkflowContext, reason: String): Boolean {
+        Log.w(TAG, reason)
+        context.putVariable("file_success", false)
+        context.putVariable("file_error", reason)
+        context.log("FileOp 拒绝: $reason")
+        return true
+    }
+
+    private fun guard(context: WorkflowContext, path: String, access: Access): Boolean {
+        val reason = FilePathGuard.check(context.appContext, path, access) ?: return false
+        return denied(context, reason)
+    }
+
+    private fun handleIo(node: WorkflowNode, context: WorkflowContext): String? {
         val params = node.params ?: return node.next
+        context.putVariable("file_success", false)
 
         val action = params["action"]?.toString()?.trim()?.lowercase() ?: run {
             Log.w(TAG, "No action specified")
-            context.variables["file_success"] = false
+            context.putVariable("file_success", false)
             return node.next
         }
 
         val rawPath = params["path"]?.toString()?.trim() ?: run {
             Log.w(TAG, "No path specified")
-            context.variables["file_success"] = false
+            context.putVariable("file_success", false)
             return node.next
         }
 
@@ -41,26 +69,28 @@ class NodeFileOperationHandler : INodeHandler {
         try {
             when (action) {
                 "read" -> {
+                    if (guard(context, path, Access.READ)) return node.next
                     val file = File(path)
                     if (!file.exists() || !file.isFile) {
                         Log.w(TAG, "File does not exist or is not a file: $path")
-                        context.variables["file_success"] = false
-                        context.variables["file_error"] = "File does not exist or is not a file"
+                        context.putVariable("file_success", false)
+                        context.putVariable("file_error", "File does not exist or is not a file")
                         return node.next
                     }
                     val content = file.readText(Charsets.UTF_8)
                     val resultKey = outputVar ?: "file_result"
-                    context.variables["file_result"] = content
-                    context.variables[resultKey] = content
-                    context.variables["file_success"] = true
+                    context.putVariable("file_result", content)
+                    context.putVariable(resultKey, content)
+                    context.putVariable("file_success", true)
                     Log.i(TAG, "File read: $path (${content.length} chars)")
                 }
 
                 "write" -> {
                     val rawContent = params["content"]?.toString() ?: ""
                     val content = context.interpolate(rawContent)
-                    val append = params["append"]?.toString()?.equals("true", true) == true
+                    val append = paramBool(node, context, "append", false)
 
+                    if (guard(context, path, Access.WRITE)) return node.next
                     val file = File(path)
                     // Create parent directories if needed
                     file.parentFile?.let { parent ->
@@ -75,51 +105,62 @@ class NodeFileOperationHandler : INodeHandler {
                         file.writeText(content, Charsets.UTF_8)
                     }
 
-                    context.variables["file_result"] = path
-                    context.variables["file_success"] = true
+                    context.putVariable("file_result", path)
+                    context.putVariable("file_success", true)
                     Log.i(TAG, "File written: $path (${content.length} chars, append=$append)")
                 }
 
                 "delete" -> {
+                    if (guard(context, path, Access.DELETE)) return node.next
                     val file = File(path)
                     if (!file.exists()) {
                         Log.w(TAG, "File does not exist: $path")
-                        context.variables["file_success"] = false
-                        context.variables["file_error"] = "File does not exist"
+                        context.putVariable("file_success", false)
+                        context.putVariable("file_error", "File does not exist")
                         return node.next
                     }
 
                     val deleted = if (file.isDirectory) {
+                        if (!paramBool(node, context, "recursive", false)) {
+                            denied(context, "删除目录需显式参数 recursive=true: $path")
+                            return node.next
+                        }
+                        if (FilePathGuard.isStorageRootOrTopLevel(path)) {
+                            denied(context, "拒绝删除存储根或其一级目录: $path")
+                            return node.next
+                        }
                         file.deleteRecursively()
                     } else {
                         file.delete()
                     }
 
-                    context.variables["file_result"] = deleted
-                    context.variables["file_success"] = deleted
+                    context.putVariable("file_result", deleted)
+                    context.putVariable("file_success", deleted)
                     Log.i(TAG, "File delete: $path -> $deleted")
                 }
 
                 "exists" -> {
+                    if (guard(context, path, Access.READ)) return node.next
                     val file = File(path)
                     val exists = file.exists()
                     val isDir = file.isDirectory
                     val isFile = file.isFile
 
-                    context.variables["file_result"] = exists
-                    context.variables["file_exists"] = exists
-                    context.variables["file_is_directory"] = isDir
-                    context.variables["file_is_file"] = isFile
-                    context.variables["file_success"] = true
+                    context.putVariable("file_result", exists)
+                    context.putVariable("file_exists", exists)
+                    context.putVariable("file_is_directory", isDir)
+                    context.putVariable("file_is_file", isFile)
+                    context.putVariable("file_success", true)
                     Log.i(TAG, "File exists check: $path -> exists=$exists, isDir=$isDir")
                 }
 
                 "list" -> {
+                    if (guard(context, path, Access.READ)) return node.next
                     val file = File(path)
                     if (!file.exists() || !file.isDirectory) {
                         Log.w(TAG, "Directory does not exist: $path")
-                        context.variables["file_success"] = false
-                        context.variables["file_error"] = "Directory does not exist or is not a directory"
+                        context.putVariable("file_success", false)
+                        context.putVariable("file_error", "Directory does not exist or is not a directory")
                         return node.next
                     }
 
@@ -133,15 +174,14 @@ class NodeFileOperationHandler : INodeHandler {
                         emptyList()
                     }
 
-                    // Store both comma-separated and JSON array formats
-                    val jsonArray = names.joinToString(",") { "\"${it.replace("\"", "\\\"")}\"" }
-                    context.variables["file_result"] = "[$jsonArray]"
-                    context.variables["file_list"] = names
-                    context.variables["file_count"] = names.size
-                    context.variables["file_success"] = true
+                    val jsonArray = gson.toJson(names)
+                    context.putVariable("file_result", jsonArray)
+                    context.putVariable("file_list", names)
+                    context.putVariable("file_count", names.size)
+                    context.putVariable("file_success", true)
 
                     if (outputVar != null) {
-                        context.variables[outputVar] = "[$jsonArray]"
+                        context.putVariable(outputVar, jsonArray)
                     }
 
                     Log.i(TAG, "File list: $path -> ${names.size} entries")
@@ -151,17 +191,18 @@ class NodeFileOperationHandler : INodeHandler {
                     val rawDest = params["dest"]?.toString()?.trim()
                     if (rawDest.isNullOrEmpty()) {
                         Log.w(TAG, "Copy failed: 'dest' parameter is empty")
-                        context.variables["file_success"] = false
-                        context.variables["file_error"] = "No 'dest' path specified"
+                        context.putVariable("file_success", false)
+                        context.putVariable("file_error", "No 'dest' path specified")
                         return node.next
                     }
                     val destPath = context.interpolate(rawDest)
+                    if (guard(context, path, Access.READ)) return node.next
                     val source = File(path)
 
                     if (!source.exists()) {
                         Log.w(TAG, "Copy failed: source does not exist: $path")
-                        context.variables["file_success"] = false
-                        context.variables["file_error"] = "Source does not exist"
+                        context.putVariable("file_success", false)
+                        context.putVariable("file_error", "Source does not exist")
                         return node.next
                     }
 
@@ -174,8 +215,8 @@ class NodeFileOperationHandler : INodeHandler {
                             ?.maxByOrNull { it.lastModified() }
                         if (newest == null) {
                             Log.w(TAG, "Copy failed: no file in directory: $path")
-                            context.variables["file_success"] = false
-                            context.variables["file_error"] = "Directory contains no files"
+                            context.putVariable("file_success", false)
+                            context.putVariable("file_error", "Directory contains no files")
                             return node.next
                         }
                         sourceFile = newest
@@ -185,6 +226,7 @@ class NodeFileOperationHandler : INodeHandler {
                         targetFile = File(destPath)
                     }
 
+                    if (guard(context, targetFile.path, Access.WRITE)) return node.next
                     targetFile.parentFile?.let { parent ->
                         if (!parent.exists()) parent.mkdirs()
                     }
@@ -192,26 +234,26 @@ class NodeFileOperationHandler : INodeHandler {
                     // 二进制流复制，录音等音频文件不会被损坏
                     sourceFile.copyTo(targetFile, overwrite = true)
 
-                    context.variables["file_result"] = targetFile.absolutePath
-                    context.variables["file_copied_from"] = sourceFile.absolutePath
-                    context.variables["file_success"] = true
+                    context.putVariable("file_result", targetFile.absolutePath)
+                    context.putVariable("file_copied_from", sourceFile.absolutePath)
+                    context.putVariable("file_success", true)
                     Log.i(TAG, "File copied: ${sourceFile.absolutePath} -> ${targetFile.absolutePath}")
                 }
 
                 else -> {
                     Log.w(TAG, "Unknown file action: $action")
-                    context.variables["file_success"] = false
-                    context.variables["file_error"] = "Unknown action: $action"
+                    context.putVariable("file_success", false)
+                    context.putVariable("file_error", "Unknown action: $action")
                 }
             }
         } catch (e: SecurityException) {
             Log.e(TAG, "File operation permission denied: ${e.message}", e)
-            context.variables["file_success"] = false
-            context.variables["file_error"] = "Permission denied: ${e.message}"
+            context.putVariable("file_success", false)
+            context.putVariable("file_error", "Permission denied: ${e.message}")
         } catch (e: Exception) {
             Log.e(TAG, "File operation failed: ${e.message}", e)
-            context.variables["file_success"] = false
-            context.variables["file_error"] = e.message ?: "Unknown error"
+            context.putVariable("file_success", false)
+            context.putVariable("file_error", e.message ?: "Unknown error")
         }
 
         return node.next

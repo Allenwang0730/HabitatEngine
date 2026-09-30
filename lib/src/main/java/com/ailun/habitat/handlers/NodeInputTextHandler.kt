@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.ailun.habitat.INodeHandler
+import com.ailun.habitat.ShellQuote
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.api.IAccessibilityProvider
@@ -31,7 +32,7 @@ class NodeInputTextHandler(
         val rawText = node.params?.get("text")?.toString().orEmpty()
         if (rawText.isEmpty()) {
             Log.w(TAG, "InputText: 'text' parameter is empty")
-            context.variables["input_success"] = false
+            context.putVariable("input_success", false)
             return node.next
         }
 
@@ -49,7 +50,7 @@ class NodeInputTextHandler(
             }
         }
 
-        context.variables["input_success"] = success
+        context.putVariable("input_success", success)
         if (success) {
             context.log("InputText: text input successful (mode=$mode)")
         } else {
@@ -68,11 +69,12 @@ class NodeInputTextHandler(
             Log.e(TAG, "InputText: IShellExecutor not available")
             return false
         }
-        val escaped = text.replace("'", "'\\''")
         return try {
-            val output = executor.exec("input text '$escaped'")
+            val output = executor.exec("input text ${ShellQuote.quote(text)}")
             !output.contains("Error", ignoreCase = true) &&
                 !output.contains("exception", ignoreCase = true)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "InputText: shell execution failed", e)
             false

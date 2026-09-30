@@ -8,21 +8,18 @@ import android.util.Log
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
-import com.ailun.habitat.api.IAccessibilityProvider
-import com.ailun.habitat.api.IShellExecutor
 
 /**
  * [ACTION_FLASHLIGHT]：控制手电筒开关。
  *
  * params：`action`（必填："on"/"off"/"toggle"）
+ * 输出：flashlight_on、flashlight_success
  */
-class NodeFlashlightHandler(
-    private val provider: IAccessibilityProvider? = null,
-    private val shellExecutor: IShellExecutor? = null,
-) : INodeHandler {
+class NodeFlashlightHandler : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val action = node.params?.get("action")?.toString()?.trim()?.lowercase().orEmpty()
+        context.putVariable("flashlight_success", false)
+        val action = node.params?.get("action")?.toString()?.let { context.interpolate(it) }?.trim()?.lowercase().orEmpty()
         if (action.isEmpty()) {
             Log.e(TAG, "Flashlight failed: 'action' parameter is empty")
             return node.next
@@ -56,18 +53,8 @@ class NodeFlashlightHandler(
                     targetOn = false
                 }
                 "toggle" -> {
-                    // Check current torch state by checking the first available flash camera
-                    targetOn = try {
-                        val currentFlashMode = cameraManager.getCameraCharacteristics(cameraId)
-                            .get(CameraCharacteristics.FLASH_INFO_AVAILABLE)
-                        // We can't easily query current torch state on all devices;
-                        // use a tracked variable instead
-                        val isOn = context.variables["flashlight_on"] as? Boolean == true
-                        !isOn
-                    } catch (e: Exception) {
-                        // Default to turning on if we can't determine state
-                        true
-                    }
+                    // 系统不提供同步查询手电状态的 API，按本工作流记录的 flashlight_on 取反
+                    targetOn = context.getVariable("flashlight_on") != true
                 }
                 else -> {
                     Log.e(TAG, "Flashlight failed: unknown action '$action'")
@@ -76,7 +63,8 @@ class NodeFlashlightHandler(
             }
 
             cameraManager.setTorchMode(cameraId, targetOn)
-            context.variables["flashlight_on"] = targetOn
+            context.putVariable("flashlight_on", targetOn)
+            context.putVariable("flashlight_success", true)
             Log.i(TAG, "Flashlight turned ${if (targetOn) "on" else "off"}")
         } catch (e: SecurityException) {
             Log.e(TAG, "Flashlight error: missing CAMERA permission - ${e.message}")

@@ -25,7 +25,7 @@ class NodeParseXmlHandler : INodeHandler {
 
         val rawXml = params["xml"]?.toString()?.trim() ?: run {
             Log.w(TAG, "No XML string provided")
-            context.variables["xml_success"] = false
+            context.putVariable("xml_success", false)
             return node.next
         }
 
@@ -47,6 +47,13 @@ class NodeParseXmlHandler : INodeHandler {
                 isNamespaceAware = false
                 isIgnoringComments = true
                 isIgnoringElementContentWhitespace = true
+                // XXE 防护：禁止 DOCTYPE / 外部实体（不支持的 feature 忽略）
+                runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+                runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
+                runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+                runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
+                isXIncludeAware = false
+                isExpandEntityReferences = false
             }
             val builder = factory.newDocumentBuilder()
             val document = builder.parse(org.xml.sax.InputSource(StringReader(actualXml)))
@@ -74,9 +81,9 @@ class NodeParseXmlHandler : INodeHandler {
             }
 
             val resultKey = outputVar ?: "xml_parsed_value"
-            context.variables["xml_parsed_value"] = resultStr
-            context.variables[resultKey] = resultStr
-            context.variables["xml_success"] = true
+            context.putVariable("xml_parsed_value", resultStr)
+            context.putVariable(resultKey, resultStr)
+            context.putVariable("xml_success", true)
 
             Log.i(TAG, "XML parsed successfully${if (xpath != null) " at path: $xpath" else ""}")
         } catch (e: Exception) {
@@ -90,9 +97,9 @@ class NodeParseXmlHandler : INodeHandler {
                 val fallbackResult = regexExtract(actualXml, xpath ?: "", attribute)
                 if (fallbackResult != null) {
                     val resultKey = outputVar ?: "xml_parsed_value"
-                    context.variables["xml_parsed_value"] = fallbackResult
-                    context.variables[resultKey] = fallbackResult
-                    context.variables["xml_success"] = true
+                    context.putVariable("xml_parsed_value", fallbackResult)
+                    context.putVariable(resultKey, fallbackResult)
+                    context.putVariable("xml_success", true)
                     Log.i(TAG, "XML parsed via regex fallback: $fallbackResult")
                     return node.next
                 }
@@ -100,8 +107,8 @@ class NodeParseXmlHandler : INodeHandler {
                 // Regex fallback also failed
             }
 
-            context.variables["xml_success"] = false
-            context.variables["xml_error"] = e.message ?: "Unknown error"
+            context.putVariable("xml_success", false)
+            context.putVariable("xml_error", e.message ?: "Unknown error")
         }
 
         return node.next
@@ -165,7 +172,7 @@ class NodeParseXmlHandler : INodeHandler {
      * Simple regex-based XML extraction as fallback.
      */
     private fun regexExtract(xml: String, tag: String, attribute: String?): String? {
-        val lastTag = tag.split(".").lastOrNull() ?: tag
+        val lastTag = Regex.escape(tag.split(".").lastOrNull() ?: tag)
 
         val textPattern = Regex("<$lastTag[^>]*>(.*?)</$lastTag>", RegexOption.DOT_MATCHES_ALL)
         val textMatch = textPattern.find(xml)
@@ -174,7 +181,8 @@ class NodeParseXmlHandler : INodeHandler {
         }
 
         if (attribute != null) {
-            val attrPattern = Regex("<$lastTag[^>]*$attribute=\"([^\"]*)\"[^>]*>", RegexOption.DOT_MATCHES_ALL)
+            val attr = Regex.escape(attribute)
+            val attrPattern = Regex("<$lastTag[^>]*$attr=\"([^\"]*)\"[^>]*>", RegexOption.DOT_MATCHES_ALL)
             val attrMatch = attrPattern.find(xml)
             if (attrMatch != null) {
                 return attrMatch.groupValues[1]

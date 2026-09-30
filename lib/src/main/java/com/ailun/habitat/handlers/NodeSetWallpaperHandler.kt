@@ -18,8 +18,8 @@ class NodeSetWallpaperHandler : INodeHandler {
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         val rawPath = node.params?.get("path")?.toString()?.trim().orEmpty()
         if (rawPath.isEmpty()) {
-            context.variables["wallpaper_success"] = false
-            context.variables["wallpaper_error"] = "缺少 'path' 参数"
+            context.putVariable("wallpaper_success", false)
+            context.putVariable("wallpaper_error", "缺少 'path' 参数")
             return node.next
         }
         val path = context.interpolate(rawPath)
@@ -29,15 +29,15 @@ class NodeSetWallpaperHandler : INodeHandler {
                 ?: throw IllegalArgumentException("无法解码图片: $path")
             val wm = WallpaperManager.getInstance(context.appContext)
             wm.setBitmap(bitmap)
-            context.variables["wallpaper_success"] = true
+            context.putVariable("wallpaper_success", true)
             context.log("SetWallpaper OK: $path")
         } catch (e: SecurityException) {
-            context.variables["wallpaper_success"] = false
-            context.variables["wallpaper_error"] = "缺少 SET_WALLPAPER 权限: ${e.message}"
+            context.putVariable("wallpaper_success", false)
+            context.putVariable("wallpaper_error", "缺少 SET_WALLPAPER 权限: ${e.message}")
             context.log("SetWallpaper FAILED (SET_WALLPAPER missing)")
         } catch (e: Exception) {
-            context.variables["wallpaper_success"] = false
-            context.variables["wallpaper_error"] = e.message ?: "Unknown error"
+            context.putVariable("wallpaper_success", false)
+            context.putVariable("wallpaper_error", e.message ?: "Unknown error")
             context.log("SetWallpaper FAILED: ${e.message}")
         }
         return node.next

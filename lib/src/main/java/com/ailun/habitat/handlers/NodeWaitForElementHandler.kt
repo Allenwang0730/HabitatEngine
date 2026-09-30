@@ -5,6 +5,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.paramLongOrNull
 import com.ailun.habitat.api.IAccessibilityProvider
 import kotlinx.coroutines.delay
 
@@ -28,22 +29,22 @@ class NodeWaitForElementHandler(
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         val rawSelector = node.params?.get("selector")?.toString()?.trim().orEmpty()
         if (rawSelector.isEmpty()) {
-            context.variables["element_found"] = false
+            context.putVariable("element_found", false)
             context.log("WaitForElement FAILED: no 'selector'")
             return node.next
         }
         val selector = context.interpolate(rawSelector)
         val mode = node.params?.get("mode")?.toString()?.trim()?.lowercase() ?: "text"
         val waitFor = node.params?.get("wait_for")?.toString()?.trim()?.lowercase() ?: "appear"
-        val timeoutMs = (node.params?.get("timeout") as? Number)?.toLong()
-            ?: (node.params?.get("timeout_ms") as? Number)?.toLong()
-            ?: 10_000L
+        val timeoutMs = (paramLongOrNull(node, context, "timeout")
+            ?: paramLongOrNull(node, context, "timeout_ms")
+            ?: 10_000L).coerceAtLeast(0L)
         val outputVar = node.params?.get("output_var")?.toString()?.trim()?.ifEmpty { null }
             ?: "element_found"
 
         val service = provider?.getService()
         if (service == null) {
-            context.variables[outputVar] = false
+            context.putVariable(outputVar, false)
             context.log("WaitForElement FAILED: a11y not connected")
             return node.next
         }
@@ -57,7 +58,7 @@ class NodeWaitForElementHandler(
             delay(500)
         }
 
-        context.variables[outputVar] = satisfied
+        context.putVariable(outputVar, satisfied)
         context.log("WaitForElement selector='$selector' mode=$mode waitFor=$waitFor → $satisfied (${System.currentTimeMillis() - start}ms)")
         return node.next
     }

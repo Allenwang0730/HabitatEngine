@@ -23,14 +23,14 @@ class NodeClipboardHandler : INodeHandler {
 
         val action = params["action"]?.toString()?.trim()?.lowercase() ?: run {
             Log.w(TAG, "No action specified")
-            context.variables["clipboard_success"] = false
+            context.putVariable("clipboard_success", false)
             return node.next
         }
 
         val clipboardManager = context.appContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         if (clipboardManager == null) {
             Log.e(TAG, "ClipboardManager not available")
-            context.variables["clipboard_success"] = false
+            context.putVariable("clipboard_success", false)
             return node.next
         }
 
@@ -47,9 +47,9 @@ class NodeClipboardHandler : INodeHandler {
                         ""
                     }
 
-                    context.variables[outputVar] = text
-                    context.variables["clipboard_content"] = text
-                    context.variables["clipboard_success"] = true
+                    context.putVariable(outputVar, text)
+                    context.putVariable("clipboard_content", text)
+                    context.putVariable("clipboard_success", true)
 
                     Log.i(TAG, "Clipboard read: ${text.take(100)}${if (text.length > 100) "..." else ""}")
                 }
@@ -61,20 +61,20 @@ class NodeClipboardHandler : INodeHandler {
                     val clip = ClipData.newPlainText("habitat_clipboard", text)
                     clipboardManager.setPrimaryClip(clip)
 
-                    context.variables["clipboard_success"] = true
+                    context.putVariable("clipboard_success", true)
 
                     Log.i(TAG, "Clipboard set: ${text.take(100)}${if (text.length > 100) "..." else ""}")
                 }
 
                 else -> {
                     Log.w(TAG, "Unknown clipboard action: $action")
-                    context.variables["clipboard_success"] = false
+                    context.putVariable("clipboard_success", false)
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Clipboard operation failed: ${e.message}", e)
-            context.variables["clipboard_success"] = false
-            context.variables["clipboard_error"] = e.message ?: "Unknown error"
+            context.putVariable("clipboard_success", false)
+            context.putVariable("clipboard_error", e.message ?: "Unknown error")
         }
 
         return node.next

@@ -3,13 +3,16 @@ package com.ailun.habitat.handlers
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.paramInt
+import com.ailun.habitat.paramString
 
 /**
  * [ACTION_LOOP]：简单循环控制（计数或条件）。
  *
  * params：
  * - `mode`: `count`（计数循环）| `while`（条件循环）
- * - 若 mode=count：`times`（循环次数），`counter_var`（计数变量名，默认"loop_index"）
+ * - 若 mode=count：`times`（循环次数，支持 "3"/"${n}"），`counter_var`（对外暴露的计数变量名，默认"loop_index"）
+ *   内部计数按节点 id 存于 `_loop_count_<id>`，多个/嵌套循环互不干扰
  * - 若 mode=while：`condition_expr`（条件表达式），`max_iterations`（最多迭代次数，默认100）
  * - `body_node`：循环体起始节点 ID
  * - `next`：循环结束后的下一节点 ID
@@ -49,16 +52,19 @@ class NodeLoopHandler : INodeHandler {
     
     private fun handleCountLoop(node: WorkflowNode, context: WorkflowContext): String? {
         val params = node.params ?: return node.next
-        val times = (params["times"] as? Number)?.toInt() ?: 1
-        val counterVar = params["counter_var"]?.toString()?.trim() ?: "loop_index"
-        
-        val currentCount = (context.getVariable(counterVar) as? Number)?.toInt() ?: 0
-        
+        val times = paramInt(node, context, "times", 1)
+        val counterVar = paramString(node, context, "counter_var")?.trim()?.ifEmpty { null } ?: "loop_index"
+        val internalVar = "_loop_count_${node.id}"
+
+        val currentCount = (context.getVariable(internalVar) as? Number)?.toInt() ?: 0
+
         return if (currentCount < times) {
+            context.putVariable(internalVar, currentCount + 1)
             context.putVariable(counterVar, currentCount + 1)
             params["body_node"]?.toString() // 进入循环体
         } else {
-            context.putVariable(counterVar, 0) // 重置
+            context.variables.remove(internalVar) // 重置，允许再次进入
+            context.putVariable(counterVar, 0)
             node.next // 跳出循环
         }
     }
@@ -66,9 +72,9 @@ class NodeLoopHandler : INodeHandler {
     private fun handleWhileLoop(node: WorkflowNode, context: WorkflowContext): String? {
         val params = node.params ?: return node.next
         val conditionExpr = params["condition_expr"]?.toString()?.trim().orEmpty()
-        val maxIterations = (params["max_iterations"] as? Number)?.toInt() ?: 100
-        
-        val iterVar = "_while_iter_count_"
+        val maxIterations = paramInt(node, context, "max_iterations", 100)
+
+        val iterVar = "_while_iter_count_${node.id}"
         val iterCount = (context.getVariable(iterVar) as? Number)?.toInt() ?: 0
         
         if (iterCount >= maxIterations) {

@@ -7,7 +7,7 @@ import com.ailun.habitat.WorkflowNode
 /**
  * [ACTION_SET_VARIABLE]：动态设置上下文变量。
  *
- * params：`key`（必填），`value`（任意类型），`type`（可选：auto|string|int|bool|float）。
+ * params：`key`（必填），`value`（任意类型；字符串会先做 `${var}` 插值），`type`（可选：auto|string|int|bool|float）。
  * 示例：
  * ```json
  * {
@@ -28,19 +28,19 @@ class NodeSetVariableHandler : INodeHandler {
             ?: node.params?.get("key")?.toString()?.trim())
             ?: return node.next
         
-        val rawValue = node.params?.get("value")
+        val rawValue = node.params?.get("value").let { if (it is String) context.interpolate(it) else it }
         val typeStr = node.params?.get("type")?.toString()?.trim()?.lowercase() ?: "auto"
         
         val value = when (typeStr) {
             "string" -> rawValue?.toString()
-            "int" -> (rawValue as? Number)?.toInt() ?: rawValue?.toString()?.toIntOrNull()
+            "int" -> (rawValue as? Number)?.toInt() ?: rawValue?.toString()?.trim()?.let { it.toIntOrNull() ?: it.toDoubleOrNull()?.toInt() }
             "bool" -> when (rawValue) {
                 is Boolean -> rawValue
                 "true" -> true
                 "false" -> false
                 else -> rawValue?.toString()?.equals("true", true) == true
             }
-            "float" -> (rawValue as? Number)?.toDouble() ?: rawValue?.toString()?.toDoubleOrNull()
+            "float" -> (rawValue as? Number)?.toDouble() ?: rawValue?.toString()?.trim()?.toDoubleOrNull()
             else -> rawValue // auto: keep original type
         }
         

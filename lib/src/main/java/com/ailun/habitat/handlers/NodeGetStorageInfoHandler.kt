@@ -20,16 +20,16 @@ class NodeGetStorageInfoHandler : INodeHandler {
             val available = stat.availableBytes
             val used = total - available
 
-            context.variables["storage_total"] = total
-            context.variables["storage_available"] = available
-            context.variables["storage_used"] = used
+            context.putVariable("storage_total", total)
+            context.putVariable("storage_available", available)
+            context.putVariable("storage_used", used)
             context.variables["storage_available_percent"] =
                 if (total > 0) (available * 100 / total) else 0
-            context.variables["storage_success"] = true
+            context.putVariable("storage_success", true)
             context.log("Storage total=${total / 1024 / 1024}MB available=${available / 1024 / 1024}MB")
         } catch (e: Exception) {
-            context.variables["storage_success"] = false
-            context.variables["storage_error"] = e.message ?: "Unknown error"
+            context.putVariable("storage_success", false)
+            context.putVariable("storage_error", e.message ?: "Unknown error")
             context.log("StorageInfo FAILED: ${e.message}")
         }
         return node.next

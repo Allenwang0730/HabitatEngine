@@ -4,6 +4,7 @@ import android.media.MediaRecorder
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.io.File
 
@@ -54,17 +55,19 @@ class NodeRecordAudioHandler : INodeHandler {
             recorder.stop()
             started = false
 
-            context.variables["record_path"] = path
-            if (outputVar != null) context.variables[outputVar] = path
-            context.variables["record_success"] = true
+            context.putVariable("record_path", path)
+            if (outputVar != null) context.putVariable(outputVar, path)
+            context.putVariable("record_success", true)
             context.log("RecordAudio OK: $path (${durationMs}ms)")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: SecurityException) {
-            context.variables["record_success"] = false
-            context.variables["record_error"] = "缺少 RECORD_AUDIO 权限: ${e.message}"
+            context.putVariable("record_success", false)
+            context.putVariable("record_error", "缺少 RECORD_AUDIO 权限: ${e.message}")
             context.log("RecordAudio FAILED (RECORD_AUDIO missing)")
         } catch (e: Exception) {
-            context.variables["record_success"] = false
-            context.variables["record_error"] = e.message ?: "Unknown error"
+            context.putVariable("record_success", false)
+            context.putVariable("record_error", e.message ?: "Unknown error")
             context.log("RecordAudio FAILED: ${e.message}")
         } finally {
             if (started) {

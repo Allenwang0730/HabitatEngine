@@ -9,6 +9,10 @@ import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.api.IShellExecutor
+import com.ailun.habitat.paramInt
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -21,7 +25,8 @@ class NodeScreenshotHandler(
 
         val outputVar = params["output_var"]?.toString()?.trim()?.ifEmpty { null }
         val format = params["format"]?.toString()?.trim()?.lowercase() ?: "base64"
-        val quality = (params["quality"] as? Number)?.toInt()?.coerceIn(1, 100) ?: 80
+        val quality = paramInt(node, context, "quality", 80).coerceIn(1, 100)
+        context.putVariable("screenshot_success", false)
 
         // Use a world-writable path so the shell process (uid=2000) can write to it.
         // App private dirs like cacheDir are NOT writable by shell.
@@ -43,80 +48,80 @@ class NodeScreenshotHandler(
                     result.contains("not found", ignoreCase = true)
                 ) {
                     Log.e(TAG, "Screenshot shell error: $result")
-                    context.variables["screenshot_success"] = false
-                    context.variables["screenshot_error"] = "Shell: $result"
+                    context.putVariable("screenshot_success", false)
+                    context.putVariable("screenshot_error", "Shell: $result")
                     return node.next
                 }
             } else {
                 context.log("Screenshot: no shell executor, trying Runtime.exec")
-                try {
-                    val process = Runtime.getRuntime().exec(arrayOf("screencap", "-p", outFile.absolutePath))
-                    process.waitFor()
-                    val err = process.errorStream.bufferedReader().readText()
-                    if (err.isNotBlank()) {
-                        context.log("Screenshot: stderr='${err.take(200)}'")
-                    }
-                } catch (e: Exception) {
-                    context.log("Screenshot: Runtime.exec failed: ${e.message}")
-                    context.variables["screenshot_success"] = false
-                    context.variables["screenshot_error"] = "exec: ${e.message}"
+                val out = LocalShell.run(arrayOf("screencap", "-p", outFile.absolutePath), 15_000)
+                if (out.startsWith("Error:")) {
+                    context.log("Screenshot: local exec failed: ${out.take(200)}")
+                    context.putVariable("screenshot_error", "exec: $out")
                     return node.next
                 }
+                if (out.isNotBlank()) context.log("Screenshot: output='${out.take(200)}'")
             }
 
             // Small delay for file system sync
             kotlinx.coroutines.delay(200)
 
-            val exists = outFile.exists()
-            val size = if (exists) outFile.length() else -1L
-            context.log("Screenshot: file exists=$exists, size=$size")
-
-            if (!exists || size == 0L) {
+            val decoded = withContext(Dispatchers.IO) { decode(outFile, format, quality) }
+            if (decoded == null) {
                 Log.e(TAG, "Screenshot: no output file at $outFile")
-                context.variables["screenshot_success"] = false
-                context.variables["screenshot_error"] = "文件未生成 ($outFile)"
+                context.putVariable("screenshot_error", "文件未生成 ($outFile)")
                 return node.next
             }
-
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(outFile.absolutePath, options)
-            val width = options.outWidth
-            val height = options.outHeight
+            val (width, height, result) = decoded
             context.log("Screenshot: decoded ${width}x${height}")
+            context.putVariable("screenshot_width", width)
+            context.putVariable("screenshot_height", height)
 
-            context.variables["screenshot_width"] = width
-            context.variables["screenshot_height"] = height
-
-            val result: String = when (format) {
-                "file" -> outFile.absolutePath
-                else -> {
-                    val bitmap = BitmapFactory.decodeFile(outFile.absolutePath)
-                    if (bitmap != null) {
-                        val baos = ByteArrayOutputStream()
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, baos)
-                        val bytes = baos.toByteArray()
-                        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                        bitmap.recycle()
-                        baos.close()
-                        base64
-                    } else {
-                        val bytes = outFile.readBytes()
-                        Base64.encodeToString(bytes, Base64.NO_WRAP)
-                    }
-                }
-            }
-
-            context.variables[outputVar ?: "screenshot_base64"] = result
-            context.variables["screenshot_success"] = true
+            context.putVariable(outputVar ?: "screenshot_base64", result)
+            context.putVariable("screenshot_success", true)
             context.log("Screenshot: success, ${width}x${height}, format=$format")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Screenshot failed: ${e.message}", e)
-            context.variables["screenshot_success"] = false
-            context.variables["screenshot_error"] = e.message ?: "Unknown"
+            context.putVariable("screenshot_success", false)
+            context.putVariable("screenshot_error", e.message ?: "Unknown")
             context.log("Screenshot: exception ${e.message}")
         }
 
         return node.next
+    }
+
+    /** 读取并编码截图文件；文件不存在/为空返回 null。 */
+    private fun decode(outFile: File, format: String, quality: Int): Triple<Int, Int, String>? {
+        val exists = outFile.exists()
+        val size = if (exists) outFile.length() else -1L
+        if (!exists || size == 0L) return null
+
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(outFile.absolutePath, options)
+        val width = options.outWidth
+        val height = options.outHeight
+
+        val result: String = when (format) {
+            "file" -> outFile.absolutePath
+            else -> {
+                val bitmap = BitmapFactory.decodeFile(outFile.absolutePath)
+                if (bitmap != null) {
+                    val baos = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, quality, baos)
+                    val bytes = baos.toByteArray()
+                    val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    bitmap.recycle()
+                    baos.close()
+                    base64
+                } else {
+                    val bytes = outFile.readBytes()
+                    Base64.encodeToString(bytes, Base64.NO_WRAP)
+                }
+            }
+        }
+        return Triple(width, height, result)
     }
 
     companion object {

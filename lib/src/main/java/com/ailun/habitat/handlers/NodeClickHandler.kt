@@ -8,6 +8,7 @@ import com.ailun.habitat.WorkflowNode
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.ailun.habitat.api.IAccessibilityProvider
+import com.ailun.habitat.paramInt
 
 /**
  * [ACTION_CLICK]：点击指定目标。
@@ -16,13 +17,16 @@ import com.ailun.habitat.api.IAccessibilityProvider
  * - `target`（必填）："x,y"坐标 或 界面文本（按文本匹配点击）
  * - `region`（可选，仅文本匹配）：限定匹配节点在屏幕区域内，
  *   "top"/"bottom"/"left"/"right"/"center" 或 归一化 "x1,y1,x2,y2"（0-1 相对屏幕，如 0,0.5,1,1 = 下半屏）
- * - `occurrence`（可选，默认 0，仅文本匹配）：在 region 过滤后，取第几个匹配（按屏幕从上到下排序，0 起）
+ * - `occurrence`（可选，默认 0，仅文本匹配）：在 region 过滤后，取第几个匹配（按屏幕从上到下排序，0 起）；
+ *   越界（≥ 匹配数或为负）直接失败，不再静默点第一个
+ * 输出：click_success（进入时先置 false）
  */
 class NodeClickHandler(
     private val a11yProvider: IAccessibilityProvider? = null
 ) : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
+        context.putVariable("click_success", false)
         val service = a11yProvider?.getService()
             ?: run {
                 Log.e(TAG, "Click failed: Accessibility Service not running")
@@ -37,10 +41,10 @@ class NodeClickHandler(
 
         val target = context.interpolate(raw)
         val regionSpec = context.interpolate(node.params?.get("region")?.toString()?.trim() ?: "")
-        val occurrence = (node.params?.get("occurrence") as? Number)?.toInt() ?: 0
+        val occurrence = paramInt(node, context, "occurrence", 0)
         // 点击坐标偏移（相对目标中心，屏幕 Y 向下为正；offset_y 为负表示向上偏移）
-        val offsetX = node.params?.get("offset_x")?.toString()?.toIntOrNull() ?: 0
-        val offsetY = node.params?.get("offset_y")?.toString()?.toIntOrNull() ?: 0
+        val offsetX = paramInt(node, context, "offset_x", 0)
+        val offsetY = paramInt(node, context, "offset_y", 0)
         val selfPackage = context.appContext.packageName
         Log.d(TAG, "Attempting to click target: '$target' region='$regionSpec' occurrence=$occurrence offset=($offsetX,$offsetY)")
 
@@ -60,7 +64,7 @@ class NodeClickHandler(
         }
 
         Log.i(TAG, "Click result for '$target': $success")
-        context.variables["click_success"] = success
+        context.putVariable("click_success", success)
         return node.next
     }
 
@@ -95,10 +99,12 @@ class NodeClickHandler(
             }
 
             // 指定 occurrence：按屏幕从上到下排序取第 N 个；否则维持"第一个可见"
-            val targetNode = if (occurrence > 0 && occurrence < filteredNodes.size) {
+            if (occurrence < 0 || occurrence >= filteredNodes.size) {
+                Log.w(TAG, "occurrence=$occurrence 越界（匹配 ${filteredNodes.size} 个）: '$selector'")
+                return false
+            }
+            val targetNode = if (occurrence > 0) {
                 filteredNodes.sortedBy { rectTop(it) }[occurrence]
-            } else if (occurrence == 0) {
-                filteredNodes.find { it.isVisibleToUser } ?: filteredNodes[0]
             } else {
                 filteredNodes.find { it.isVisibleToUser } ?: filteredNodes[0]
             }
@@ -160,12 +166,17 @@ class NodeClickHandler(
     }
 
     private fun getScreenRect(service: android.accessibilityservice.AccessibilityService): Rect {
+        var root: AccessibilityNodeInfo? = null
         return try {
             val r = Rect()
-            service.rootInActiveWindow?.getBoundsInScreen(r)
+            root = service.rootInActiveWindow
+            root?.getBoundsInScreen(r)
             if (r.isEmpty) Rect(0, 0, 1080, 2400) else r
         } catch (_: Exception) {
             Rect(0, 0, 1080, 2400)
+        } finally {
+            @Suppress("DEPRECATION")
+            try { root?.recycle() } catch (_: Exception) {}
         }
     }
 

@@ -27,7 +27,7 @@ class NodeCallDirectHandler : INodeHandler {
         val rawNumber = node.params?.get("phone_number")?.toString()?.trim().orEmpty()
         if (rawNumber.isEmpty()) {
             Log.e(TAG, "CallDirect failed: 'phone_number' parameter is empty")
-            context.variables["call_success"] = false
+            context.putVariable("call_success", false)
             return node.next
         }
 
@@ -35,11 +35,18 @@ class NodeCallDirectHandler : INodeHandler {
             != PackageManager.PERMISSION_GRANTED
         ) {
             Log.e(TAG, "CallDirect failed: CALL_PHONE permission not granted")
-            context.variables["call_success"] = false
+            context.putVariable("call_success", false)
             return node.next
         }
 
-        val phoneNumber = context.interpolate(rawNumber)
+        val phoneNumber = context.interpolate(rawNumber).trim()
+        // 只允许拨号字符，防止变量注入 USSD/MMI 等特殊串以外的内容
+        if (!PHONE_REGEX.matches(phoneNumber)) {
+            Log.e(TAG, "CallDirect failed: invalid phone number")
+            context.putVariable("call_success", false)
+            context.putVariable("call_error", "号码格式非法")
+            return node.next
+        }
         val simPref = node.params?.get("sim")?.toString()?.trim()?.ifEmpty { "auto" } ?: "auto"
 
         // 用 TelecomManager.placeCall（系统底层拨号 API）：后台运行也能拨，不依赖前台 Activity，
@@ -50,13 +57,14 @@ class NodeCallDirectHandler : INodeHandler {
             resolvePhoneAccountHandle(context.appContext, simPref)?.let {
                 extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
             }
-            val call = tm.placeCall(Uri.parse("tel:$phoneNumber"), extras)
-            call != null
+            // placeCall 无返回值；未抛异常即视为已提交拨号
+            tm.placeCall(Uri.fromParts("tel", phoneNumber, null), extras)
+            true
         }.onSuccess { Log.i(TAG, "CallDirect placed via placeCall: $phoneNumber (sim=$simPref)") }
             .onFailure { Log.e(TAG, "CallDirect placeCall failed: ${it.message}", it) }
             .getOrElse { false }
 
-        context.variables["call_success"] = success
+        context.putVariable("call_success", success)
         return node.next
     }
 
@@ -72,5 +80,6 @@ class NodeCallDirectHandler : INodeHandler {
 
     companion object {
         private const val TAG = "HabitatCallDirect"
+        private val PHONE_REGEX = Regex("^[0-9+*#,; ()\\-]{1,40}$")
     }
 }

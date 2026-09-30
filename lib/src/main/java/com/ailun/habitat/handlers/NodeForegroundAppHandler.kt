@@ -6,6 +6,8 @@ import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.api.IAccessibilityProvider
 import com.ailun.habitat.api.IShellExecutor
+import com.ailun.habitat.paramBool
+import kotlinx.coroutines.CancellationException
 
 /**
  * [ACTION_FOREGROUND_APP]：获取当前前台应用信息。
@@ -31,7 +33,7 @@ class NodeForegroundAppHandler(
             ?: "foreground_package"
         val activityVar = params["activity_var"]?.toString()?.trim()?.ifEmpty { null }
             ?: "foreground_activity"
-        val forceShell = params["use_shell"]?.toString()?.equals("true", true) == true
+        val forceShell = paramBool(node, context, "use_shell", false)
 
         var packageName: String? = null
         var activityName: String? = null
@@ -45,7 +47,8 @@ class NodeForegroundAppHandler(
             }
         }
 
-        if (packageName == null && (forceShell || provider == null)) {
+        // provider 缺失、或 provider 存在但拿不到包名（无障碍未连接）都回退 shell
+        if (packageName == null) {
             // Fallback to shell
             val shell = shellExecutor
             if (shell != null) {
@@ -60,6 +63,8 @@ class NodeForegroundAppHandler(
                             Log.d(TAG, "Got foreground app from dumpsys activity: $packageName / $activityName")
                         }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                     Log.d(TAG, "dumpsys activity method failed, trying alternative")
                 }
@@ -76,6 +81,8 @@ class NodeForegroundAppHandler(
                                 Log.d(TAG, "Got foreground app from dumpsys window: $packageName / $activityName")
                             }
                         }
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (_: Exception) {
                         Log.d(TAG, "dumpsys window method failed")
                     }
@@ -89,6 +96,8 @@ class NodeForegroundAppHandler(
                             packageName = parseRecentsLine(recentsOutput.trim())
                             Log.d(TAG, "Got foreground app from dumpsys recents: $packageName")
                         }
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (_: Exception) {
                         Log.d(TAG, "dumpsys recents method failed")
                     }
@@ -96,13 +105,11 @@ class NodeForegroundAppHandler(
             } else {
                 // No shell executor, try Runtime.exec
                 try {
-                    val process = Runtime.getRuntime().exec(
-                        arrayOf("sh", "-c", "dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity' | head -1")
-                    )
-                    val output = process.inputStream.bufferedReader().readText().trim()
-                    process.waitFor()
+                    val output = LocalShell.sh(
+                        "dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity' | head -1", 10_000,
+                    ).trim()
 
-                    if (output.isNotBlank()) {
+                    if (output.isNotBlank() && !output.startsWith("Error:")) {
                         val parts = parseActivityDumpsysLine(output)
                         if (parts != null) {
                             packageName = parts.first
@@ -110,6 +117,8 @@ class NodeForegroundAppHandler(
                             Log.d(TAG, "Got foreground app from Runtime.exec: $packageName / $activityName")
                         }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.d(TAG, "Runtime.exec method failed: ${e.message}")
                 }
@@ -117,28 +126,28 @@ class NodeForegroundAppHandler(
         }
 
         if (packageName != null) {
-            context.variables[outputVar] = packageName
-            context.variables["foreground_package"] = packageName
-            context.variables["foreground_success"] = true
+            context.putVariable(outputVar, packageName)
+            context.putVariable("foreground_package", packageName)
+            context.putVariable("foreground_success", true)
             Log.i(TAG, "Foreground app: $packageName")
         } else {
-            context.variables[outputVar] = "unknown"
-            context.variables["foreground_package"] = "unknown"
-            context.variables["foreground_success"] = false
+            context.putVariable(outputVar, "unknown")
+            context.putVariable("foreground_package", "unknown")
+            context.putVariable("foreground_success", false)
             Log.w(TAG, "Could not determine foreground app")
         }
 
         if (activityName != null) {
-            context.variables[activityVar] = activityName
-            context.variables["foreground_activity"] = activityName
+            context.putVariable(activityVar, activityName)
+            context.putVariable("foreground_activity", activityName)
 
             // Extract short class name
             val shortClass = activityName.substringAfterLast(".").ifEmpty { activityName }
-            context.variables["foreground_class"] = shortClass
+            context.putVariable("foreground_class", shortClass)
         } else {
-            context.variables[activityVar] = "unknown"
-            context.variables["foreground_activity"] = "unknown"
-            context.variables["foreground_class"] = "unknown"
+            context.putVariable(activityVar, "unknown")
+            context.putVariable("foreground_activity", "unknown")
+            context.putVariable("foreground_class", "unknown")
         }
 
         return node.next

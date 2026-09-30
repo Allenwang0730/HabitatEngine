@@ -21,15 +21,15 @@ class NodeGetTrafficHandler : INodeHandler {
             val tx = TrafficStats.getTotalTxBytes()
             val total = rx + tx
             val summary = "rx=${format(rx)} tx=${format(tx)} total=${format(total)}"
-            context.variables["traffic_rx"] = rx
-            context.variables["traffic_tx"] = tx
-            context.variables["traffic_total"] = total
-            context.variables[outputVar] = summary
-            context.variables["traffic_success"] = true
+            context.putVariable("traffic_rx", rx)
+            context.putVariable("traffic_tx", tx)
+            context.putVariable("traffic_total", total)
+            context.putVariable(outputVar, summary)
+            context.putVariable("traffic_success", true)
             context.log("Traffic $summary")
         } catch (e: Exception) {
-            context.variables["traffic_success"] = false
-            context.variables["traffic_error"] = e.message ?: "Unknown error"
+            context.putVariable("traffic_success", false)
+            context.putVariable("traffic_error", e.message ?: "Unknown error")
         }
         return node.next
     }

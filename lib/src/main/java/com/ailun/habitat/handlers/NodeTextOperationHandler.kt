@@ -3,6 +3,7 @@ package com.ailun.habitat.handlers
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.paramInt
 
 /**
  * [ACTION_TEXT_OPERATION]：文本操作。
@@ -19,30 +20,33 @@ class NodeTextOperationHandler : INodeHandler {
             ?.trim()?.lowercase() ?: return node.next
 
         val inputKey = (params["input"]?.toString() ?: params["source_var"]?.toString())?.trim().orEmpty()
-        val sourceValue = context.getVariable(inputKey)?.toString() ?: inputKey
+        // input 是变量名则取变量值；否则当作字面文本（支持 ${var} 插值）
+        val sourceValue = context.getVariable(inputKey)?.toString() ?: context.interpolate(inputKey)
+        fun text(vararg keys: String): String =
+            keys.firstNotNullOfOrNull { params[it]?.toString() }?.let { context.interpolate(it) }.orEmpty()
         val outputVar = params["output_var"]?.toString()?.trim()?.ifEmpty { null } ?: "text_output"
 
         val result = when (op) {
             "replace" -> {
-                val old = (params["old"]?.toString() ?: params["search"]?.toString()).orEmpty()
-                val new = (params["new"]?.toString() ?: params["replace_with"]?.toString()).orEmpty()
-                sourceValue.replace(old, new)
+                val old = text("old", "search")
+                val new = text("new", "replace_with")
+                if (old.isEmpty()) sourceValue else sourceValue.replace(old, new)
             }
             "substring" -> {
-                val start = (params["start"] as? Number)?.toInt() ?: 0
-                val end = (params["end"] as? Number)?.toInt() ?: sourceValue.length
-                sourceValue.substring(maxOf(0, start).coerceAtMost(sourceValue.length),
-                    end.coerceAtMost(sourceValue.length))
+                val len = sourceValue.length
+                val start = paramInt(node, context, "start", 0).coerceIn(0, len)
+                val end = paramInt(node, context, "end", len).coerceIn(start, len)
+                sourceValue.substring(start, end)
             }
             "split" -> {
-                val delimiter = params["delimiter"]?.toString() ?: ","
+                val delimiter = params["delimiter"]?.toString()?.ifEmpty { null } ?: ","
                 sourceValue.split(delimiter).joinToString("\n")
             }
             "uppercase" -> sourceValue.uppercase()
             "lowercase" -> sourceValue.lowercase()
             "trim" -> sourceValue.trim()
-            "append" -> sourceValue + (params["text"]?.toString().orEmpty())
-            "prepend" -> (params["text"]?.toString().orEmpty()) + sourceValue
+            "append" -> sourceValue + text("text")
+            "prepend" -> text("text") + sourceValue
             else -> sourceValue
         }
 

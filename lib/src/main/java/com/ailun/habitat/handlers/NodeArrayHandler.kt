@@ -42,36 +42,36 @@ class NodeArrayHandler : INodeHandler {
                     val value = node.params?.get("value")?.toString() ?: ""
                     list.clear()
                     list.addAll(parseValues(value, delimiter))
-                    context.variables[varName] = list
-                    context.variables[outputVar] = list.size
+                    context.putVariable(varName, list)
+                    context.putVariable(outputVar, list.size)
                     context.log("Array set '${varName}' ← ${list.size} items")
                 }
 
                 "push" -> {
                     if (item != null) list.add(item)
-                    context.variables[varName] = list
-                    context.variables[outputVar] = list.size
+                    context.putVariable(varName, list)
+                    context.putVariable(outputVar, list.size)
                 }
 
                 "pop" -> {
                     val popped = if (list.isEmpty()) null else list.removeAt(list.size - 1)
-                    context.variables[varName] = list
-                    context.variables[outputVar] = popped
+                    context.putVariable(varName, list)
+                    context.putVariable(outputVar, popped)
                 }
 
                 "get" -> {
                     val i = normalizeIndex(index ?: 0, list.size)
-                    context.variables[outputVar] = if (i != null) list.getOrNull(i) else null
+                    context.putVariable(outputVar, if (i != null) list.getOrNull(i) else null)
                 }
 
-                "length" -> context.variables[outputVar] = list.size
+                "length" -> context.putVariable(outputVar, list.size)
 
-                "join" -> context.variables[outputVar] = list.joinToString(delimiter) { it?.toString() ?: "" }
+                "join" -> context.putVariable(outputVar, list.joinToString(delimiter) { it?.toString() ?: "" })
 
                 "clear" -> {
                     list.clear()
-                    context.variables[varName] = list
-                    context.variables[outputVar] = 0
+                    context.putVariable(varName, list)
+                    context.putVariable(outputVar, 0)
                 }
 
                 "remove" -> {
@@ -81,11 +81,11 @@ class NodeArrayHandler : INodeHandler {
                     } else {
                         list.remove(item)
                     }
-                    context.variables[varName] = list
-                    context.variables[outputVar] = removed
+                    context.putVariable(varName, list)
+                    context.putVariable(outputVar, removed)
                 }
 
-                "contains" -> context.variables[outputVar] = list.any { it?.toString() == item }
+                "contains" -> context.putVariable(outputVar, list.any { it?.toString() == item })
 
                 else -> {
                     context.variables.remove(outputVar) // CHM 不允许 null value

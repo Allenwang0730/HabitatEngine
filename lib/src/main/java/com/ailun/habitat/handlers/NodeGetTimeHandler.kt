@@ -24,23 +24,23 @@ class NodeGetTimeHandler : INodeHandler {
         val now = Date()
         try {
             val sdf = SimpleDateFormat(format, Locale.getDefault())
-            context.variables[outputVar] = sdf.format(now)
+            context.putVariable(outputVar, sdf.format(now))
         } catch (e: Exception) {
-            context.variables[outputVar] = now.toString()
+            context.putVariable(outputVar, now.toString())
         }
         context.log("GetTime format=$format → ${context.variables[outputVar]}")
-        context.variables["current_timestamp"] = now.time
-        context.variables["current_time"] = context.variables[outputVar]
+        context.putVariable("current_timestamp", now.time)
+        context.putVariable("current_time", context.variables[outputVar])
 
         val cal = java.util.Calendar.getInstance()
-        context.variables["current_year"] = cal.get(java.util.Calendar.YEAR)
-        context.variables["current_month"] = cal.get(java.util.Calendar.MONTH) + 1
-        context.variables["current_day"] = cal.get(java.util.Calendar.DAY_OF_MONTH)
-        context.variables["current_hour"] = cal.get(java.util.Calendar.HOUR_OF_DAY)
-        context.variables["current_minute"] = cal.get(java.util.Calendar.MINUTE)
-        context.variables["current_second"] = cal.get(java.util.Calendar.SECOND)
-        context.variables["current_weekday"] = cal.get(java.util.Calendar.DAY_OF_WEEK) - 1 // 0=Sunday
-        context.variables["time_success"] = true
+        context.putVariable("current_year", cal.get(java.util.Calendar.YEAR))
+        context.putVariable("current_month", cal.get(java.util.Calendar.MONTH) + 1)
+        context.putVariable("current_day", cal.get(java.util.Calendar.DAY_OF_MONTH))
+        context.putVariable("current_hour", cal.get(java.util.Calendar.HOUR_OF_DAY))
+        context.putVariable("current_minute", cal.get(java.util.Calendar.MINUTE))
+        context.putVariable("current_second", cal.get(java.util.Calendar.SECOND))
+        context.putVariable("current_weekday", cal.get(java.util.Calendar.DAY_OF_WEEK) - 1) // 0=Sunday
+        context.putVariable("time_success", true)
         return node.next
     }
 }
