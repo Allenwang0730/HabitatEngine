@@ -7,7 +7,10 @@ plugins {
 android {
     namespace = "com.ailun.habitat"
     compileSdk = 36
-    defaultConfig { minSdk = 29 }
+    defaultConfig {
+        minSdk = 29
+        consumerProguardFiles("consumer-rules.pro")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -15,6 +18,8 @@ android {
     kotlin {
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11) }
     }
+    // JVM 单测里 android.util.Log 等桩方法返回默认值而非抛 "not mocked"
+    testOptions { unitTests.isReturnDefaultValues = true }
 }
 
 // 独立发布：./gradlew :lib:publishReleasePublicationToMavenLocal → mavenLocal 出一个 habitat-engine AAR

@@ -36,3 +36,6 @@ openvpn_config_backup/
 *.cer
 *.p12
 *.pfx
+
+# 本地 IDE/助手配置（含本机路径）
+.codemoss/

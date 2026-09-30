@@ -18,12 +18,17 @@ android {
     namespace = "com.ailun.habitat"
     compileSdk = 36
 
-    signingConfigs {
-        create("release") {
-            storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
+    // 仅在 keystore.properties 存在且字段齐全时配置 release 签名；否则 release 构建产出未签名 APK（配置阶段不失败）
+    val hasReleaseKeystore = keystorePropertiesFile.exists() &&
+        listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !keystoreProperties.getProperty(it).isNullOrBlank() }
+    if (hasReleaseKeystore) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
         }
     }
 
@@ -37,7 +42,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKeystore) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -115,7 +120,6 @@ dependencies {
 
     // Ktor（Agent WebSocket server）
     implementation(libs.ktor.server.core)
-    implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.websockets)
 
@@ -132,7 +136,4 @@ dependencies {
 
     // Local Broadcast Manager (deprecated but needed for NotificationService)
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
-
-    // DocumentFile
-    implementation("androidx.documentfile:documentfile:1.1.0")
 }
