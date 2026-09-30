@@ -1,62 +1,77 @@
 package com.ailun.habitat.app.triggers
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import com.ailun.habitat.TriggerConfig
 import com.ailun.habitat.api.ITriggerSource
 import com.ailun.habitat.api.TriggerEvent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 定时触发器 — 基于 Handler 的周期性定时。
- * 对于需要持久化的定时任务，应改为 AlarmManager；当前实现适用于应用进程内的简单定时。
+ * 定时触发器 — 每个定时工作流一个独立协程，按自己的 interval_ms 用 delay 调度（最小 1000ms）。
+ * 事件参数带 [PARAM_WORKFLOW_ID]，TriggerManager 只把它分发给对应工作流。
  *
- * source 以 5s 最小粒度 tick；精确间隔由 TriggerManager 按每个 timer entry 的
- * TriggerConfig.intervalMs 门控（见 onTriggerEvent 的 timerLastFired 检查）。
+ * 限制：仅在应用进程存活期间有效。Doze/应用待机下 delay 会被推迟（CPU 休眠时不计时），
+ * 进程被杀后不会自行唤醒（重启进程时由 HabitatApp 恢复注册）。需要严格准时或跨进程存活
+ * 应改用 AlarmManager / WorkManager（本轮未引入）。
  */
 class TimerTriggerSource : ITriggerSource {
     override val type: String = TriggerConfig.TYPE_TIMER
 
-    private var handler: Handler? = null
-    private var runnable: Runnable? = null
+    private var scope: CoroutineScope? = null
+    @Volatile
     private var onEvent: ((TriggerEvent) -> Unit)? = null
-    private var intervalMs: Long = 5000L
-    private var isRepeat: Boolean = false
-    private var started: Boolean = false
+    private val jobs = ConcurrentHashMap<String, Job>()
 
+    @Synchronized
     override fun start(context: Context, onEvent: (TriggerEvent) -> Unit) {
-        // 幂等：若已 start，先彻底清理旧的（防旧 Handler/Runnable 自续期泄漏）
-        if (started) stop(context)
-
         this.onEvent = onEvent
-        intervalMs = 5000L // 最小粒度；精确间隔由 TriggerManager 门控
-        isRepeat = true
-
-        val h = Handler(Looper.getMainLooper())
-        handler = h
-
-        val self = this
-        val r = object : Runnable {
-            override fun run() {
-                val cb = self.onEvent
-                // 若已 stop（onEvent 为 null）则不再自续期，避免旧 runnable 无限循环
-                if (cb != null) {
-                    cb(TriggerEvent(type = TriggerConfig.TYPE_TIMER))
-                    if (self.isRepeat) h.postDelayed(this, self.intervalMs)
-                }
-            }
-        }
-        runnable = r
-        started = true
-        h.post(r)
+        if (scope == null) scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     }
 
+    /** 为某个工作流（重新）安排定时；默认首次在一个间隔之后触发，fireImmediately=true 时立即触发一次。 */
+    @Synchronized
+    fun schedule(workflowId: String, intervalMs: Long, fireImmediately: Boolean) {
+        val s = scope ?: return
+        val interval = intervalMs.coerceAtLeast(MIN_INTERVAL_MS)
+        jobs.remove(workflowId)?.cancel()
+        jobs[workflowId] = s.launch {
+            if (!fireImmediately) delay(interval)
+            while (isActive) {
+                onEvent?.invoke(
+                    TriggerEvent(
+                        type = TriggerConfig.TYPE_TIMER,
+                        params = mapOf(PARAM_WORKFLOW_ID to workflowId),
+                    )
+                )
+                delay(interval)
+            }
+        }
+    }
+
+    @Synchronized
+    fun cancel(workflowId: String) {
+        jobs.remove(workflowId)?.cancel()
+    }
+
+    @Synchronized
     override fun stop(context: Context) {
-        handler?.removeCallbacksAndMessages(null)
-        handler = null
-        runnable = null
+        jobs.values.forEach { it.cancel() }
+        jobs.clear()
+        scope?.cancel()
+        scope = null
         onEvent = null
-        isRepeat = false
-        started = false
+    }
+
+    companion object {
+        const val PARAM_WORKFLOW_ID = "workflow_id"
+        private const val MIN_INTERVAL_MS = 1000L
     }
 }

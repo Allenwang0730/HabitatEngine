@@ -13,13 +13,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import com.ailun.habitat.HabitatExecutionService
-import com.ailun.habitat.HabitatWorkflow
-import com.ailun.habitat.NodeHandlerFactory
 import com.ailun.habitat.R
-import com.ailun.habitat.app.bridge.AppAccessibilityProvider
-import com.ailun.habitat.app.bridge.ShizukuShellExecutor
-import com.ailun.habitat.app.bridge.applyAppHandlers
 import com.ailun.habitat.app.HabitatLogger
 import kotlinx.coroutines.*
 
@@ -33,37 +27,40 @@ class HabitatFloatService : Service() {
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    private var foregroundFailed = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         HabitatLogger.d(TAG, "HabitatFloatService onCreate")
-        isRunning = true  // 真实服务启动后才标记在运行（避免 optimism 虚假状态）
         ensureNotificationChannel()
-        startForegroundSafely()
+        if (!startForegroundSafely()) {
+            // Android 12+ 后台启动被拒（ForegroundServiceStartNotAllowedException）等：不能以非前台状态继续运行，否则稍后被系统杀并崩溃
+            foregroundFailed = true
+            stopSelf()
+            return
+        }
+        isRunning = true  // 真实进入前台后才标记在运行（避免 optimism 虚假状态）
 
-        val manager = FloatWindowManager.getInstance(application)
-        manager.onWorkflowSelected = { workflow ->
-            runMountedWorkflow(workflow)
-        }
-        manager.onWorkflowStop = { workflow ->
-            // 工作流停止已在manager中处理
-        }
-        manager.onDismiss = {
-            // 面板关闭时不需要额外处理
-        }
-        manager.showFloatWindow()
+        // 执行与日志由 FloatWindowManager 自己处理（记录悬浮窗启动的 run id），服务只负责保活
+        FloatWindowManager.getInstance(application).showFloatWindow()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         HabitatLogger.d(TAG, "HabitatFloatService onStartCommand")
-        return START_STICKY
+        return if (foregroundFailed) START_NOT_STICKY else START_STICKY
     }
 
     override fun onDestroy() {
         HabitatLogger.d(TAG, "HabitatFloatService onDestroy")
         isRunning = false
-        FloatWindowManager.getInstanceOrNull()?.destroy()
+        FloatWindowManager.getInstanceOrNull()?.let {
+            it.onWorkflowSelected = null
+            it.onWorkflowStop = null
+            it.onDismiss = null
+            if (!foregroundFailed) it.destroy()
+        }
         ioScope.cancel()
         mainScope.cancel()
         super.onDestroy()
@@ -83,9 +80,9 @@ class HabitatFloatService : Service() {
         }
     }
 
-    private fun startForegroundSafely() {
+    private fun startForegroundSafely(): Boolean {
         val notification = createNotification()
-        try {
+        return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceCompat.startForeground(
                     this, NOTIFICATION_ID, notification,
@@ -94,8 +91,10 @@ class HabitatFloatService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+            true
         } catch (t: Throwable) {
-            HabitatLogger.w(TAG, "startForeground failed")
+            HabitatLogger.e(TAG, "startForeground failed", t)
+            false
         }
     }
 
@@ -116,22 +115,6 @@ class HabitatFloatService : Service() {
             .build()
     }
 
-    // ---------- 工作流执行 ----------
-
-    private fun runMountedWorkflow(wf: HabitatWorkflow) {
-        val factory = NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(applicationContext)).apply {
-            applyAppHandlers(applicationContext)
-        }
-        val ok = HabitatExecutionService.start(wf.id, wf.jsonContent, applicationContext, factory, onLog = { log ->
-            HabitatLogger.habitat(log)
-        })
-        if (ok) {
-            HabitatLogger.d(TAG, "启动工作流: ${wf.name}")
-        } else {
-            HabitatLogger.d(TAG, "工作流已在运行: ${wf.name}")
-        }
-    }
-
     companion object {
         private const val TAG = "HabitatFloatService"
         private const val NOTIFICATION_ID = 31042
@@ -141,9 +124,16 @@ class HabitatFloatService : Service() {
         var isRunning: Boolean = false
             private set
 
-        fun start(context: Context) {
+        fun start(context: Context): Boolean {
             // 不乐观置 isRunning——由 onCreate 真实置 true（FGS 启动失败时避免虚假状态）
-            ContextCompat.startForegroundService(context, Intent(context, HabitatFloatService::class.java))
+            return try {
+                ContextCompat.startForegroundService(context, Intent(context, HabitatFloatService::class.java))
+                true
+            } catch (e: Exception) {
+                // Android 12+ 后台调用 startForegroundService 可能直接抛 ForegroundServiceStartNotAllowedException
+                HabitatLogger.e(TAG, "startForegroundService failed", e)
+                false
+            }
         }
 
         fun stop(context: Context) {

@@ -32,6 +32,8 @@ class NotificationTriggerSource : ITriggerSource {
                         "package" to (intent.getStringExtra(HabitatNotificationService.EXTRA_PACKAGE_NAME) ?: ""),
                         "title" to (intent.getStringExtra(HabitatNotificationService.EXTRA_TITLE) ?: ""),
                         "text" to (intent.getStringExtra(HabitatNotificationService.EXTRA_TEXT) ?: ""),
+                        "big_text" to (intent.getStringExtra(HabitatNotificationService.EXTRA_BIG_TEXT) ?: ""),
+                        "ongoing" to intent.getBooleanExtra(HabitatNotificationService.EXTRA_ONGOING, false),
                         "timestamp" to (intent.getLongExtra(HabitatNotificationService.EXTRA_TIMESTAMP, 0L)),
                     ),
                 )
