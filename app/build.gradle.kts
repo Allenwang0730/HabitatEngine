@@ -36,8 +36,8 @@ android {
         applicationId = "com.ailun.habitat"
         minSdk = 29
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.7.0"
+        versionCode = 4
+        versionName = "1.8.0"
     }
 
     buildTypes {
