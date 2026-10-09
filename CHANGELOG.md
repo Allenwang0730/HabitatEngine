@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — 自主模式重构：规划（DeepSeek）+ 执行（Jev）+ 代码控制
+- **规划器**（`Planner` / `DeepSeekPlanner`）：先把目标拆成 1~6 步，每步带屏幕上可验证的完成条件，能用设备工具就直接用；执行卡住时从当前屏幕重规划剩下的部分（最多 2 次）；全部完成后按屏幕证据**复核**，提问类目标在复核里读出答案。Agent 页新增「DeepSeek 规划与复核」开关（默认开，需 DeepSeek key）；MCP `agent_start` 新增 `planner` 参数。
+- **设备工具**（`DeviceTools`）：`open_settings`（15 个设置页直接跳转）、`open_app`、`set_wifi/bluetooth/flashlight/dnd`、`set_brightness`、`set_volume`、`read_battery/time/device_info/network`。执行器每屏也能看到相关的 `USE_TOOL` 快捷方式。会改设备状态的工具必须由用户目标原文点名。
+- **导航栈 + 页面图**（`NavigationState`）：当前位置（`设置 > 蓝牙`，第几层、返回到哪）、本页试过的入口与结果、是否已滚到底，带给执行器和重规划。
+- **控件状态**：开关 `[已开启]/[已关闭]`（含"包着一个开关的列表行"）、滑块百分比、灰掉的控件进入观测和候选；新增 `SET_SLIDER`（拖到最大/最小/中间）。
+- **步骤完成判定**：Jev 在同一次请求里额外回答 `step_status`（当前步骤完成条件是否成立），≥0.7 由代码推进到下一步，不加延迟。
+- `ACTION_LAUNCH_APP` 新增 `intent_action`（只接受 `android.settings.*` 与电池页），用于直接跳转设置页。
+- 评测脚本 `scripts/agent_eval.mjs` + `agent_eval_tasks.json`：固定任务集，adb/读屏独立验证，跑完恢复设备状态，支持按执行器 × 有/无规划对比。
+
+### Changed
+- 默认最多步数 12 → 20，上限 30 → 40；多步计划里每步最多 8 步。
+- 页面标题识别跳过状态栏时钟。
+
+### Security
+- 规划器输出一律当不可信：工具/参数白名单与枚举、输入文字必须是目标原文子串、敏感按钮与权限弹窗的放行只看用户目标原文（规划器写进步骤说明的文字不能解锁）。
+- 规划器开启时屏幕文字也会发给 DeepSeek：即使执行器选 Jev/本地，首次也会弹出 DeepSeek 的隐私提示。
+
 ## [1.8.1] - 2026-10-09
 
 App `versionName` 1.8.1（`versionCode` 5）；引擎 AAR `com.ailun:habitat-engine:1.7.1`。

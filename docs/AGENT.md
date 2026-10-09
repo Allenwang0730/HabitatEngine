@@ -62,7 +62,7 @@ $env:AGENT_TOKEN = "<Agent 页复制的令牌>"
 - `ACTION_LAUNCH_APP` 打开系统设置（`launch_success=True`），再 `screen` 确认设置页 ✅
 - 完整 Agent 循环：观察 → 操作 → 验证 ✅
 
-## 自主模式（1.7.0）
+## 自主模式
 
 手机本机循环，Habitat 自己执行，不经过 Mobilerun：
 
@@ -72,6 +72,36 @@ $env:AGENT_TOKEN = "<Agent 页复制的令牌>"
 - Jev 走 `POST https://api.typesafe.ai/v1/systemone`，key 存在加密存储（Agent 页填写），不进代码、不进日志。429/5xx/网络错误重试一次；停止按钮会立即取消在途请求。
 - MCP/WS：`agent_start`（`goal` / `provider` / `max_steps`）、`agent_stop`、`agent_status`。启动后立即返回，不阻塞到循环结束。
 - 微信：系统设置另开「Habitat 微信读屏」。类名是 `SelectToSpeakService`，不要改。树为空才 OCR。
+
+### 架构：规划（System 2）+ 执行（System 1）+ 代码控制
+
+```
+目标 ─► 规划（DeepSeek）：拆成 1~6 步，每步带屏幕上可验证的完成条件；能用设备工具就直接用工具
+          │
+          ▼
+   每一步 ─► 工具步：直接调设备工具（DeviceTools），读回结果；失败退回界面步
+          └► 界面步：读屏 → 候选（ActionCatalog）→ 执行器（Jev / DeepSeek / 本地）只选一个 → 代码执行 → 代码验证
+               卡住（兜圈 / 连续无变化 / 低置信）─► 规划器从当前屏幕重规划剩下的部分（最多 2 次）
+          │
+          ▼
+   复核（DeepSeek）：按屏幕证据判断目标是否真的完成；提问类目标在这里读出答案
+```
+
+- **谁做什么**：DeepSeek 只拆步骤、复核，从不直接产生动作或坐标；Jev（或其它执行器）每屏只回答"点哪个"，并在同一次请求里回答"当前步骤做完没有"（`step_status`，≥0.7 时代码推进到下一步）。步骤推进、导航、判重、换招、安全闸都由代码掌握。
+- **开关**：Agent 页「DeepSeek 规划与复核」（默认开，需 DeepSeek key）。关掉或没配 key 时整个目标就是一步，与旧行为一致。MCP `agent_start` 可传 `planner: true/false` 覆盖一次。
+- **规划器输出一律不可信**：工具名和参数要过 `DeviceTools.resolve` 的白名单与枚举；要输入的文字必须是用户目标原文的子串；敏感按钮、权限弹窗的放行只看用户目标原文——规划器在步骤里写「确认支付」解锁不了支付按钮。
+- **设备工具**（`DeviceTools`）：`open_settings`（15 个设置页，直接跳转）、`open_app`、`set_wifi` / `set_bluetooth` / `set_flashlight` / `set_dnd`、`set_brightness`、`set_volume`、`read_battery` / `read_time` / `read_device_info` / `read_network`。会改设备状态的工具必须由**用户目标原文**点名（如目标里有"蓝牙"才可用 `set_bluetooth`）。执行器每屏也能看到相关的工具快捷方式（`USE_TOOL`）。
+- **页面状态**：包名 + Activity + 页面标题识别"在哪一页"；开关 `[已开启]/[已关闭]`、滑块百分比、灰掉、输入框内容都进候选描述；滑块用 `SET_SLIDER` 拖到最大/最小/中间。
+- **导航栈 + 页面图**（`NavigationState`）：点进新页面压栈，返回弹栈；每页记录试过的入口与结果（进了哪页 / 无变化 / 失败 / 进去过已退回）和是否已滚到底。执行器看到 `nav.path` / `nav.tried` / `nav.atBottom`，重规划时规划器看到"已经找过、没用的入口"。
+
+### 评测
+
+```bash
+node scripts/agent_eval.mjs                                   # jev + deepseek × 有/无规划
+node scripts/agent_eval.mjs --providers jev --planner on --repeat 3
+```
+
+任务在 `scripts/agent_eval_tasks.json`；结果用 adb / 读屏**独立验证**（不相信 agent 的 DONE），跑完恢复亮度等设备状态，明细写到 `selftest_results/`。
 
 ### 安全闸（ActionCatalog）
 
