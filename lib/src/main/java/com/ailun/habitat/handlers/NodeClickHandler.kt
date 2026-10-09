@@ -48,7 +48,7 @@ class NodeClickHandler(
         val selfPackage = context.appContext.packageName
         Log.d(TAG, "Attempting to click target: '$target' region='$regionSpec' occurrence=$occurrence offset=($offsetX,$offsetY)")
 
-        val success = if (target.contains(",")) {
+        val success = if (target.contains(",") && !isViewIdSelector(target)) {
             val parts = target.split(",")
             val x = parts[0].trim().toIntOrNull()
             val y = parts[1].trim().toIntOrNull()
@@ -77,6 +77,8 @@ class NodeClickHandler(
         offsetX: Int = 0,
         offsetY: Int = 0,
     ): Boolean {
+        val viewId = viewIdOf(selector)
+        val selectorText = if (viewId != null) selector.removePrefix(VIEW_ID_PREFIX).removePrefix(VIEW_ID_PREFIX_CN) else selector
         val roots = mutableListOf<AccessibilityNodeInfo>()
         val foundNodes = mutableListOf<AccessibilityNodeInfo>()
         try {
@@ -84,8 +86,17 @@ class NodeClickHandler(
             service.windows.forEach { win -> win.root?.let { roots.add(it) } }
 
             for (root in roots) {
-                root.findAccessibilityNodeInfosByViewId(selector)?.let { foundNodes.addAll(it) }
-                root.findAccessibilityNodeInfosByText(selector)?.let { foundNodes.addAll(it) }
+                if (viewId != null) {
+                    root.findAccessibilityNodeInfosByViewId(viewId)?.let { foundNodes.addAll(it) }
+                    continue
+                }
+                root.findAccessibilityNodeInfosByText(selectorText)?.let { foundNodes.addAll(it) }
+            }
+            // 精确匹配为空时退回递归子串匹配：Agent 拿到的是行的聚合文字，与子节点精确文本常常对不上
+            if (foundNodes.isEmpty() && viewId == null && selectorText.isNotBlank()) {
+                for (root in roots) {
+                    collectMatching(root, selectorText, selfPackage, foundNodes, 0)
+                }
             }
 
             val filteredNodes = foundNodes.filter { node ->
@@ -193,7 +204,78 @@ class NodeClickHandler(
         return r.top
     }
 
+    /**
+     * 递归收集自身或后代文字包含 [keyword] 的节点。命中后不再往下钻（避免同一行收集出多个候选）。
+     */
+    private fun collectMatching(
+        node: AccessibilityNodeInfo,
+        keyword: String,
+        selfPackage: String,
+        out: MutableList<AccessibilityNodeInfo>,
+        depth: Int,
+    ) {
+        if (depth > 20 || out.size >= 20) return
+        if (!node.isVisibleToUser) return
+        val text = node.text?.toString().orEmpty()
+        val desc = node.contentDescription?.toString().orEmpty()
+        val hit = text.contains(keyword, ignoreCase = true) || desc.contains(keyword, ignoreCase = true) ||
+            descendantLabel(node).contains(keyword, ignoreCase = true)
+        if (hit && node.packageName?.toString() != selfPackage) {
+            out.add(node)
+            return
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            try {
+                collectMatching(child, keyword, selfPackage, out, depth + 1)
+            } finally {
+                @Suppress("DEPRECATION")
+                runCatching { child.recycle() }
+            }
+        }
+    }
+
+    /** 后代文字拼接（最多 3 条、总长 80），用于列表行容器与传入文本的模糊比对。 */
+    private fun descendantLabel(node: AccessibilityNodeInfo): String {
+        val parts = mutableListOf<String>()
+        fun walk(n: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 3 || parts.size >= 3) return
+            val t = n.text?.toString()?.trim().orEmpty()
+            val d = n.contentDescription?.toString()?.trim().orEmpty()
+            (if (t.isNotEmpty()) t else d).takeIf { it.isNotEmpty() }?.let { parts.add(it) }
+            for (i in 0 until n.childCount) {
+                val c = n.getChild(i) ?: continue
+                try {
+                    walk(c, depth + 1)
+                } finally {
+                    @Suppress("DEPRECATION")
+                    runCatching { c.recycle() }
+                }
+            }
+        }
+        walk(node, 0)
+        return parts.joinToString(" ").take(80)
+    }
+
+    /**
+     * `target` 写成 `id:com.android.settings:id/title`（或 `#id:...`）时按 resource-id 匹配。
+     * 同名控件（列表行）用 occurrence 选第几个；坐标形式不受影响。
+     */
+    private fun viewIdOf(selector: String): String? {
+        val trimmed = selector.trim()
+        val raw = when {
+            trimmed.startsWith(VIEW_ID_PREFIX, ignoreCase = true) -> trimmed.substring(VIEW_ID_PREFIX.length)
+            trimmed.startsWith(VIEW_ID_PREFIX_CN, ignoreCase = true) -> trimmed.substring(VIEW_ID_PREFIX_CN.length)
+            else -> return null
+        }.trim().trim('"', '\'')
+        return raw.takeIf { it.isNotEmpty() && it.contains("/") || it.contains(":id/") }
+    }
+
+    private fun isViewIdSelector(selector: String): Boolean = viewIdOf(selector) != null
+
     companion object {
         private const val TAG = "HabitatClick"
+        private const val VIEW_ID_PREFIX = "id:"
+        private const val VIEW_ID_PREFIX_CN = "#id:"
     }
 }

@@ -9,6 +9,7 @@ import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.api.IAccessibilityProvider
 import com.ailun.habitat.api.IShellExecutor
+import com.ailun.habitat.paramBool
 
 /**
  * [ACTION_INPUT_TEXT] : 在当前焦点输入框中输入文本。
@@ -19,6 +20,10 @@ import com.ailun.habitat.api.IShellExecutor
  *   - "a11y": 通过无障碍服务的 ACTION_SET_TEXT 在焦点节点输入
  *   - "shell": 通过 `input text` shell 命令输入
  *   - "ime": 通过 shell `input text` 命令输入（与 shell 相同）
+ * - `submit` (可选, 默认 false): 输入后在焦点框触发 IME 回车（搜索/发送/确认）。
+ *   走无障碍 ACTION_IME_ENTER（Android 11+），不需要 Shizuku；不可用时退回 shell `input keyevent 66`。
+ *   `text` 为空且 submit=true 时只提交，不改内容。
+ * - `allow_empty` (可选, 默认 false): 允许把输入框整框设为空串（用于清空）。
  *
  * 输出变量:
  * - `input_success` (Boolean): 输入是否成功
@@ -29,26 +34,34 @@ class NodeInputTextHandler(
 ) : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
+        context.putVariable("input_success", false)
         val rawText = node.params?.get("text")?.toString().orEmpty()
-        if (rawText.isEmpty()) {
+        val submit = paramBool(node, context, "submit", false)
+        val allowEmpty = paramBool(node, context, "allow_empty", false)
+        if (rawText.isEmpty() && !submit && !allowEmpty) {
             Log.w(TAG, "InputText: 'text' parameter is empty")
-            context.putVariable("input_success", false)
             return node.next
         }
 
         val text = context.interpolate(rawText)
         val mode = node.params?.get("mode")?.toString()?.trim()?.lowercase() ?: MODE_A11Y
 
-        Log.d(TAG, "InputText: mode=$mode, text length=${text.length}")
+        Log.d(TAG, "InputText: mode=$mode, text length=${text.length}, submit=$submit")
 
-        val success = when (mode) {
-            MODE_SHELL, MODE_IME -> inputViaShell(text)
-            MODE_A11Y -> inputViaAccessibility(text)
-            else -> {
-                Log.w(TAG, "InputText: unknown mode '$mode', falling back to a11y")
-                inputViaAccessibility(text)
+        // 只提交不改内容：text 为空且没要求清空
+        val typed = if (text.isEmpty() && !allowEmpty) {
+            true
+        } else {
+            when (mode) {
+                MODE_SHELL, MODE_IME -> inputViaShell(text)
+                MODE_A11Y -> inputViaAccessibility(text)
+                else -> {
+                    Log.w(TAG, "InputText: unknown mode '$mode', falling back to a11y")
+                    inputViaAccessibility(text)
+                }
             }
         }
+        val success = typed && (!submit || submitFocused())
 
         context.putVariable("input_success", success)
         if (success) {
@@ -117,6 +130,45 @@ class NodeInputTextHandler(
             false
         } finally {
             focusedNode.recycle()
+        }
+    }
+
+    /**
+     * 在焦点输入框触发 IME 回车。优先无障碍 ACTION_IME_ENTER（不依赖 Shizuku），
+     * 节点不支持或系统低于 Android 11 时退回 shell keyevent。
+     */
+    private suspend fun submitFocused(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val service = provider?.getService()
+            val focused = try {
+                service?.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            } catch (e: Exception) {
+                null
+            }
+            if (focused != null) {
+                try {
+                    val ime = AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER
+                    if (focused.actionList.any { it.id == ime.id } && focused.performAction(ime.id)) {
+                        Log.d(TAG, "InputText: ACTION_IME_ENTER ok")
+                        return true
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "InputText: ACTION_IME_ENTER failed", e)
+                } finally {
+                    @Suppress("DEPRECATION")
+                    runCatching { focused.recycle() }
+                }
+            }
+        }
+        val executor = shellExecutor ?: return false
+        return try {
+            val out = executor.exec("input keyevent 66")
+            !out.contains("Error", ignoreCase = true) && !out.contains("exception", ignoreCase = true)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "InputText: keyevent submit failed", e)
+            false
         }
     }
 
