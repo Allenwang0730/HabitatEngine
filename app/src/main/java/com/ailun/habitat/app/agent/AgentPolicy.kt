@@ -5,6 +5,10 @@ import com.google.gson.JsonObject
 /** 不联网的决策：目标原文里出现的控件优先，否则打开点名的应用，再否则最多向下滚两次。 */
 fun decideLocal(goal: String, catalog: ActionCatalog, history: List<StepNote>): Decision {
     val scrolled = history.count { it.operation == "SCROLL_DOWN" }
+    // 工具快捷方式只在目标点名时才会出现，没用过就先用（跳设置页、开关这类一步到位的事）
+    catalog.actions.firstOrNull { it.operation == "USE_TOOL" && history.none { h -> h.actionId == it.id } }?.let {
+        return actionDecision(it, "本地使用工具「${it.label}」")
+    }
     val best = catalog.actions
         .filter { it.operation == "TAP" }
         .maxByOrNull { score(goal, it.matchText.orEmpty()) }
@@ -60,7 +64,55 @@ object MobilePriors {
         "TYPE_TEXT 只能从给出的原文里选，不要自己编造要输入的内容。",
         "输入框已经有焦点时，ACTION_SET_TEXT 是整框替换；想清空就选 CLEAR_TEXT。",
         "输入完要提交或搜索，选 PRESS_ENTER，然后等屏幕响应。",
+        "有 USE_TOOL 候选能直接做到（跳到某个设置页、开关蓝牙/WLAN、调亮度音量）时优先用它，比在界面里一层层找快且稳。",
+        "开关后面标了[已开启]/[已关闭]：已经是要求的状态就不要再点（再点会反过来），直接选 DONE 或做下一件事。",
+        "滑块（亮度条、音量条）用 SET_SLIDER 拖到头，不要点它。",
+        "有 task 时只做 task 里的当前一步：done_when 在屏幕上成立就选 DONE；不要提前去做后面的步骤，也不要重复已完成的步骤。",
+        "nav.tried 里标了「进去过，已退回」「无变化」「失败」的入口不要再点；nav.atBottom=true 表示这一页已经滚到底，不要再 SCROLL_DOWN。",
+        "nav.path 是当前位置；要回上一层用 BACK（会回到 nav.parent），不要用 HOME 从头再找。",
     )
+
+    /** operation 题干开头：有规划时强调"只做当前一步"。 */
+    fun operationLead(step: StepContext?): String = if (step != null && step.multiStep) {
+        "只推进当前这一步（task.current），完成条件是 task.done_when。"
+    } else {
+        "根据当前屏幕推进整个目标。"
+    }
+
+    /** 给 Jev state 的任务进度（代码掌握，模型只读）。单步模式只带导航。 */
+    fun taskState(step: StepContext): Map<String, Any> = buildMap {
+        if (step.multiStep) {
+            put("step", "${step.index + 1}/${step.total}")
+            put("current", step.instruction)
+            put("done_when", step.doneWhen)
+            if (step.completed.isNotEmpty()) put("completed", step.completed)
+        }
+        if (step.facts.isNotEmpty()) put("facts", step.facts)
+        step.nav?.let { nav ->
+            put("nav", buildMap {
+                put("path", nav.path)
+                put("depth", nav.depth)
+                nav.parent?.let { put("parent", it) }
+                if (nav.triedHere.isNotEmpty()) put("tried", nav.triedHere)
+                if (nav.atBottom) put("atBottom", true)
+            })
+        }
+    }
+
+    /** DeepSeek prompt 里的同一份任务进度。 */
+    fun taskLines(step: StepContext): List<String> = buildList {
+        if (step.multiStep) {
+            add("当前步骤 ${step.index + 1}/${step.total}: ${step.instruction}")
+            add("这一步的完成条件: ${step.doneWhen}（屏幕上看到它就选 DONE）")
+            if (step.completed.isNotEmpty()) add("已完成: ${step.completed.joinToString("；")}")
+        }
+        if (step.facts.isNotEmpty()) add("已知事实: " + step.facts.entries.joinToString("；") { "${it.key}=${it.value}" })
+        step.nav?.let { nav ->
+            add("当前位置: ${nav.path}（第 ${nav.depth} 层${nav.parent?.let { "，BACK 回到「$it」" } ?: ""}）")
+            if (nav.triedHere.isNotEmpty()) add("本页已试过: ${nav.triedHere.joinToString("；")}")
+            if (nav.atBottom) add("本页已经滚到底，不要再向下滚动")
+        }
+    }
 
     /** 当前屏幕的输入状态描述，告诉模型"输入框里现在是什么"。 */
     fun stateOfInput(observation: ScreenObservation): String? {
@@ -83,11 +135,15 @@ object MobilePriors {
         val skip = setOf("返回", "取消", "搜索", "更多", "关闭", "完成")
         return observation.elements
             .asSequence()
-            .filter { it.centerY in 1..limit && !it.editable }
+            .filter { it.centerY in STATUS_BAR_PX..limit && !it.editable }
             .map { it.text.trim() }
-            .filter { it.length in 2..30 && it !in skip && !it.contains("通知：") }
+            .filter { it.length in 2..30 && it !in skip && !it.contains("通知：") && !CLOCK.matches(it) }
             .firstOrNull()
     }
+
+    /** 状态栏高度下限：真机状态栏文字在 y≈75，页面标题在 y≈260。 */
+    private const val STATUS_BAR_PX = 150
+    private val CLOCK = Regex("^\\d{1,2}:\\d{2}.*")
 
     /** `com.android.settings.Settings$BluetoothSettingsActivity` → `BluetoothSettingsActivity`。 */
     fun shortActivity(activity: String?): String? =
@@ -102,6 +158,9 @@ object MobilePriors {
         put("editable", el.editable)
         put("focused", el.focused)
         put("selectable", el.selectable)
+        if (el.checkable) put("checked", el.checked == true)
+        if (!el.enabled) put("enabled", false)
+        el.rangeFraction?.let { put("value", "${(it * 100).toInt()}%") }
         val id = Catalogs.shortViewId(el.viewId)
         if (id.isNotEmpty()) put("viewId", id)
     }

@@ -250,6 +250,10 @@ object ScreenObserver {
                 selectable = node.selectable,
                 bounds = node.bounds,
                 aggregated = node.aggregated,
+                checkable = node.checkable,
+                checked = node.checked,
+                enabled = node.enabled,
+                rangeFraction = node.rangeFraction,
             )
         }
         val pkg = kept.filter { it.pkg.isNotEmpty() && it.pkg != SELF }.minByOrNull { it.rank }?.pkg
@@ -286,7 +290,8 @@ object ScreenObserver {
         return nodes.filter { node ->
             val bounds = node.bounds
             val shadowed = bounds != null && containers.any { it !== node && it.bounds!!.contains(bounds) }
-            !shadowed || node.editable || node.focused
+            // 滑块即使在可点的行里也要留下：它要用 SET_SLIDER 拖，不是点行
+            !shadowed || node.editable || node.focused || node.rangeFraction != null
         }
     }
 
@@ -318,7 +323,18 @@ object ScreenObserver {
             // 容器自身没文字时，把后代文字拼进来：模型看到「电池」而不是空白行
             val aggregated = own.isEmpty() && clickable && !password && !editable && !pageSizedNode
             val label = if (aggregated) aggregatedText(node) else own
-            if (label.isNotEmpty() || clickable || editable) {
+            val range = rangeFractionOf(node)
+            // 开关常是列表行里的子控件：行被点，状态在子节点上。行里恰好一个开关时，把它的状态挂到行上，
+            // 模型才看得出「蓝牙 已开启」这一行是个处于"开"的开关，不会把已经打开的再关掉。
+            val ownCheckable = node.isCheckable
+            val rowCheck = if (!ownCheckable && clickable && !pageSizedNode) singleCheckableDescendant(node) else null
+            val checkable = ownCheckable || rowCheck != null
+            val checked = when {
+                ownCheckable -> node.isChecked
+                rowCheck != null -> rowCheck
+                else -> null
+            }
+            if (label.isNotEmpty() || clickable || editable || range != null) {
                 val bounds = Rect()
                 node.getBoundsInScreen(bounds)
                 if (bounds.width() > 0 && bounds.height() > 0) {
@@ -341,6 +357,10 @@ object ScreenObserver {
                             descendantClickable = descendantClickable,
                             selectable = isSelectableRow(clickable, ancestorClickable, descendantClickable, node.className?.toString().orEmpty()),
                             aggregated = aggregated,
+                            checkable = checkable,
+                            checked = checked,
+                            enabled = node.isEnabled,
+                            rangeFraction = range,
                         ),
                     )
                 }
@@ -398,6 +418,37 @@ object ScreenObserver {
         return parts.joinToString(" ").take(DESC_MAX_LEN)
     }
 
+    /** 滑块/进度条：当前值在 [min,max] 中的位置。取不到、区间为 0 时返回 null。 */
+    private fun rangeFractionOf(node: AccessibilityNodeInfo): Double? {
+        val info = node.rangeInfo ?: return null
+        val span = info.max - info.min
+        if (span <= 0f) return null
+        return ((info.current - info.min) / span).toDouble().coerceIn(0.0, 1.0)
+    }
+
+    /** 行里（3 层内）恰好一个可勾选子控件时返回它的勾选状态；没有或不止一个返回 null。 */
+    private fun singleCheckableDescendant(node: AccessibilityNodeInfo): Boolean? {
+        var found: Boolean? = null
+        var count = 0
+        fun scan(current: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 3 || count > 1) return
+            for (i in 0 until current.childCount) {
+                val child = current.getChild(i) ?: continue
+                try {
+                    if (child.isCheckable) {
+                        count++
+                        found = child.isChecked
+                    }
+                    scan(child, depth + 1)
+                } finally {
+                    runCatching { child.recycle() }
+                }
+            }
+        }
+        scan(node, 1)
+        return if (count == 1) found else null
+    }
+
     private fun hasClickableDescendant(node: AccessibilityNodeInfo): Boolean {
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
@@ -448,6 +499,9 @@ object ScreenObserver {
             append(if (el.editable) "EDIT " else "     ")
             append(if (el.focused) "FOCUS " else "      ")
             append(if (el.password) "PWD " else "    ")
+            if (el.checkable) append(if (el.checked == true) "[ON] " else "[OFF] ")
+            if (!el.enabled) append("[DISABLED] ")
+            el.rangeFraction?.let { append("[RANGE ${(it * 100).toInt()}%] ") }
             append('(').append(el.centerX).append(',').append(el.centerY).append(") ")
             append(if (el.text.isEmpty()) "「」" else "「${el.text}」")
             if (el.viewId.isNotEmpty()) append(" id=").append(el.viewId)
@@ -476,5 +530,10 @@ object ScreenObserver {
         val selectable: Boolean = false,
         /** text 是从后代拼接来的（容器聚合），不是节点自身文字。 */
         val aggregated: Boolean = false,
+        val checkable: Boolean = false,
+        val checked: Boolean? = null,
+        val enabled: Boolean = true,
+        /** 滑块当前值在 [min,max] 中的位置 0~1；不是滑块为 null。 */
+        val rangeFraction: Double? = null,
     )
 }

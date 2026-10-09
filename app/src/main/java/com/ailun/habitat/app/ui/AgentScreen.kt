@@ -129,7 +129,8 @@ fun AgentScreen() {
     var jevKey by remember { mutableStateOf(AgentLoopController.getJevKey(context)) }
     var jevModel by remember { mutableStateOf(AgentLoopController.getJevModel(context)) }
     var deepseekKey by remember { mutableStateOf(WorkflowAIClient.getApiKey(context).orEmpty()) }
-    var steps by rememberSaveable { mutableFloatStateOf(12f) }
+    var steps by rememberSaveable { mutableFloatStateOf(AgentLoopController.DEFAULT_STEPS.toFloat()) }
+    var plannerEnabled by remember { mutableStateOf(AgentLoopController.isPlannerEnabled(context)) }
     var privacyFor by remember { mutableStateOf<String?>(null) }
 
     // serverRunning 是同进程的内存标志，轮询代价极低
@@ -177,9 +178,15 @@ fun AgentScreen() {
         message = AgentLoopController.start(context, goal, provider, steps.toInt())
     }
 
-    fun privacyAcknowledged(p: String): Boolean =
-        p == AgentLoopController.PROVIDER_LOCAL ||
-            context.getSharedPreferences(PRIVACY_PREFS, Context.MODE_PRIVATE).getBoolean("ack_$p", false)
+    fun acked(p: String): Boolean =
+        context.getSharedPreferences(PRIVACY_PREFS, Context.MODE_PRIVATE).getBoolean("ack_$p", false)
+
+    // 规划器开着时屏幕文字也会发给 DeepSeek，即使执行器选的是 Jev 或本地
+    fun privacyNeeded(p: String): String? = when {
+        p != AgentLoopController.PROVIDER_LOCAL && !acked(p) -> p
+        AgentLoopController.plannerActive(context) && !acked(AgentLoopController.PROVIDER_DEEPSEEK) -> AgentLoopController.PROVIDER_DEEPSEEK
+        else -> null
+    }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
@@ -402,6 +409,22 @@ fun AgentScreen() {
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !loop.running,
                     )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("DeepSeek 规划与复核", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (deepseekKey.isBlank()) "需要先在 DeepSeek 里填 API Key" else "先拆成几步、能用设备工具就直接用，最后按屏幕复核",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = plannerEnabled,
+                            onCheckedChange = { plannerEnabled = it; AgentLoopController.setPlannerEnabled(context, it) },
+                            enabled = !loop.running,
+                            modifier = Modifier.semantics { contentDescription = "DeepSeek 规划与复核" },
+                        )
+                    }
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("最多步数", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
@@ -410,8 +433,8 @@ fun AgentScreen() {
                         Slider(
                             value = steps,
                             onValueChange = { steps = it },
-                            valueRange = 1f..30f,
-                            steps = 28,
+                            valueRange = 1f..AgentLoopController.MAX_STEPS.toFloat(),
+                            steps = AgentLoopController.MAX_STEPS - 2,
                             enabled = !loop.running,
                             modifier = Modifier.semantics { contentDescription = "最多步数" },
                         )
@@ -428,7 +451,7 @@ fun AgentScreen() {
                         }
                     } else {
                         Button(
-                            onClick = { if (privacyAcknowledged(provider)) startLoop() else privacyFor = provider },
+                            onClick = { persistKeys(); privacyNeeded(provider)?.let { privacyFor = it } ?: startLoop() },
                             enabled = goal.isNotBlank(),
                             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                         ) {
@@ -489,7 +512,7 @@ fun AgentScreen() {
             onConfirm = {
                 context.getSharedPreferences(PRIVACY_PREFS, Context.MODE_PRIVATE).edit().putBoolean("ack_$p", true).apply()
                 privacyFor = null
-                startLoop()
+                privacyNeeded(provider)?.let { privacyFor = it } ?: startLoop()
             },
             onDismiss = { privacyFor = null },
         )

@@ -1,0 +1,41 @@
+[
+  {
+    "id": "bluetooth_page",
+    "goal": "打开设置，进入蓝牙页面",
+    "verify": { "focus": "Bluetooth" }
+  },
+  {
+    "id": "settings_search",
+    "goal": "打开设置，在搜索框输入「电池」并搜索",
+    "verify": { "screen": "电池(最大容量|健康|用量)" }
+  },
+  {
+    "id": "about_phone",
+    "goal": "打开设置，找到「关于手机」并进入",
+    "verify": { "focus": "(DeviceInfo|deviceinfo|MyDevice)" }
+  },
+  {
+    "id": "clock_stopwatch",
+    "goal": "打开时钟，切换到秒表页面",
+    "setup": ["am force-stop com.android.BBKClock"],
+    "verify": { "focus": "BBKClock", "screen": "(计次|秒表)" }
+  },
+  {
+    "id": "brightness_max",
+    "goal": "把屏幕亮度调到最高",
+    "save": { "brightness": "settings get system screen_brightness", "mode": "settings get system screen_brightness_mode" },
+    "setup": ["settings put system screen_brightness_mode 0", "settings put system screen_brightness 60"],
+    "verify": { "shell": "settings get system screen_brightness", "atLeast": 230 },
+    "restore": ["settings put system screen_brightness {brightness}", "settings put system screen_brightness_mode {mode}"]
+  },
+  {
+    "id": "battery_question",
+    "goal": "现在电量是多少？",
+    "verify": { "detailMatchesShell": "dumpsys battery | grep level", "detailRegex": "(\\d{1,3})\\s*%?" }
+  },
+  {
+    "id": "android_version",
+    "goal": "进入关于手机，告诉我安卓版本号",
+    "verify": { "detailContainsShell": "getprop ro.build.version.release" }
+  }
+]

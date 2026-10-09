@@ -20,6 +20,14 @@ data class ScreenElement(
     val bounds: ElementBounds? = null,
     /** text 是从后代拼接来的容器标签，不是节点自身文字。 */
     val aggregated: Boolean = false,
+    /** 开关/复选框（或包着唯一一个开关的列表行）。 */
+    val checkable: Boolean = false,
+    /** [checkable] 时的当前状态；不可勾选为 null。 */
+    val checked: Boolean? = null,
+    /** 灰掉的控件：点了没用。 */
+    val enabled: Boolean = true,
+    /** 滑块/进度条：当前值在 [min,max] 中的位置，0~1；不是滑块为 null。 */
+    val rangeFraction: Double? = null,
 )
 
 data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom: Int) {
@@ -105,6 +113,10 @@ data class CatalogAction(
      * 只对 TAP 有意义：同一行文字在不同层级出现时，第一候选可能点不到。
      */
     val alternatives: List<CatalogAction> = emptyList(),
+    /** 节点成功标志变量名（如 bluetooth_success）；为空时按 [tool] 推断。 */
+    val successFlag: String? = null,
+    /** 执行后要记成"已知事实"的输出变量（读电量、读时间这类查询工具）。 */
+    val outputs: List<String> = emptyList(),
 )
 
 data class ActionCatalog(
@@ -116,12 +128,18 @@ data class ActionCatalog(
     val longPressTargets: Map<String, String> = emptyMap(),
     /** 非空表示本屏被收紧（验证页/权限弹窗），只剩导航类动作。 */
     val guard: String? = null,
+    /** USE_TOOL 的候选：直接调设备工具（跳设置页、开关、调亮度…），比在界面里翻找快且稳。 */
+    val toolTargets: Map<String, String> = emptyMap(),
+    /** SET_SLIDER 的候选：`序号:max|min|mid` → 说明。 */
+    val sliderTargets: Map<String, String> = emptyMap(),
 ) {
     fun resolve(operation: String, target: String?): CatalogAction? = when (operation) {
         "TAP" -> actions.find { it.operation == "TAP" && it.target == target }
         "TYPE_TEXT" -> actions.find { it.operation == "TYPE_TEXT" && it.target == target }
         "OPEN_APP" -> actions.find { it.operation == "OPEN_APP" && it.target == target }
         "LONG_PRESS" -> actions.find { it.operation == "LONG_PRESS" && it.target == target }
+        "USE_TOOL" -> actions.find { it.operation == "USE_TOOL" && it.target == target }
+        "SET_SLIDER" -> actions.find { it.operation == "SET_SLIDER" && it.target == target }
         "SCROLL_DOWN", "SCROLL_UP", "BACK", "HOME", "WAIT", "DONE", "BLOCKED",
         "PRESS_ENTER", "CLEAR_TEXT",
         -> actions.find { it.operation == operation }
@@ -148,6 +166,8 @@ data class ActionCatalog(
             textValues = keptTargets("TYPE_TEXT", textValues),
             apps = keptTargets("OPEN_APP", apps),
             longPressTargets = keptTargets("LONG_PRESS", longPressTargets),
+            toolTargets = keptTargets("USE_TOOL", toolTargets),
+            sliderTargets = keptTargets("SET_SLIDER", sliderTargets),
         )
     }
 
@@ -182,6 +202,8 @@ data class Decision(
     val action: CatalogAction? = null,
     val confidence: Double = 1.0,
     val detail: String = "",
+    /** 执行器对"当前步骤已完成"的概率（Jev 的 step_status 题）；没问为 null。 */
+    val stepDone: Double? = null,
 )
 
 data class StepNote(
@@ -199,4 +221,44 @@ data class StepNote(
     val error: String = "",
     /** 这一步之后前台换成了别的应用（点进了外部 App）。紧接着又被拉回来，就说明这个入口是死路。 */
     val leftApp: Boolean = false,
+    /** 属于规划里的第几步（0 起）；没有规划时恒为 0。 */
+    val planStep: Int = 0,
 )
+
+/**
+ * 规划器（System 2）给出的一步。两种：
+ * - 工具步（[tool] 非空）：直接调设备工具（开设置页、开关蓝牙、调亮度…），不经过界面；
+ *   失败时退回成界面步，按 [instruction]/[doneWhen] 让执行器去点。
+ * - 界面步：交给执行器（Jev/DeepSeek/本地）在屏幕上一步步点，直到 [doneWhen] 在屏幕上成立。
+ */
+data class PlanStep(
+    val instruction: String,
+    val doneWhen: String,
+    val tool: String? = null,
+    val args: Map<String, String> = emptyMap(),
+    /** 这一步要输入的原文。必须是目标原文的子串（规划器不能编造输入内容）。 */
+    val text: String? = null,
+)
+
+data class Plan(val steps: List<PlanStep>, val summary: String = "")
+
+/** 规划器对"整件事做完没有"的独立判断。 */
+data class Review(val done: Boolean, val reason: String, val answer: String = "")
+
+/**
+ * 执行器每一轮看到的"当前在做哪一步"。没有规划器时整件事就是一步。
+ * 控制权在代码手里：步骤推进、完成判定由循环决定，模型只回答"这一步现在该点哪"。
+ */
+data class StepContext(
+    val goal: String,
+    val instruction: String,
+    val doneWhen: String,
+    val index: Int,
+    val total: Int,
+    val completed: List<String> = emptyList(),
+    val facts: Map<String, String> = emptyMap(),
+    /** 导航栈与本页已试过的入口（[NavigationState.snapshot]）。 */
+    val nav: NavSnapshot? = null,
+) {
+    val multiStep: Boolean get() = total > 1
+}

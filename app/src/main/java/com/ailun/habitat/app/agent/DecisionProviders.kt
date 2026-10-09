@@ -25,6 +25,7 @@ interface DecisionProvider {
         observation: ScreenObservation,
         catalog: ActionCatalog,
         history: List<StepNote>,
+        step: StepContext?,
     ): Decision
 }
 
@@ -35,6 +36,7 @@ class LocalDecisionProvider : DecisionProvider {
         observation: ScreenObservation,
         catalog: ActionCatalog,
         history: List<StepNote>,
+        step: StepContext?,
     ): Decision = decideLocal(goal, catalog, history)
 }
 
@@ -53,6 +55,7 @@ class JevDecisionProvider(
         observation: ScreenObservation,
         catalog: ActionCatalog,
         history: List<StepNote>,
+        step: StepContext?,
     ): Decision {
         if (apiKey.isBlank() || apiKey.any { it == '\r' || it == '\n' }) {
             return Decision("error", "", detail = "未配置 Jev API key")
@@ -60,24 +63,26 @@ class JevDecisionProvider(
         val request = Request.Builder()
             .url(ENDPOINT)
             .addHeader("Authorization", "Bearer $apiKey")
-            .post(buildBody(goal, observation, catalog, history).toString().toRequestBody(JSON))
+            .post(buildBody(goal, observation, catalog, history, step).toString().toRequestBody(JSON))
             .build()
         val text = when (val r = postWithRetry(request)) {
             is HttpResult.Ok -> r.body
             is HttpResult.Fail -> return Decision("error", "", detail = r.message)
         }
-        return parseJevAnswer(text, catalog)
+        val decision = parseJevAnswer(text, catalog)
+        return if (step != null && step.multiStep) decision.copy(stepDone = parseStepDone(text)) else decision
     }
 
-    private fun buildBody(
+    internal fun buildBody(
         goal: String,
         observation: ScreenObservation,
         catalog: ActionCatalog,
         history: List<StepNote>,
+        step: StepContext?,
     ): JsonObject {
         val questions = JsonObject()
         questions.add("operation", choiceQuestion(
-            "根据当前屏幕推进整个目标。" + MobilePriors.RULES.joinToString(" "),
+            MobilePriors.operationLead(step) + MobilePriors.RULES.joinToString(" "),
             catalog.operations,
         ))
         if (catalog.tapTargets.isNotEmpty()) {
@@ -96,8 +101,22 @@ class JevDecisionProvider(
         if (catalog.longPressTargets.isNotEmpty()) {
             questions.add("long_press_target", choiceQuestion("假设下一步是 LONG_PRESS，选择要长按的控件序号。", catalog.longPressTargets))
         }
+        if (catalog.toolTargets.isNotEmpty()) {
+            questions.add("tool_target", choiceQuestion("假设下一步是 USE_TOOL，选择要直接调用的设备功能。", catalog.toolTargets))
+        }
+        if (catalog.sliderTargets.isNotEmpty()) {
+            questions.add("slider_target", choiceQuestion("假设下一步是 SET_SLIDER，选择要拖的滑块和位置。", catalog.sliderTargets))
+        }
+        // 同一次请求里顺带问"当前步骤做完没有"：步骤推进由代码根据它决定，不靠模型自己选 DONE（不加延迟）
+        if (step != null && step.multiStep) {
+            questions.add("step_status", choiceQuestion(
+                "只判断：当前屏幕上是否已经能看到这一步的完成条件「${step.doneWhen}」。看不到明确证据就选 NOT_YET。",
+                mapOf(STEP_DONE to "完成条件已在屏幕上成立", STEP_NOT_YET to "还没有成立"),
+            ))
+        }
         val state = JsonObject().apply {
             addProperty("goal", goal)
+            step?.let { MobilePriors.taskState(it).takeIf { m -> m.isNotEmpty() }?.let { m -> add("task", gson.toJsonTree(m)) } }
             addProperty("app", observation.packageName)
             addProperty("source", observation.source)
             addProperty("visibleText", observation.visibleText.take(2000))
@@ -156,6 +175,8 @@ class JevDecisionProvider(
     }
 
     companion object {
+        const val STEP_DONE = "DONE"
+        const val STEP_NOT_YET = "NOT_YET"
         const val ENDPOINT = "https://api.typesafe.ai/v1/systemone"
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private val gson = Gson()
@@ -179,6 +200,8 @@ fun parseJevAnswer(text: String, catalog: ActionCatalog): Decision {
         "TYPE_TEXT" -> "text_value"
         "OPEN_APP" -> "app_target"
         "LONG_PRESS" -> "long_press_target"
+        "USE_TOOL" -> "tool_target"
+        "SET_SLIDER" -> "slider_target"
         else -> null
     }
     val target = if (head == null) {
@@ -188,12 +211,24 @@ fun parseJevAnswer(text: String, catalog: ActionCatalog): Decision {
             "tap_target" -> catalog.tapTargets.keys
             "text_value" -> catalog.textValues.keys
             "long_press_target" -> catalog.longPressTargets.keys
+            "tool_target" -> catalog.toolTargets.keys
+            "slider_target" -> catalog.sliderTargets.keys
             else -> catalog.apps.keys
         }
         parseChoice(answers.objectOrNull(head), allowed)?.choice
             ?: return Decision("error", operation.choice, detail = "Jev 目标选择无效")
     }
     return decisionFromChoice(catalog, operation.choice, target, operation.confidence, "Jev 选择 ${operation.choice}")
+}
+
+/** step_status 题：返回"已完成"的概率；没有或格式不对返回 null。 */
+fun parseStepDone(text: String): Double? {
+    val root = runCatching { Gson().fromJson(text, JsonObject::class.java) }.getOrNull() ?: return null
+    val answer = root.objectOrNull("answers")?.objectOrNull("step_status") ?: return null
+    val parsed = parseChoice(answer, setOf(JevDecisionProvider.STEP_DONE, JevDecisionProvider.STEP_NOT_YET)) ?: return null
+    val probs = answer.objectOrNull("probabilities")
+    probs?.get(JevDecisionProvider.STEP_DONE)?.let { runCatching { it.asDouble }.getOrNull() }?.let { return it.coerceIn(0.0, 1.0) }
+    return if (parsed.choice == JevDecisionProvider.STEP_DONE) parsed.confidence else 1.0 - parsed.confidence
 }
 
 internal fun JsonObject.objectOrNull(key: String): JsonObject? =
@@ -227,10 +262,12 @@ class DeepSeekDecisionProvider(
         observation: ScreenObservation,
         catalog: ActionCatalog,
         history: List<StepNote>,
+        step: StepContext?,
     ): Decision {
         if (apiKey.isBlank()) return Decision("error", "", detail = "未配置 DeepSeek API key")
         val prompt = buildString {
             appendLine("目标: $goal")
+            step?.let { MobilePriors.taskLines(it).forEach(::appendLine) }
             appendLine("前台: ${observation.packageName} 来源: ${observation.source}")
             catalog.guard?.let { appendLine("限制: $it") }
             MobilePriors.pageTitle(observation)?.let { appendLine("当前页面标题: $it") }
@@ -247,6 +284,7 @@ class DeepSeekDecisionProvider(
                         if (el.editable) append("[可输入]")
                         if (el.selectable) append("[行]")
                         if (el.focused) append("[焦点]")
+                        append(Catalogs.stateOf(el))
                     }
                     "${el.index}=${el.text.take(60)}(${Catalogs.typeOf(el)})$suffix$mark"
                 },
@@ -256,6 +294,8 @@ class DeepSeekDecisionProvider(
             if (catalog.longPressTargets.isNotEmpty()) appendLine("LONG_PRESS 目标: ${catalog.longPressTargets}")
             if (catalog.textValues.isNotEmpty()) appendLine("TYPE_TEXT 原文: ${catalog.textValues}")
             if (catalog.apps.isNotEmpty()) appendLine("OPEN_APP: ${catalog.apps}")
+            if (catalog.toolTargets.isNotEmpty()) appendLine("USE_TOOL 目标: ${catalog.toolTargets}")
+            if (catalog.sliderTargets.isNotEmpty()) appendLine("SET_SLIDER 目标: ${catalog.sliderTargets}")
             appendLine("最近动作:")
             MobilePriors.recentActions(history, limit = 6).forEach { note ->
                 val flag = when {

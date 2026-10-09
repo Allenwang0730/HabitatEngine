@@ -60,6 +60,27 @@ object AgentLoopController {
         SecretStore.put(context, SecretStore.JEV_API_KEY, key.trim())
     }
 
+    /** 规划/复核（System 2）用 DeepSeek。开着且配了 DeepSeek key 才生效；执行器选谁都可以。 */
+    fun isPlannerEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, 0).getBoolean("planner_enabled", true)
+
+    fun setPlannerEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, 0).edit().putBoolean("planner_enabled", enabled).apply()
+    }
+
+    /** 当前会不会用规划器：开关打开且 DeepSeek key 已配置。 */
+    fun plannerActive(context: Context): Boolean =
+        isPlannerEnabled(context) && !WorkflowAIClient.getApiKey(context).isNullOrBlank()
+
+    private fun plannerFor(context: Context, force: Boolean = false): Planner? {
+        if (!force && !isPlannerEnabled(context)) return null
+        val key = WorkflowAIClient.getApiKey(context)?.takeIf { it.isNotBlank() } ?: return null
+        return DeepSeekPlanner(key, WorkflowAIClient.getBaseUrl(context))
+    }
+
+    const val DEFAULT_STEPS = 20
+    const val MAX_STEPS = 40
+
     fun getJevModel(context: Context): String =
         context.getSharedPreferences(PREFS, 0).getString("jev_model", "jev-latest") ?: "jev-latest"
 
@@ -86,6 +107,8 @@ object AgentLoopController {
         providerId: String? = null,
         maxSteps: Int? = null,
         origin: String = ORIGIN_LOCAL,
+        /** null 跟随界面开关；true/false 只覆盖这一次（评测 A/B 用）。 */
+        usePlanner: Boolean? = null,
     ): String? {
         val text = goal.trim()
         if (text.isEmpty()) return "目标为空"
@@ -104,16 +127,18 @@ object AgentLoopController {
             PROVIDER_LOCAL -> LocalDecisionProvider()
             else -> return "未知决策器: $providerName"
         }
-        val steps = (maxSteps ?: 12).coerceIn(1, 30)
+        val steps = (maxSteps ?: DEFAULT_STEPS).coerceIn(1, MAX_STEPS)
+        val planner = if (usePlanner == false) null else plannerFor(context, force = usePlanner == true)
         val agent = AgentLoop(
             context.applicationContext,
             provider,
             steps,
             allowGoalUnlock = origin != ORIGIN_REMOTE,
+            planner = planner,
         )
         synchronized(this) {
             if (_state.value.running) return "自主模式已在运行"
-            val tag = if (origin == ORIGIN_REMOTE) " · 远程" else ""
+            val tag = (if (origin == ORIGIN_REMOTE) " · 远程" else "") + (if (planner != null) " · DeepSeek 规划" else "")
             _state.value = AgentLoopState(running = true, phase = "running", lines = listOf("开始：$providerName$tag · $text"))
             loop = agent
             // LAZY：先登记 job 再启动，finally 里按 job 身份清理，旧循环的收尾不会覆盖新一轮

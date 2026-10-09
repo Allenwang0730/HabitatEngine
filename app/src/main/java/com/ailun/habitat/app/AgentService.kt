@@ -465,7 +465,7 @@ class AgentService : Service() {
         arr.add(mcpToolSchema("screen", "获取当前屏幕无障碍树文本 + 前台应用包名（AI 的眼睛）"))
         arr.add(mcpToolSchema("debug_screen", "排查用：当前观测快照 + 候选动作清单。arguments: goal（可空，默认「打开设置」）"))
         arr.add(mcpToolSchema("ping", "连通性测试"))
-        arr.add(mcpToolSchema("agent_start", "启动自主循环。arguments: goal（必填）, provider（jev/deepseek/local，可空）, max_steps（1-30，可空）"))
+        arr.add(mcpToolSchema("agent_start", "启动自主循环。arguments: goal（必填）, provider（jev/deepseek/local，可空）, max_steps（1-40，默认 20，可空）, planner（true/false，可空，覆盖界面开关）。配了 DeepSeek key 且开启规划时，先由 DeepSeek 拆步骤、最后复核"))
         arr.add(mcpToolSchema("agent_stop", "停止自主循环"))
         arr.add(mcpToolSchema("agent_status", "自主循环状态与最近步骤"))
         val allowDangerous = isRemoteDangerousAllowed(this)
@@ -520,9 +520,11 @@ class AgentService : Service() {
                 val goal = runCatching { args.get("goal")?.asString }.getOrNull()?.trim().orEmpty()
                 val provider = runCatching { args.get("provider")?.asString }.getOrNull()
                 val maxSteps = args.get("max_steps")?.let { runCatching { it.asInt }.getOrNull() }
+                val usePlanner = args.get("planner")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean
                 val err = AgentLoopController.start(
                     applicationContext, goal, provider, maxSteps,
                     origin = AgentLoopController.ORIGIN_REMOTE,
+                    usePlanner = usePlanner,
                 )
                 if (err != null) false to err else true to gson.toJson(AgentLoopController.statusMap())
             }

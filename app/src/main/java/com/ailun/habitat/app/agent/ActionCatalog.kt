@@ -37,6 +37,7 @@ object Catalogs {
     private const val MAX_APPS = 8
     private const val MAX_TEXTS = 6
     private const val TEXT_PREVIEW = 40
+    private const val MAX_SLIDERS = 3
 
     fun textCandidates(goal: String): List<String> {
         val quoted = Regex("[\"「『']([^\"」』']{1,40})[\"」』']")
@@ -55,11 +56,18 @@ object Catalogs {
             .toList()
     }
 
+    /**
+     * @param goal 用户目标原文。敏感按钮放行、权限弹窗放行、工具可用性都只看它。
+     * @param step 当前规划步（有规划器时）。只影响候选说明和输入候选，不参与任何放行判断——
+     *   规划器是不可信输出，它写进步骤说明的「确认支付」不能解锁支付按钮。
+     */
     fun build(
         goal: String,
         observation: ScreenObservation,
         apps: List<AppEntry>,
         allowGoalUnlock: Boolean = true,
+        step: StepContext? = null,
+        stepText: String? = null,
     ): ActionCatalog {
         val actions = mutableListOf<CatalogAction>()
         val operations = linkedMapOf<String, String>()
@@ -67,6 +75,8 @@ object Catalogs {
         val textValues = linkedMapOf<String, String>()
         val appTargets = linkedMapOf<String, String>()
         val longPressTargets = linkedMapOf<String, String>()
+        val toolTargets = linkedMapOf<String, String>()
+        val sliderTargets = linkedMapOf<String, String>()
 
         val guard = guardOf(goal, observation, allowGoalUnlock)
         val taps = if (guard != null) emptyList() else orderedTaps(goal, observation, allowGoalUnlock)
@@ -98,7 +108,12 @@ object Catalogs {
         val focused = observation.elements.firstOrNull {
             it.index == observation.focusedIndex && it.editable && !it.password
         }
-        val texts = if (focused != null && guard == null) textCandidates(goal) else emptyList()
+        val texts = if (focused != null && guard == null) {
+            // 规划器给的输入文字已经在 PlanPrompts.parsePlan 里校验过是目标原文子串
+            (listOfNotNull(stepText) + textCandidates(goal)).distinct().take(MAX_TEXTS)
+        } else {
+            emptyList()
+        }
         if (texts.isNotEmpty()) {
             operations["TYPE_TEXT"] = "把当前焦点输入框替换成目标里给出的原文，不要编造。" +
                 "ACTION_SET_TEXT 是整框替换，不需要先清空。"
@@ -149,7 +164,11 @@ object Catalogs {
         operations["BACK"] = "返回上一屏。从二级页面回列表时用它，不要用 HOME。"
         operations["HOME"] = "回到桌面。只在需要离开当前应用时用。"
         operations["WAIT"] = "屏幕还在加载时短暂等待。不确定该做什么时选它，不要选 DONE。"
-        operations["DONE"] = "目标已经在屏幕上完成。只有屏幕上确实出现完成状态才能选。"
+        operations["DONE"] = if (step != null && step.multiStep) {
+            "当前这一步已完成：屏幕上已经能看到「${step.doneWhen}」。只判断这一步，不用管整个目标。"
+        } else {
+            "目标已经在屏幕上完成。只有屏幕上确实出现完成状态才能选。"
+        }
         operations["BLOCKED"] = "给出的操作都无法让目标前进一步。"
         actions.add(nav("BACK", "back", "返回"))
         actions.add(nav("HOME", "home", "回到桌面"))
@@ -209,7 +228,78 @@ object Catalogs {
             )
         }
 
-        return ActionCatalog(actions, operations, tapTargets, textValues, appTargets, longPressTargets, guard)
+        // 设备工具快捷方式：跳到设置某页、被目标点名的开关/亮度/音量。界面里要翻好几屏的事一步做完。
+        if (guard == null) {
+            val shortcuts = DeviceTools.shortcuts(goal, step?.instruction.orEmpty(), apps)
+            if (shortcuts.isNotEmpty()) {
+                operations["USE_TOOL"] = "直接调用设备功能（跳到设置某一页、开关蓝牙/WLAN、调亮度音量），不用在界面里翻找。能用就优先用。"
+                shortcuts.forEachIndexed { i, inv ->
+                    val key = "t${i + 1}"
+                    toolTargets[key] = inv.label
+                    actions.add(
+                        CatalogAction(
+                            id = "tool_${inv.tool}_${inv.args.values.joinToString("_")}",
+                            operation = "USE_TOOL",
+                            target = key,
+                            label = inv.label,
+                            tool = inv.node,
+                            params = inv.params,
+                            successFlag = inv.successFlag,
+                            outputs = inv.outputs,
+                        ),
+                    )
+                }
+            }
+        }
+
+        // 滑块：点一下只会跳到点的位置，拖到头才是"最大/最小"
+        if (guard == null) {
+            observation.elements.filter { it.rangeFraction != null && it.bounds != null && it.enabled }.take(MAX_SLIDERS).forEach { el ->
+                val name = el.text.ifBlank { "滑块" }.take(TEXT_PREVIEW)
+                listOf("max" to "拉到最大", "min" to "拉到最小", "mid" to "拉到中间").forEach { (pos, verb) ->
+                    val key = "${el.index}:$pos"
+                    sliderTargets[key] = "$name（当前 ${(el.rangeFraction!! * 100).toInt()}%）$verb"
+                    actions.add(sliderAction(el, pos, key, "「$name」$verb"))
+                }
+            }
+            if (sliderTargets.isNotEmpty()) {
+                operations["SET_SLIDER"] = "把滑块（亮度条、音量条、进度条）拖到最大/最小/中间。"
+            }
+        }
+
+        return ActionCatalog(
+            actions, operations, tapTargets, textValues, appTargets, longPressTargets, guard,
+            toolTargets = toolTargets, sliderTargets = sliderTargets,
+        )
+    }
+
+    /** 从滑块当前位置拖到目标位置；拖过头一点（两端各留 1%）保证到头。 */
+    private fun sliderAction(el: ScreenElement, pos: String, key: String, label: String): CatalogAction {
+        val b = el.bounds!!
+        val y = b.centerY
+        val from = (b.left + b.width * (el.rangeFraction ?: 0.5)).toInt()
+        val to = when (pos) {
+            "max" -> b.right - 1
+            "min" -> b.left + 1
+            else -> b.centerX
+        }
+        return CatalogAction(
+            id = "slider_${el.index}_$pos",
+            operation = "SET_SLIDER",
+            target = key,
+            label = label,
+            tool = "ACTION_SWIPE",
+            params = mapOf("x1" to from, "y1" to y, "x2" to to, "y2" to y, "duration" to 500),
+            matchText = el.text,
+            viewId = el.viewId,
+        )
+    }
+
+    /** 控件状态后缀：开关开/关、灰掉、滑块位置。让模型知道"这个开关已经是开的"。 */
+    fun stateOf(el: ScreenElement): String = buildString {
+        if (el.checkable) append(if (el.checked == true) "[已开启]" else "[已关闭]")
+        if (!el.enabled) append("[不可用]")
+        el.rangeFraction?.let { append("[当前${(it * 100).toInt()}%]") }
     }
 
     /**
@@ -249,7 +339,9 @@ object Catalogs {
         val id = el.viewId.lowercase()
         return when {
             el.editable -> "输入框"
-            id.contains("switch") || id.contains("toggle") -> "开关"
+            el.rangeFraction != null -> "滑块"
+            el.checkable && el.selectable -> "开关行"
+            el.checkable || id.contains("switch") || id.contains("toggle") -> "开关"
             id.contains("checkbox") -> "复选框"
             el.selectable -> "列表行"
             id.contains("tab") -> "标签页"
@@ -261,7 +353,8 @@ object Catalogs {
     /** 给模型看的候选条目：`文字 ⟪id/title⟫`。viewId 让模型能区分同名控件。 */
     fun describeTarget(el: ScreenElement, type: String): String {
         val id = shortViewId(el.viewId)
-        return if (id.isEmpty()) el.text else "${el.text} ⟪$id⟫"
+        val base = el.text + stateOf(el)
+        return if (id.isEmpty()) base else "$base ⟪$id⟫"
     }
 
     /** `com.android.settings:id/title` → `id/title`，去掉包名前缀省 token。 */
