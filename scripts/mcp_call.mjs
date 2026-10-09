@@ -4,7 +4,10 @@
 //   node scripts/mcp_call.mjs                     # initialize + tools/list + tools/call(screen)
 //   node scripts/mcp_call.mjs ACTION_LAUNCH_APP '{"package_name":"com.android.settings"}'
 //   node scripts/mcp_call.mjs --list              # 只列工具
-const args = process.argv.slice(2);
+//   node scripts/mcp_call.mjs --full agent_status # 不截断长字段（看完整步骤日志）
+const argv = process.argv.slice(2);
+const full = argv.includes('--full');
+const args = argv.filter((a) => a !== '--full');
 const listOnly = args.includes('--list');
 const tool = listOnly ? null : (args[0] || 'screen');
 const toolArgs = listOnly ? null : (args[1] ? JSON.parse(args[1]) : {});
@@ -67,7 +70,7 @@ ws.onopen = async () => {
     const parsed = tryJson(content);
     if (parsed) {
       for (const [k, v] of Object.entries(parsed)) {
-        const s = typeof v === 'string' && v.length > 400 ? v.slice(0, 400) + '...' : JSON.stringify(v);
+        const s = typeof v === 'string' && !full && v.length > 400 ? v.slice(0, 400) + '...' : JSON.stringify(v);
         console.log(`    ${k} = ${s}`);
       }
     } else {

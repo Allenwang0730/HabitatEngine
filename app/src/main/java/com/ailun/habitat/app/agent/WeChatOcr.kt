@@ -13,7 +13,8 @@ import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 
 /**
- * 微信无障碍树为空时的离线 OCR。只在读屏线程调用，限频，不把识别文字打进日志。
+ * 无障碍树读不到文字时的离线 OCR 兜底（微信前台、或任意 App 树文字不足）。
+ * 只在读屏协程调用，限频 + 指数退避，不把识别文字打进日志。
  */
 object WeChatOcr {
     private val executor = Executors.newSingleThreadExecutor()
@@ -23,7 +24,12 @@ object WeChatOcr {
     @Volatile private var nextAllowedAt = 0L
     @Volatile private var backoffMs = 1_000L
 
-    suspend fun recognize(service: AccessibilityService, screenWidth: Int, screenHeight: Int): ScreenObservation? {
+    suspend fun recognize(
+        service: AccessibilityService,
+        screenWidth: Int,
+        screenHeight: Int,
+        packageName: String = ScreenObserver.WECHAT,
+    ): ScreenObservation? {
         val now = System.currentTimeMillis()
         if (now < nextAllowedAt) return null
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
@@ -59,11 +65,17 @@ object WeChatOcr {
                     clickable = true,
                     editable = false,
                     focused = false,
+                    bounds = ElementBounds(
+                        left = (box.left * scaleX).toInt(),
+                        top = (box.top * scaleY).toInt(),
+                        right = (box.right * scaleX).toInt(),
+                        bottom = (box.bottom * scaleY).toInt(),
+                    ),
                 )
             }
             if (elements.isEmpty()) null
             else ScreenObservation(
-                packageName = ScreenObserver.WECHAT,
+                packageName = packageName,
                 screenWidth = screenWidth,
                 screenHeight = screenHeight,
                 elements = elements,

@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -19,6 +20,8 @@ import com.ailun.habitat.R
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.app.agent.AgentLoopController
+import com.ailun.habitat.app.agent.Catalogs
+import com.ailun.habitat.app.agent.ScreenObserver
 import com.ailun.habitat.app.auth.SecretStore
 import com.ailun.habitat.app.bridge.AppAccessibilityProvider
 import com.ailun.habitat.app.bridge.ShizukuShellExecutor
@@ -319,6 +322,12 @@ class AgentService : Service() {
 
         if (tool == "ping") return buildReplyJson(id, ok = true, outputs = mapOf("pong" to true))
         if (tool == "screen") return buildReplyJson(id, ok = true, outputs = screenSnapshot())
+        if (tool == "debug_screen") {
+            val params = req.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
+            val goal = runCatching { params.get("goal")?.asString }.getOrNull()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: "打开设置"
+            return buildReplyJson(id, ok = true, outputs = mapOf("result" to debugScreen(goal)))
+        }
         if (tool.startsWith("agent_")) {
             val params = req.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
             val (ok, text) = handleAgentControl(tool, params)
@@ -426,6 +435,11 @@ class AgentService : Service() {
     private suspend fun executeNodeAsText(factory: NodeHandlerFactory, tool: String, args: JsonObject): Pair<Boolean, String> {
         if (tool == "ping") return true to """{"pong":true}"""
         if (tool == "screen") return true to gson.toJson(screenSnapshot())
+        if (tool == "debug_screen") {
+            val goal = runCatching { args.get("goal")?.asString }.getOrNull()?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: "打开设置"
+            return true to debugScreen(goal)
+        }
         if (tool.startsWith("agent_")) return handleAgentControl(tool, args)
         remotePolicyError(tool)?.let { return false to it }
 
@@ -449,6 +463,7 @@ class AgentService : Service() {
     private fun buildMcpTools(factory: NodeHandlerFactory): JsonArray {
         val arr = JsonArray()
         arr.add(mcpToolSchema("screen", "获取当前屏幕无障碍树文本 + 前台应用包名（AI 的眼睛）"))
+        arr.add(mcpToolSchema("debug_screen", "排查用：当前观测快照 + 候选动作清单。arguments: goal（可空，默认「打开设置」）"))
         arr.add(mcpToolSchema("ping", "连通性测试"))
         arr.add(mcpToolSchema("agent_start", "启动自主循环。arguments: goal（必填）, provider（jev/deepseek/local，可空）, max_steps（1-30，可空）"))
         arr.add(mcpToolSchema("agent_stop", "停止自主循环"))
@@ -525,6 +540,50 @@ class AgentService : Service() {
         return MessageDigest.isEqual(given.toByteArray(Charsets.UTF_8), expected.toByteArray(Charsets.UTF_8))
     }
 
+    /**
+     * 排查用快照：当前观测（含窗口/元素细节）+ 用 [goal] 生成的候选动作。
+     * 只读，不执行任何节点，所以不进 [REMOTE_DANGEROUS_TOOLS]。
+     */
+    private suspend fun debugScreen(goal: String): String {
+        val (width, height) = screenMetrics()
+        if (ScreenObserver.screenState(this).locked) {
+            return "屏幕已锁定：观测为空，不能决策。请先解锁手机再调用 debug_screen。\n" +
+                "size=${width}x${height}"
+        }
+        val observation = ScreenObserver.observe(this)
+        val catalog = Catalogs.build(goal, observation, ScreenObserver.launcherApps(this))
+        return buildString {
+            append("size=").append(observation.screenWidth).append('x').append(observation.screenHeight)
+            append(" goal=").append(goal)
+            append('\n')
+            append(ScreenObserver.describe(observation)).append('\n')
+            append("candidates: total=").append(catalog.actions.size)
+            append(" TAP=").append(catalog.tapTargets.size)
+            append(" TYPE_TEXT=").append(catalog.textValues.size)
+            append(" OPEN_APP=").append(catalog.apps.size)
+            append(" operations=").append(catalog.operations.keys.joinToString(","))
+            if (catalog.guard != null) append(" guard=").append(catalog.guard)
+            append('\n')
+            catalog.actions.forEach { a ->
+                append("- ").append(a.id).append(" [").append(a.operation).append("] ")
+                append(a.label)
+                if (a.centerX != null && a.centerY != null) append(" @").append(a.centerX).append(',').append(a.centerY)
+                append('\n')
+            }
+        }
+    }
+
+    /** 与读屏同一来源的屏幕像素尺寸（无障碍坐标 / 截图 / 滑动都用这个）。 */
+    private fun screenMetrics(): Pair<Int, Int> {
+        val wm = getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = wm?.maximumWindowMetrics?.bounds
+            if (bounds != null && bounds.width() > 0 && bounds.height() > 0) return bounds.width() to bounds.height()
+        }
+        val dm = resources.displayMetrics
+        return dm.widthPixels to dm.heightPixels
+    }
+
     /** 屏幕快照（AI 的"眼睛"）：返回屏幕状态 + 所有窗口文本（无障碍树，替代截图省 token）。 */
     private fun screenSnapshot(): Map<String, Any> {
         val service = AppAccessibilityProvider.getService()
@@ -539,14 +598,24 @@ class AgentService : Service() {
             try {
                 service.windows.forEach { w ->
                     if (w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION ||
-                        w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM
+                        w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM ||
+                        w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD
                     ) {
                         val root = w.root ?: return@forEach
                         try {
                             val pkg = root.packageName?.toString() ?: ""
                             val texts = collectText(root)
                             if (texts.isNotEmpty() || pkg.isNotEmpty()) {
-                                windows.add(mapOf("package" to pkg, "text" to texts.joinToString("\n")))
+                                windows.add(
+                                    mapOf(
+                                        "package" to pkg,
+                                        "type" to windowTypeName(w.type),
+                                        "type_id" to w.type,
+                                        "active" to w.isActive,
+                                        "focused" to w.isFocused,
+                                        "text" to texts.joinToString("\n"),
+                                    ),
+                                )
                             }
                         } finally {
                             runCatching { root.recycle() }
@@ -569,7 +638,17 @@ class AgentService : Service() {
             "screen_text" to (main?.get("text") ?: ""),
             "windows" to windows,
             "foreground_package" to (AppAccessibilityProvider.foregroundPackage ?: "unknown"),
+            "window_count" to windows.size,
         )
+    }
+
+    private fun windowTypeName(type: Int): String = when (type) {
+        android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
+        android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "ime"
+        android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+        android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "a11y_overlay"
+        android.view.accessibility.AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_divider"
+        else -> "other($type)"
     }
 
     private fun collectText(node: android.view.accessibility.AccessibilityNodeInfo, out: MutableList<String> = mutableListOf()): List<String> {
@@ -598,6 +677,8 @@ class AgentService : Service() {
             mapOf(
                 "count" to factory.size,
                 "modules" to modules,
+                "builtin_tools" to listOf("ping", "screen", "debug_screen", "agent_start", "agent_stop", "agent_status"),
+                "debug_screen" to "排查用：当前观测快照 + 候选动作清单；params.goal（默认「打开设置」）",
                 "remote_dangerous_allowed" to isRemoteDangerousAllowed(this),
                 "remote_dangerous_tools" to REMOTE_DANGEROUS_TOOLS.sorted(),
             ),
