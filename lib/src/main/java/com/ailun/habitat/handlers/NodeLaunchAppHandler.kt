@@ -16,6 +16,10 @@ import com.ailun.habitat.WorkflowNode
 class NodeLaunchAppHandler : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
+        context.putVariable("launch_success", false)
+        val intentAction = node.params?.get("intent_action")?.toString()?.let { context.interpolate(it) }?.trim().orEmpty()
+        if (intentAction.isNotEmpty()) return launchSettingsAction(node, context, intentAction)
+
         val packageName = node.params?.get("package_name")?.toString()?.let { context.interpolate(it) }?.trim().orEmpty()
         if (packageName.isEmpty()) {
             Log.e(TAG, "Launch app failed: 'package_name' parameter is empty")
@@ -64,7 +68,40 @@ class NodeLaunchAppHandler : INodeHandler {
         return node.next
     }
 
+    /**
+     * `intent_action`：直接打开系统设置的某一页（如 `android.settings.BLUETOOTH_SETTINGS`）。
+     * 只接受 `android.settings.` 开头的 action——这个入口只用于"导航到设置页"，
+     * 不能被拿来发 CALL/SENDTO/VIEW 这类有外部副作用的 Intent。
+     */
+    private fun launchSettingsAction(node: WorkflowNode, context: WorkflowContext, action: String): String? {
+        val allowed = action.startsWith(SETTINGS_ACTION_PREFIX) || action in EXTRA_SETTINGS_ACTIONS
+        if (!allowed || action.length > 120 || action.any { it.isWhitespace() }) {
+            context.putVariable("launch_error", "intent_action 只允许 $SETTINGS_ACTION_PREFIX* : $action")
+            return node.next
+        }
+        val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val resolved = context.appContext.packageManager.resolveActivity(intent, 0)
+        if (resolved == null) {
+            context.putVariable("launch_error", "本机没有响应 $action 的设置页")
+            return node.next
+        }
+        return try {
+            context.appContext.startActivity(intent)
+            context.putVariable("launch_success", true)
+            context.putVariable("launch_package", resolved.activityInfo?.packageName.orEmpty())
+            node.next
+        } catch (e: Exception) {
+            Log.e(TAG, "Launch settings action '$action' failed: ${e.message}", e)
+            context.putVariable("launch_error", e.message ?: e.javaClass.simpleName)
+            node.next
+        }
+    }
+
     companion object {
         private const val TAG = "HabitatLaunchApp"
+        const val SETTINGS_ACTION_PREFIX = "android.settings."
+
+        /** 不在 android.settings.* 下、但同样只是打开设置页的 action。 */
+        val EXTRA_SETTINGS_ACTIONS = setOf("android.intent.action.POWER_USAGE_SUMMARY")
     }
 }
