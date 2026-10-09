@@ -30,7 +30,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.ailun"
                 artifactId = "habitat-engine"
-                version = "1.7.0"
+                version = "1.7.1"
             }
         }
     }

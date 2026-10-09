@@ -99,7 +99,7 @@
 - **微信读屏**：系统设置里另开「Habitat 微信读屏」（`SelectToSpeakService`）。树为空时 ML Kit 中文离线 OCR。改过无障碍配置后要关掉再开一次
 - **AI 生成工作流**：`NodeKnowledge` 动态提示词 → DeepSeek，**13 场景 100% 正确**；单次成本 ≈¥0.02–0.05
 - **CLICK/FIND_ELEMENT 支持 `region` + `occurrence`**（多实例文本精准定位，如"下半屏的确定"）
-- **独立 AAR 发布配置**（`:lib` maven-publish → `com.ailun:habitat-engine:1.7.0`）
+- **独立 AAR 发布配置**（`:lib` maven-publish → `com.ailun:habitat-engine:1.7.1`）
 - App UI：4 tab（工作流/AI 生成/Agent/个人主页），编辑器内嵌主页卡片
 - 直拨 `ACTION_CALL_DIRECT` 走 `TelecomManager.placeCall`（后台可拨）
 - 安全：API key 不硬编码、密钥扫描 hook、manifest 权限铁律

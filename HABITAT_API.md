@@ -171,7 +171,7 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `target` | String | — | 坐标 "x,y" 或无障碍文本/ID 选择器 |
+| `target` | String | — | 坐标 `"x,y"`；无障碍文本（精确匹配不到时退回子串匹配，含列表行的子文字）；或 `"id:com.android.settings:id/title"` 按 resource-id 匹配（同名行配合 `occurrence`） |
 | `region` | String | 无 | 仅文本匹配：限定匹配节点所在屏幕区域，`"top"/"bottom"/"left"/"right"/"center"` 或归一化 `"x1,y1,x2,y2"`（0-1 相对屏幕，如 `0,0.5,1,1` = 下半屏） |
 | `occurrence` | Int | 0 | 仅文本匹配：region 过滤后取第几个匹配（按屏幕从上到下排序，0 起） |
 | `offset_x` | Int | 0 | 点击坐标相对目标中心的 X 偏移（px） |
@@ -229,8 +229,10 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `text` | String | — | 文字内容，支持 `${var}` |
-| `mode` | String | "a11y" | 输入模式: a11y / shell / clipboard |
+| `text` | String | — | 文字内容，支持 `${var}`；`submit=true` 时可为空（只提交不改内容） |
+| `mode` | String | "a11y" | 输入模式: a11y / shell / ime |
+| `submit` | Boolean | false | 输入后在焦点框按 IME 回车（搜索/发送/确认）。走无障碍 `ACTION_IME_ENTER`，不需要 Shizuku；不可用时退回 `input keyevent 66` |
+| `allow_empty` | Boolean | false | 允许把输入框整框设为空（清空） |
 
 输出: `input_success` (Boolean)
 
