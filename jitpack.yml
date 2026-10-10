@@ -1,0 +1,9 @@
+# JitPack 只构建并发布引擎 :lib（不构建带 UI 的 :app）。
+# 用法：repositories { maven("https://jitpack.io") }
+#       implementation("com.github.Allenwang0730:HabitatEngine:<tag>")
+jdk:
+  - openjdk21
+before_install:
+  - sed -i 's#mirrors.cloud.tencent.com/gradle#services.gradle.org/distributions#' gradle/wrapper/gradle-wrapper.properties
+install:
+  - ./gradlew :lib:publishReleasePublicationToMavenLocal --console=plain

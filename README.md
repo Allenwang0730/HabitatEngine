@@ -1,18 +1,45 @@
-# Habitat — Embeddable, LLM-Driven Android Automation Runtime
+# Habitat — Let AI Agents Drive Android
 
-> An **embeddable** Android automation runtime. Define workflows as flat JSON
-> (LLM-generatable), run them via **accessibility + system APIs**.
-> Drop the `:lib` into any app — or use it as the execution layer for **device AI agents**.
+> An **embeddable Android automation runtime** with an **on-device MCP server** and an
+> **autonomous agent** (DeepSeek plans, TypeSafe Jev picks each tap, code verifies).
+> Workflows are flat JSON that LLMs can write; execution goes through accessibility + system APIs.
 
-> **One line**: the library that lets LLMs & AI agents control Android, and lets developers
-> embed JSON-workflow automation into their own apps.
-
+[![CI](https://github.com/Allenwang0730/HabitatEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/Allenwang0730/HabitatEngine/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Allenwang0730/HabitatEngine)](https://github.com/Allenwang0730/HabitatEngine/releases)
+[![JitPack](https://jitpack.io/v/Allenwang0730/HabitatEngine.svg)](https://jitpack.io/#Allenwang0730/HabitatEngine)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-purple)]()
 [![Min SDK](https://img.shields.io/badge/API-29+-green)]()
-[![Nodes](https://img.shields.io/badge/Nodes-84-blue)]()
-[![MCP](https://img.shields.io/badge/MCP-LM_accessible-green)]()
-[![Compose](https://img.shields.io/badge/UI-Compose_M3-orange)]()
-[![License](https://img.shields.io/badge/License-Apache--2.0-blue)]()
+[![MCP](https://img.shields.io/badge/MCP-server-green)]()
+[![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+
+[中文文档](README_CN.md)
+
+**What you get**
+
+- **Tell the phone what to do** — "open Settings and go to Bluetooth", "turn brightness to max", "what's my battery?" The agent plans, uses device tools directly when it can, taps through the UI when it must, and verifies the result on screen. On-device eval: **14/14** with planning for both Jev and DeepSeek executors (vs 6–10/14 without).
+- **An MCP server on the phone** — any MCP client (Claude, Cursor, your own agent) can read the screen and call ~80 automation nodes over `ws://127.0.0.1:8931/mcp`, token-authenticated, dangerous tools off by default.
+- **An embeddable engine** — drop `:lib` into your own app (JitPack) and run LLM-generated JSON workflows: triggers, branches, loops, variables, shell, HTTP, sensors, notifications.
+
+## Try it in 2 minutes
+
+1. Install the APK from [Releases](https://github.com/Allenwang0730/HabitatEngine/releases) on Android 10+ — `app-standard-arm64-v8a-release.apk` fits almost every phone (`universal` if unsure).
+2. Open Habitat, enable its **accessibility service** when prompted.
+3. **Agent** tab → pick an executor (Jev / DeepSeek / Local), paste your API key (stored encrypted on the device), type a goal, tap **Start**.
+   - No key? Choose **Local** — it runs offline with simple heuristics.
+   - Calling Jev from mainland China returns HTTP 451; see [Jev network](#autonomous-mode-planner-deepseek--executor-jev--code-control).
+
+Prefer workflows? **AI 生成** tab → describe a task in plain language → DeepSeek writes the JSON → save & run.
+
+### Use the engine in your app
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement { repositories { maven("https://jitpack.io") } }
+// build.gradle.kts
+implementation("com.github.Allenwang0730:HabitatEngine:v1.9.0")
+```
+
+See [docs/ENGINE_USAGE.md](docs/ENGINE_USAGE.md) for initialization and permissions.
 
 ---
 
@@ -314,7 +341,7 @@ ws://127.0.0.1:8931/mcp                # Authorization: Bearer <token> (or ?toke
 - `initialize / tools/list / tools/call` standard MCP, any LLM client can connect
 - **Auth**: a random token is generated per install (view / copy / regenerate on the App's Agent page); LAN access is off by default; dangerous nodes (shell, files, SMS, calls, …) are refused for remote callers unless explicitly enabled
 - supports `region`/`occurrence` to precisely target repeated text (e.g. "tap the confirm button at the bottom")
-- WeChat reading: enable “Habitat 微信读屏” (`SelectToSpeakService`). If the tree is empty, ML Kit Chinese OCR runs on device
+- WeChat reading: only in the `wechat` build flavor (`./gradlew :app:assembleWechatDebug`), which adds a reader service named `SelectToSpeakService` — WeChat only exposes its UI tree to that class name, so this impersonates a Google component: personal use only, not for store distribution. The default `standard` flavor doesn't include it and falls back to on-device ML Kit OCR
 - PC side `scripts/agent_daemon.mjs` (persistent connection) / `mcp_call.mjs` (one-off calls, `--full` for untruncated fields)
 
 ### Autonomous mode: planner (DeepSeek) + executor (Jev) + code control

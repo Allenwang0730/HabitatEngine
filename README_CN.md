@@ -1,12 +1,44 @@
-# Habitat — JSON 驱动的 Android 自动化工作流引擎
+# Habitat — 让 AI Agent 操控安卓手机
 
-> 轻量、AI 友好、84+ 节点类型。工作流定义为扁平 JSON——专为 LLM 生成设计，非手工编写。
+> **可嵌入的安卓自动化运行时**，自带**手机端 MCP 服务**和**自主 Agent**（DeepSeek 规划、TypeSafe Jev 逐屏选动作、代码验证）。
+> 工作流是 LLM 能直接生成的扁平 JSON，执行走无障碍 + 系统 API 双轨。
 
+[![CI](https://github.com/Allenwang0730/HabitatEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/Allenwang0730/HabitatEngine/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Allenwang0730/HabitatEngine)](https://github.com/Allenwang0730/HabitatEngine/releases)
+[![JitPack](https://jitpack.io/v/Allenwang0730/HabitatEngine.svg)](https://jitpack.io/#Allenwang0730/HabitatEngine)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-purple)]()
 [![Min SDK](https://img.shields.io/badge/API-29+-green)]()
-[![Nodes](https://img.shields.io/badge/Nodes-84-blue)]()
-[![MCP](https://img.shields.io/badge/MCP-LM_accessible-green)]()
-[![Compose](https://img.shields.io/badge/UI-Compose_M3-orange)]()
+[![MCP](https://img.shields.io/badge/MCP-server-green)]()
+[![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+
+[English](README.md)
+
+**能做什么**
+
+- **一句话让手机自己做**——"打开设置进入蓝牙""亮度调到最高""现在电量多少"。Agent 先规划，能用设备工具就直接用，不能就在界面上点，最后按屏幕证据复核。真机评测：有规划时 Jev、DeepSeek 两种执行器都是 **14/14**（无规划 6–10/14）。
+- **手机上的 MCP 服务**——任意 MCP 客户端（Claude、Cursor、自己的 Agent）经 `ws://127.0.0.1:8931/mcp` 读屏、调用约 80 个自动化节点；令牌鉴权，高危节点默认关闭。
+- **可嵌入的引擎**——把 `:lib` 引入你自己的 App（JitPack），运行 LLM 生成的 JSON 工作流：触发器、分支、循环、变量、Shell、HTTP、传感器、通知。
+
+## 两分钟上手
+
+1. 从 [Releases](https://github.com/Allenwang0730/HabitatEngine/releases) 下载安装包装到 Android 10+ 手机：绝大多数手机用 `app-standard-arm64-v8a-release.apk`，不确定就用 `universal`。
+2. 打开 Habitat，按提示开启**无障碍服务**。
+3. 底栏 **Agent** → 选执行器（Jev / DeepSeek / 本地）→ 填 API Key（只加密存在手机上）→ 输入目标 → **开始**。
+   - 没有 key：选「本地」，离线可用（策略简单）。
+   - 国内网络直连 Jev 会返回 451，见下文 [Jev 网络](#自主模式规划deepseek-执行jev-代码控制)。
+
+想用工作流：底栏 **AI 生成** → 用一句话描述 → DeepSeek 生成 JSON → 保存运行。
+
+### 在你的 App 里使用引擎
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement { repositories { maven("https://jitpack.io") } }
+// build.gradle.kts
+implementation("com.github.Allenwang0730:HabitatEngine:v1.9.0")
+```
+
+初始化与权限见 [docs/ENGINE_USAGE.md](docs/ENGINE_USAGE.md)。
 
 ---
 
@@ -121,7 +153,7 @@ ws://127.0.0.1:8931/mcp                # Authorization: Bearer <令牌>（或 ?t
 - `initialize / tools/list / tools/call` 标准 MCP，任意 LLM 客户端可接入
 - **鉴权**：令牌每台设备首次启动随机生成，在 App「Agent」页查看/复制/重新生成；局域网访问默认关闭；Shell、文件、短信、拨号等高危节点远程默认拒绝，需在 Agent 页手动开启
 - 支持 `region`/`occurrence` 精准定位多实例文本（如"点下半屏的确定"）
-- 微信读屏：另开「Habitat 微信读屏」（类名 `SelectToSpeakService`）；树为空时用 ML Kit 中文离线 OCR
+- 微信读屏：只在 `wechat` 渠道包里（`./gradlew :app:assembleWechatDebug`）。微信只对类名为 `SelectToSpeakService` 的服务返回节点，这等于冒用 Google 组件身份，**仅限自用，不能上架分发**。默认的 `standard` 包不含它，树为空时用 ML Kit 中文离线 OCR
 - 电脑侧 `scripts/agent_daemon.mjs`（常驻长连接）/ `mcp_call.mjs`（单次调用，`--full` 看完整字段）
 
 ### 自主模式：规划（DeepSeek）+ 执行（Jev）+ 代码控制
