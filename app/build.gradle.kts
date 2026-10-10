@@ -60,6 +60,17 @@ android {
         }
     }
 
+    // standard：默认渠道，可公开分发。
+    // wechat：额外带「微信读屏」服务（冒用 Google SelectToSpeakService 类名，只能自用，不能上架）。
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("standard") { dimension = "distribution" }
+        create("wechat") {
+            dimension = "distribution"
+            versionNameSuffix = "-wechat"
+        }
+    }
+
     buildFeatures {
         compose = true
         aidl = true

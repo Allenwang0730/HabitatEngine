@@ -71,7 +71,7 @@ $env:AGENT_TOKEN = "<Agent 页复制的令牌>"
 - 决策只从当前屏幕候选里选题。候选由代码生成（点击、滚动、输入目标原文、打开点名应用、返回、桌面、等待、完成、无法继续）。
 - Jev 走 `POST https://api.typesafe.ai/v1/systemone`，key 存在加密存储（Agent 页填写），不进代码、不进日志。429/5xx/网络错误重试一次；停止按钮会立即取消在途请求。
 - MCP/WS：`agent_start`（`goal` / `provider` / `max_steps`）、`agent_stop`、`agent_status`。启动后立即返回，不阻塞到循环结束。
-- 微信：系统设置另开「Habitat 微信读屏」。类名是 `SelectToSpeakService`，不要改。树为空才 OCR。
+- 微信：只在 `wechat` 渠道包里（`./gradlew :app:assembleWechatDebug`）。系统设置另开「Habitat 微信读屏」。类名是 `SelectToSpeakService`，不要改。树为空才 OCR。默认的 `standard` 包不含这个服务，微信树为空时只能靠 OCR。
 
 ### 架构：规划（System 2）+ 执行（System 1）+ 代码控制
 

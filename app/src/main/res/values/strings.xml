@@ -2,8 +2,6 @@
 <resources>
     <string name="app_name">Habitat</string>
     <string name="accessibility_service_description">Habitat 服务可以通过自动化流程执行多种任务。</string>
-    <string name="wechat_reader_label">Habitat 微信读屏</string>
-    <string name="wechat_reader_description">读取微信等会隐藏无障碍节点的界面。请与 Habitat 无障碍一起开启；升级后若截屏无效，把这项关掉再打开一次。</string>
     <string name="habitat_float_notification_channel_name">Habitat 悬浮球</string>
     <string name="habitat_float_notification_title">Habitat 悬浮球</string>
     <string name="habitat_float_notification_text">点击悬浮按钮运行已挂载脚本</string>

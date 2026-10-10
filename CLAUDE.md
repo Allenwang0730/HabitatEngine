@@ -5,21 +5,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build commands
 
 ```bash
-# Debug APK (all ABIs)
-./gradlew assembleDebug
+# Debug APK (all ABIs). Two flavors: `standard` (default, distributable) and
+# `wechat` (adds the WeChat reader service that impersonates Google's SelectToSpeakService — personal use only)
+./gradlew :app:assembleStandardDebug
+./gradlew :app:assembleWechatDebug
 
 # Release APK (signed, minified, with ProGuard)
 ./gradlew assembleRelease
 
 # Clean rebuild
-./gradlew clean assembleDebug
+./gradlew clean :app:assembleStandardDebug
 
 # Build a single module
-./gradlew :app:assembleDebug
 ./gradlew :lib:assembleRelease
 ```
 
-Output APKs land in `app/build/outputs/apk/<variant>/`. The debug build uses the default debug keystore automatically. The release build reads signing config from `keystore.properties` at the project root (if the file is missing, no release signing config is created — debug builds still work) — this file and `*.keystore`/`*.jks` are git-ignored. To set up release signing, generate a keystore and create `keystore.properties`:
+Output APKs land in `app/build/outputs/apk/<flavor>/<buildType>/`. The debug build uses the default debug keystore automatically. The release build reads signing config from `keystore.properties` at the project root (if the file is missing, no release signing config is created — debug builds still work) — this file and `*.keystore`/`*.jks` are git-ignored. To set up release signing, generate a keystore and create `keystore.properties`:
 
 ```
 storePassword=<password>

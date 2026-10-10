@@ -86,7 +86,7 @@
 |---|---|
 | `agent_daemon.mjs` | 电脑侧常驻 MCP 客户端（长连接，本地 HTTP :18080，14× 加速）|
 | `mcp_call.mjs` | 单次 MCP 调用（带 `?token=`）|
-| `run_selftest.ps1` | 跑 68 条回归（默认 APK `app-arm64-v8a-debug.apk`）|
+| `run_selftest.ps1` | 跑 68 条回归（默认 APK `apk/standard/debug/app-standard-arm64-v8a-debug.apk`）|
 | `verify_workflow_gen.ps1` | LLM 生成正确率验证（13 场景；key 从 `-ApiKey`/`DEEPSEEK_API_KEY` 读）|
 | `scan_secrets.sh` | 密钥扫描（pre-commit hook 调用）|
 | `agent_ws.ps1` | WS 调试 |
@@ -97,7 +97,7 @@
 - 引擎 **84 节点** + 68 条回归（最近一次真机：**53 PASS / 0 FAIL / 15 SKIP**，SKIP 为需权限/Shizuku/手工项）
 - **MCP server** + **token 鉴权**（随机令牌，`Authorization: Bearer` 或 `?token=`；高危节点远程默认拒绝）
 - **自主模式**（1.9.0）：DeepSeek 规划拆步 → Jev/DeepSeek/本地逐屏选动作 → 代码执行与验证 → DeepSeek 复核；设备工具、导航栈、控件状态。真机评测（7 类任务 × 2 次）：有规划时 Jev 14/14、DeepSeek 14/14（详见 `docs/AGENT.md`）
-- **微信读屏**：系统设置里另开「Habitat 微信读屏」（`SelectToSpeakService`）。树为空时 ML Kit 中文离线 OCR。改过无障碍配置后要关掉再开一次
+- **微信读屏**（只在 `wechat` 渠道包里）：系统设置里另开「Habitat 微信读屏」（`SelectToSpeakService`）。树为空时 ML Kit 中文离线 OCR。改过无障碍配置后要关掉再开一次
 - **AI 生成工作流**：`NodeKnowledge` 动态提示词 → DeepSeek，**13 场景 100% 正确**；单次成本 ≈¥0.02–0.05
 - **CLICK/FIND_ELEMENT 支持 `region` + `occurrence`**（多实例文本精准定位，如"下半屏的确定"）
 - **独立 AAR 发布配置**（`:lib` maven-publish → `com.ailun:habitat-engine:1.8.0`）
@@ -122,7 +122,7 @@
 1. **SmartCS 的 lib 完全不动**；SmartCS app 可改但必须 git 版本管理、随时可回退。
 2. **密钥/机密绝不硬编码、绝不提交**（见 `AGENTS.md`）；遇泄露：`git filter-repo` 清全历史 + 强推 + 服务方作废 key。
 3. **新节点必须同步在 `AndroidManifest.xml` 声明它用到的权限**，否则功能静默失败（CALL_PHONE 漏声明的教训）。
-4. 引擎改动后**跑回归**（`scripts/run_selftest.ps1`）+ 编译验证（`./gradlew :app:assembleDebug`）。
+4. 引擎改动后**跑回归**（`scripts/run_selftest.ps1`）+ 编译验证（`./gradlew :app:assembleStandardDebug`）。
 5. handler 跑在 `Dispatchers.Default`（无 Looper），**禁用依赖 `Looper.myLooper()` 的 API**。
 6. 改 UI/引擎后**装机测试**（`adb install -r` + 启动），真机验证为准。
 
