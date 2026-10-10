@@ -254,6 +254,7 @@ object ScreenObserver {
                 checked = node.checked,
                 enabled = node.enabled,
                 rangeFraction = node.rangeFraction,
+                system = node.rank == RANK_SYSTEM,
             )
         }
         val pkg = kept.filter { it.pkg.isNotEmpty() && it.pkg != SELF }.minByOrNull { it.rank }?.pkg

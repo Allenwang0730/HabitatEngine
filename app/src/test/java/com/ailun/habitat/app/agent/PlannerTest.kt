@@ -170,4 +170,94 @@ class PlannerTest {
         val multi = MobilePriors.taskState(StepContext("g", "第二步", "看到结果", 1, 3, completed = listOf("第一步")))
         assertEquals("2/3", multi["step"])
     }
+
+    @Test
+    fun jevProxyParsing() {
+        assertEquals("127.0.0.1" to 7897, JevDecisionProvider.parseProxy("127.0.0.1:7897"))
+        assertEquals("10.0.2.2" to 8080, JevDecisionProvider.parseProxy("http://10.0.2.2:8080/"))
+        assertNull(JevDecisionProvider.parseProxy(""))
+        assertNull(JevDecisionProvider.parseProxy("127.0.0.1"))
+        assertNull(JevDecisionProvider.parseProxy("user@evil:80"))
+        assertNull(JevDecisionProvider.parseProxy("host:99999"))
+    }
+
+    @Test
+    fun viewClassNamesAreNotActivities() {
+        assertNull(MobilePriors.shortActivity("android.widget.FrameLayout"))
+        assertEquals("OriginDeviceSettingsActivity", MobilePriors.shortActivity("com.vivo.settings.deviceinfo.OriginDeviceSettingsActivity"))
+    }
+
+    @Test
+    fun statusBarIslandIsNotATapTargetAndFailedToolsAreHidden() {
+        val obs = screen(
+            "com.android.settings",
+            ScreenElement("1", "电话,8分钟18秒", 720, 76, clickable = true, editable = false, focused = false, system = true),
+            el("2", "显示、亮度与护眼", 1500),
+        )
+        val catalog = Catalogs.build("把屏幕亮度调到最高", obs, apps, failedTools = setOf("set_brightness|{level=max}"))
+        assertFalse(catalog.tapTargets.containsKey("1"))
+        assertTrue(catalog.tapTargets.containsKey("2"))
+        assertTrue(catalog.toolTargets.values.none { it.contains("最高") })
+        assertTrue(catalog.toolTargets.values.any { it.contains("最低") })
+    }
+
+    @Test
+    fun inputBoxIsDescribedAsInputNotAsTheEntryItContains() {
+        val search = ScreenElement("1", "关于手机", 700, 535, clickable = true, editable = true, focused = false,
+            viewId = "com.android.settings:id/vigour_search_edit")
+        val row = el("2", "关于手机", 2000, selectable = true)
+        val catalog = Catalogs.build("进入关于手机", screen("com.android.settings", search, row), apps)
+        assertTrue(catalog.tapTargets.getValue("1").startsWith("输入框，当前内容：关于手机"))
+        assertTrue(catalog.tapTargets.getValue("2").startsWith("关于手机（列表行）"))
+    }
+
+    @Test
+    fun questionGoalsGetReadToolShortcuts() {
+        val labels = DeviceTools.shortcuts("现在电量是多少？", "", apps).map { it.tool }
+        assertTrue("read_battery" in labels)
+        assertTrue("read_device_info" in DeviceTools.shortcuts("进入关于手机，告诉我安卓版本号", "", apps).map { it.tool })
+    }
+
+    @Test
+    fun sliderOrSwitchChangeCountsAsScreenChange() {
+        val before = screen("com.android.settings", el("1", "亮度", 900, clickable = false, range = 0.41))
+        val after = screen("com.android.settings", el("1", "亮度", 900, clickable = false, range = 1.0))
+        assertFalse(LoopPolicy.sameScreen(before, after))
+        assertTrue(LoopPolicy.sameScreen(before, before))
+    }
+
+    @Test
+    fun failedToolIsNotSwappedForAnotherLevel() {
+        val catalog = Catalogs.build("把屏幕亮度调到最高", screen("com.android.settings"), apps)
+        val max = catalog.actions.first { it.operation == "USE_TOOL" && it.label.contains("最高") }
+        assertEquals("set_brightness|{level=max}", max.toolKey)
+        // 可以换别的工具（打开显示设置页），不能换同一工具的另一档
+        val retry = LoopPolicy.retryCandidate(catalog, max, "把屏幕亮度调到最高", emptyList())!!
+        assertEquals("open_settings", retry.toolKey?.substringBefore('|'))
+    }
+
+    @Test
+    fun focusedInputIsNotATapTargetAndSingleTextIgnoresWrongIndex() {
+        val search = ScreenElement("2", "搜索设置项", 700, 535, clickable = true, editable = true, focused = true)
+        val obs = screen("com.android.settings", search).copy(focusedIndex = "2")
+        val catalog = Catalogs.build("在搜索框输入「电池」并搜索", obs, apps)
+        assertFalse(catalog.tapTargets.containsKey("2"))
+        val d = decisionFromChoice(catalog, "TYPE_TEXT", "2", 1.0, "")
+        assertEquals("action", d.status)
+        assertEquals("电池", d.action?.params?.get("text"))
+    }
+
+    @Test
+    fun sliderAtMaxOffersNoMoreMaxAndReadToolDisappearsOnceKnown() {
+        val atMax = screen("com.android.settings", el("1", "亮度", 900, clickable = false, range = 1.0))
+        val catalog = Catalogs.build("把屏幕亮度调到最高", atMax, apps)
+        assertFalse(catalog.sliderTargets.containsKey("1:max"))
+        assertTrue(catalog.sliderTargets.containsKey("1:min"))
+        assertTrue(Catalogs.stateOf(atMax.elements[0]).contains("已是最大"))
+
+        val q = Catalogs.build("现在电量是多少？", screen("com.bbk.launcher2"), apps)
+        assertTrue(q.toolTargets.values.any { it.contains("电量") })
+        val known = Catalogs.build("现在电量是多少？", screen("com.bbk.launcher2"), apps, knownFacts = setOf("battery_level"))
+        assertTrue(known.toolTargets.values.none { it.contains("电量") })
+    }
 }

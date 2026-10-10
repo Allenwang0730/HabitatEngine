@@ -101,9 +101,11 @@ object DeviceTools {
         return when (tool) {
             "open_settings" -> {
                 val (label, action, _) = SETTINGS_PAGES[args.getValue("page")] ?: return null
+                // 部分 ROM 的电池页由厂商省电应用提供（不是 com.android.settings），只要 intent 成功就算跳过去了
                 Invocation(
                     tool, args, "ACTION_LAUNCH_APP", mapOf("intent_action" to action),
-                    "直接打开「$label」设置页", "launch_success", expectPackage = "settings",
+                    "直接打开「$label」设置页", "launch_success",
+                    expectPackage = if (args["page"] == "battery") null else "settings",
                 )
             }
             "open_app" -> {
@@ -168,6 +170,10 @@ object DeviceTools {
                 resolve("open_settings", mapOf("page" to key), goal, apps)?.let(out::add)
             }
         }
+        // 提问类目标：直接给读数工具，不用去界面里翻（"电量多少""安卓版本号"）
+        READ_HINTS.forEach { (tool, words) ->
+            if (words.any { goal.lowercase().contains(it) }) resolve(tool, emptyMap(), goal, apps)?.let(out::add)
+        }
         for (tool in available(goal).filter { it.gate.isNotEmpty() }) {
             when (tool.id) {
                 "set_brightness" -> LEVELS.filter { it == "max" || it == "min" || it == "mid" }
@@ -208,4 +214,11 @@ object DeviceTools {
     }
 
     private const val MAX_SHORTCUTS = 6
+
+    private val READ_HINTS = mapOf(
+        "read_battery" to listOf("电量", "多少电", "充电"),
+        "read_time" to listOf("几点", "时间", "日期", "星期"),
+        "read_device_info" to listOf("型号", "安卓版本", "android 版本", "系统版本", "版本号", "品牌"),
+        "read_network" to listOf("网络", "联网", "连着"),
+    )
 }

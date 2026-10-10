@@ -68,6 +68,9 @@ object Catalogs {
         allowGoalUnlock: Boolean = true,
         step: StepContext? = null,
         stepText: String? = null,
+        failedTools: Set<String> = emptySet(),
+        /** 已经读到的事实（变量名）：对应的读数工具不再提供，值已经在 task.facts 里。 */
+        knownFacts: Set<String> = emptySet(),
     ): ActionCatalog {
         val actions = mutableListOf<CatalogAction>()
         val operations = linkedMapOf<String, String>()
@@ -231,6 +234,8 @@ object Catalogs {
         // 设备工具快捷方式：跳到设置某页、被目标点名的开关/亮度/音量。界面里要翻好几屏的事一步做完。
         if (guard == null) {
             val shortcuts = DeviceTools.shortcuts(goal, step?.instruction.orEmpty(), apps)
+                .filter { "${it.tool}|${it.args}" !in failedTools }
+                .filter { inv -> inv.outputs.isEmpty() || inv.outputs.none { it in knownFacts } }
             if (shortcuts.isNotEmpty()) {
                 operations["USE_TOOL"] = "直接调用设备功能（跳到设置某一页、开关蓝牙/WLAN、调亮度音量），不用在界面里翻找。能用就优先用。"
                 shortcuts.forEachIndexed { i, inv ->
@@ -246,6 +251,7 @@ object Catalogs {
                             params = inv.params,
                             successFlag = inv.successFlag,
                             outputs = inv.outputs,
+                            toolKey = "${inv.tool}|${inv.args}",
                         ),
                     )
                 }
@@ -256,11 +262,16 @@ object Catalogs {
         if (guard == null) {
             observation.elements.filter { it.rangeFraction != null && it.bounds != null && it.enabled }.take(MAX_SLIDERS).forEach { el ->
                 val name = el.text.ifBlank { "滑块" }.take(TEXT_PREVIEW)
-                listOf("max" to "拉到最大", "min" to "拉到最小", "mid" to "拉到中间").forEach { (pos, verb) ->
-                    val key = "${el.index}:$pos"
-                    sliderTargets[key] = "$name（当前 ${(el.rangeFraction!! * 100).toInt()}%）$verb"
-                    actions.add(sliderAction(el, pos, key, "「$name」$verb"))
-                }
+                val fraction = el.rangeFraction!!
+                val percent = (fraction * 100).toInt()
+                listOf("max" to "拉到最大", "min" to "拉到最小", "mid" to "拉到中间")
+                    // 已经在最大/最小就不再提供同方向的拖动：真机上模型对着 100% 的亮度条反复"拉到最大"直到被判兜圈
+                    .filterNot { (pos, _) -> (pos == "max" && fraction >= 0.98) || (pos == "min" && fraction <= 0.02) }
+                    .forEach { (pos, verb) ->
+                        val key = "${el.index}:$pos"
+                        sliderTargets[key] = "$name（当前 $percent%）$verb"
+                        actions.add(sliderAction(el, pos, key, "「$name」$verb"))
+                    }
             }
             if (sliderTargets.isNotEmpty()) {
                 operations["SET_SLIDER"] = "把滑块（亮度条、音量条、进度条）拖到最大/最小/中间。"
@@ -299,7 +310,11 @@ object Catalogs {
     fun stateOf(el: ScreenElement): String = buildString {
         if (el.checkable) append(if (el.checked == true) "[已开启]" else "[已关闭]")
         if (!el.enabled) append("[不可用]")
-        el.rangeFraction?.let { append("[当前${(it * 100).toInt()}%]") }
+        el.rangeFraction?.let {
+            append("[当前${(it * 100).toInt()}%")
+            if (it >= 0.98) append("，已是最大") else if (it <= 0.02) append("，已是最小")
+            append("]")
+        }
     }
 
     /**
@@ -315,6 +330,10 @@ object Catalogs {
         if (observation.packageName == SELF_PACKAGE) return emptyList()
         return observation.elements
             .filter { (it.clickable || it.selectable || it.editable) && it.text.isNotBlank() }
+            // 状态栏/灵动岛（vivo 的「电话,8分钟18秒」胶囊）属于系统窗口，点了会跳去别的应用，不是页面控件
+            .filter { !it.system }
+            // 已经有焦点的输入框再点也不会变（真机上模型反复点搜索框直到被判兜圈），该做的是 TYPE_TEXT
+            .filter { !(it.editable && it.focused) }
             .filter { allowedTap(goal, it.text, allowGoalUnlock) }
             // 先按"控件可信度"分层，再在层内按屏幕从上到下（模型看屏幕的习惯顺序）
             .sortedWith(compareBy({ tierOf(it) }, { it.centerY }, { it.centerX }))
@@ -350,10 +369,18 @@ object Catalogs {
         }
     }
 
-    /** 给模型看的候选条目：`文字 ⟪id/title⟫`。viewId 让模型能区分同名控件。 */
+    /**
+     * 给模型看的候选条目：`文字（类型）[状态] ⟪id/title⟫`。
+     * 类型必须带上：真机上搜索框里残留着「关于手机」，不带类型时模型把输入框当成「关于手机」入口反复点。
+     * 输入框写成「输入框，当前内容：…」，与同名的列表行区分开。
+     */
     fun describeTarget(el: ScreenElement, type: String): String {
         val id = shortViewId(el.viewId)
-        val base = el.text + stateOf(el)
+        val base = if (el.editable) {
+            "输入框" + (if (el.text.isBlank()) "（空）" else "，当前内容：${el.text}")
+        } else {
+            "${el.text}（$type）"
+        } + stateOf(el)
         return if (id.isEmpty()) base else "$base ⟪$id⟫"
     }
 

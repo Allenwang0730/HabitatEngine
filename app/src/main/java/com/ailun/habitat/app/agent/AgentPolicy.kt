@@ -66,7 +66,8 @@ object MobilePriors {
         "输入完要提交或搜索，选 PRESS_ENTER，然后等屏幕响应。",
         "有 USE_TOOL 候选能直接做到（跳到某个设置页、开关蓝牙/WLAN、调亮度音量）时优先用它，比在界面里一层层找快且稳。",
         "开关后面标了[已开启]/[已关闭]：已经是要求的状态就不要再点（再点会反过来），直接选 DONE 或做下一件事。",
-        "滑块（亮度条、音量条）用 SET_SLIDER 拖到头，不要点它。",
+        "滑块（亮度条、音量条）用 SET_SLIDER 拖到头，不要点它。标了「已是最大/已是最小」就说明已经到位，选 DONE。",
+        "task.facts 里已经有回答目标所需的值（电量、版本、时间…）时，直接选 DONE，不要再去读一次。",
         "有 task 时只做 task 里的当前一步：done_when 在屏幕上成立就选 DONE；不要提前去做后面的步骤，也不要重复已完成的步骤。",
         "nav.tried 里标了「进去过，已退回」「无变化」「失败」的入口不要再点；nav.atBottom=true 表示这一页已经滚到底，不要再 SCROLL_DOWN。",
         "nav.path 是当前位置；要回上一层用 BACK（会回到 nav.parent），不要用 HOME 从头再找。",
@@ -146,8 +147,13 @@ object MobilePriors {
     private val CLOCK = Regex("^\\d{1,2}:\\d{2}.*")
 
     /** `com.android.settings.Settings$BluetoothSettingsActivity` → `BluetoothSettingsActivity`。 */
-    fun shortActivity(activity: String?): String? =
-        activity?.substringAfterLast('.')?.substringAfterLast('$')?.takeIf { it.isNotBlank() }
+    fun shortActivity(activity: String?): String? {
+        val name = activity?.substringAfterLast('.')?.substringAfterLast('$')?.takeIf { it.isNotBlank() } ?: return null
+        // 无障碍事件的 className 常常是根 View（FrameLayout/LinearLayout…）而不是 Activity，不能当页面身份
+        return name.takeUnless { VIEW_CLASS.matches(it) }
+    }
+
+    private val VIEW_CLASS = Regex("^(Frame|Linear|Relative|Constraint|Coordinator|Drawer)Layout$|^(View|ViewGroup|Dialog|PopupWindow|RecyclerView|ListView|ScrollView|WebView|TextView|Toast)$")
 
     /** 元素摘要，供 prompt 与 state 复用。 */
     fun elementBrief(el: ScreenElement): Map<String, Any?> = buildMap {
@@ -217,10 +223,16 @@ fun decisionFromChoice(
     if (operation == "BLOCKED") {
         return Decision("blocked", "BLOCKED", action = catalog.resolve("BLOCKED", null), confidence = confidence, detail = detail)
     }
-    val action = catalog.resolve(operation, target)
+    // TYPE_TEXT 只有一个原文候选时，target 编号不重要：模型常把输入框的元素序号当成原文序号
+    val effectiveTarget = if (operation == "TYPE_TEXT" && catalog.textValues.size == 1 && target !in catalog.textValues) {
+        catalog.textValues.keys.first()
+    } else {
+        target
+    }
+    val action = catalog.resolve(operation, effectiveTarget)
         ?: return Decision("error", operation, target, confidence = confidence, detail = "候选里没有 $operation/$target")
     val status = if (operation == "WAIT") "wait" else "action"
-    return Decision(status, operation, target, action, confidence, detail)
+    return Decision(status, operation, effectiveTarget, action, confidence, detail)
 }
 
 fun actionDecision(action: CatalogAction, detail: String) = Decision(

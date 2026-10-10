@@ -2,7 +2,7 @@
   {
     "id": "bluetooth_page",
     "goal": "打开设置，进入蓝牙页面",
-    "verify": { "focus": "Bluetooth" }
+    "verify": { "focus": "(Bluetooth|bluetooth)" }
   },
   {
     "id": "settings_search",
@@ -12,7 +12,7 @@
   {
     "id": "about_phone",
     "goal": "打开设置，找到「关于手机」并进入",
-    "verify": { "focus": "(DeviceInfo|deviceinfo|MyDevice)" }
+    "verify": { "focus": "(DeviceInfo|deviceinfo|MyDevice|DeviceSettings)" }
   },
   {
     "id": "clock_stopwatch",

@@ -28,6 +28,8 @@ data class ScreenElement(
     val enabled: Boolean = true,
     /** 滑块/进度条：当前值在 [min,max] 中的位置，0~1；不是滑块为 null。 */
     val rangeFraction: Double? = null,
+    /** 来自非活动的系统窗口（状态栏、灵动岛、导航栏）。 */
+    val system: Boolean = false,
 )
 
 data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom: Int) {
@@ -117,6 +119,8 @@ data class CatalogAction(
     val successFlag: String? = null,
     /** 执行后要记成"已知事实"的输出变量（读电量、读时间这类查询工具）。 */
     val outputs: List<String> = emptyList(),
+    /** 设备工具的身份（tool|args），用于记"本次失败过的工具"。 */
+    val toolKey: String? = null,
 )
 
 data class ActionCatalog(
@@ -204,6 +208,8 @@ data class Decision(
     val detail: String = "",
     /** 执行器对"当前步骤已完成"的概率（Jev 的 step_status 题）；没问为 null。 */
     val stepDone: Double? = null,
+    /** 决策器本身不可用（key 无效、地区被拒）：重规划也没用，整个任务立即结束。 */
+    val fatal: Boolean = false,
 )
 
 data class StepNote(

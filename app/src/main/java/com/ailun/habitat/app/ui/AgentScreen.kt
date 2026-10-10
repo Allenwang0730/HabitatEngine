@@ -80,6 +80,7 @@ import com.ailun.habitat.app.HabitatTextStyles
 import com.ailun.habitat.app.HabitatTheme
 import com.ailun.habitat.app.Spacing
 import com.ailun.habitat.app.agent.AgentLoopController
+import com.ailun.habitat.app.agent.JevDecisionProvider
 import com.ailun.habitat.app.ai.WorkflowAIClient
 import com.ailun.habitat.app.tabular
 import com.ailun.habitat.app.ui.components.ConfirmDialog
@@ -128,6 +129,7 @@ fun AgentScreen() {
     var goal by rememberSaveable { mutableStateOf("") }
     var jevKey by remember { mutableStateOf(AgentLoopController.getJevKey(context)) }
     var jevModel by remember { mutableStateOf(AgentLoopController.getJevModel(context)) }
+    var jevProxy by remember { mutableStateOf(AgentLoopController.getJevProxy(context)) }
     var deepseekKey by remember { mutableStateOf(WorkflowAIClient.getApiKey(context).orEmpty()) }
     var steps by rememberSaveable { mutableFloatStateOf(AgentLoopController.DEFAULT_STEPS.toFloat()) }
     var plannerEnabled by remember { mutableStateOf(AgentLoopController.isPlannerEnabled(context)) }
@@ -168,6 +170,7 @@ fun AgentScreen() {
             AgentLoopController.PROVIDER_JEV -> {
                 AgentLoopController.setJevKey(context, jevKey)
                 AgentLoopController.setJevModel(context, jevModel)
+                AgentLoopController.setJevProxy(context, jevProxy)
             }
             AgentLoopController.PROVIDER_DEEPSEEK -> WorkflowAIClient.setApiKey(context, deepseekKey)
         }
@@ -389,6 +392,19 @@ fun AgentScreen() {
                                 value = jevModel, onValueChange = { jevModel = it },
                                 label = { Text("Jev 模型") }, singleLine = true,
                                 textStyle = HabitatTextStyles.code, modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                value = jevProxy, onValueChange = { jevProxy = it },
+                                label = { Text("Jev 代理（可空）") },
+                                placeholder = { Text("127.0.0.1:7897") },
+                                supportingText = {
+                                    Text(
+                                        if (jevProxy.isNotBlank() && JevDecisionProvider.parseProxy(jevProxy) == null) "格式应为 主机:端口"
+                                        else "国内网络直连 Jev 会被拒（451）时填。手机开了 VPN 就留空",
+                                    )
+                                },
+                                isError = jevProxy.isNotBlank() && JevDecisionProvider.parseProxy(jevProxy) == null,
+                                singleLine = true, textStyle = HabitatTextStyles.code, modifier = Modifier.fillMaxWidth(),
                             )
                         }
                         AgentLoopController.PROVIDER_DEEPSEEK ->

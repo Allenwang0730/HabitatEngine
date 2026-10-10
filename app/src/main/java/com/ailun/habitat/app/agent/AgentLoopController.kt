@@ -78,6 +78,16 @@ object AgentLoopController {
         return DeepSeekPlanner(key, WorkflowAIClient.getBaseUrl(context))
     }
 
+    /** Jev 请求的 HTTP 代理（host:port），只存本机，不能远程设置。 */
+    fun getJevProxy(context: Context): String =
+        context.getSharedPreferences(PREFS, 0).getString("jev_proxy", "") ?: ""
+
+    fun setJevProxy(context: Context, proxy: String) {
+        val value = proxy.trim()
+        val ok = value.isEmpty() || JevDecisionProvider.parseProxy(value) != null
+        if (ok) context.getSharedPreferences(PREFS, 0).edit().putString("jev_proxy", value).apply()
+    }
+
     const val DEFAULT_STEPS = 20
     const val MAX_STEPS = 40
 
@@ -117,7 +127,7 @@ object AgentLoopController {
             PROVIDER_JEV -> {
                 val key = getJevKey(context)
                 if (key.isBlank()) return "未配置 Jev API key"
-                JevDecisionProvider(key, getJevModel(context))
+                JevDecisionProvider(key, getJevModel(context), getJevProxy(context).ifBlank { null })
             }
             PROVIDER_DEEPSEEK -> {
                 val key = WorkflowAIClient.getApiKey(context)

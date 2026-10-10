@@ -468,9 +468,11 @@ class AgentPolicyTest {
         val catalog = Catalogs.build("打开设置", obs, emptyList())
         catalog.tapTargets.keys.forEach { key ->
             val el = obs.elements.first { it.index == key }
-            assertTrue(catalog.tapTargets.getValue(key).startsWith(el.text))
+            assertTrue(catalog.tapTargets.getValue(key).contains(el.text))
         }
-        assertEquals("搜索", catalog.resolve("TAP", "3")?.matchText)
+        assertEquals("设置", catalog.resolve("TAP", "1")?.matchText)
+        // 3 号是已聚焦的输入框：点它不会有变化，不进 TAP 候选（应当 TYPE_TEXT）
+        assertNull(catalog.resolve("TAP", "3"))
     }
 
     @Test

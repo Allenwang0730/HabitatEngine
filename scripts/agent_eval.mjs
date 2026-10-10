@@ -5,6 +5,7 @@
 //   node scripts/agent_eval.mjs                                  # 默认：jev + deepseek，各自 有/无 规划，每项 1 次
 //   node scripts/agent_eval.mjs --providers jev --planner on --repeat 2
 //   node scripts/agent_eval.mjs --only about_phone,clock_stopwatch
+//   JEV_PROXY_PORT=7897 node scripts/agent_eval.mjs   # 手机经 PC 代理访问 Jev：每个任务前恢复 adb reverse
 // 结果写到 selftest_results/agent_eval_<时间>.json（目录已在 .gitignore）。
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -34,12 +35,36 @@ if (!TOKEN) {
 
 const tasks = JSON.parse(readFileSync(join(here, 'agent_eval_tasks.json'), 'utf8')).filter((t) => !only || only.has(t.id));
 
-const sh = (cmd) => {
-  try {
-    return execFileSync(ADB, ['shell', cmd], { encoding: 'utf8', timeout: 20000 }).trim();
-  } catch (e) {
-    return '';
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const adb = (args) => execFileSync(ADB, args, { encoding: 'utf8', timeout: 20000 }).trim();
+
+// USB 数据线会掉线（真机实测一次评测里掉好几次）：命令失败就等设备回来再重试，不把"读不到"当成验证失败
+function waitDevice() {
+  for (let i = 0; i < 40; i++) {
+    try {
+      if (/\tdevice$/m.test(adb(['devices']))) return true;
+      adb(['reconnect', 'offline']);
+    } catch {}
+    sleepSync(3000);
   }
+  return false;
+}
+// 手机经 PC 代理访问 Jev 时（Agent 页「Jev 代理」填 127.0.0.1:端口），重连后 adb reverse 也要恢复
+const PROXY_PORT = process.env.JEV_PROXY_PORT;
+function restoreTunnels() {
+  try { adb(['forward', 'tcp:8931', 'tcp:8931']); } catch {}
+  if (PROXY_PORT) try { adb(['reverse', `tcp:${PROXY_PORT}`, `tcp:${PROXY_PORT}`]); } catch {}
+}
+const sh = (cmd) => {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return adb(['shell', cmd]);
+    } catch {
+      if (!waitDevice()) break;
+      restoreTunnels();
+    }
+  }
+  return '';
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -52,6 +77,7 @@ function connect() {
     ws = new WebSocket(`${URL_BASE}?token=${encodeURIComponent(TOKEN)}`);
     ws.onopen = resolve;
     ws.onerror = () => reject(new Error('MCP 连接失败（服务没起？adb forward？令牌？）'));
+    ws.onclose = () => { ws = null; };
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.id && pending.has(msg.id)) {
@@ -61,10 +87,24 @@ function connect() {
     };
   });
 }
-function rpc(method, params) {
-  const id = nextId++;
-  ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
-  return new Promise((resolve) => pending.set(id, resolve));
+async function rpc(method, params) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      waitDevice();
+      restoreTunnels();
+      try { await connect(); } catch { await sleep(3000); continue; }
+    }
+    const id = nextId++;
+    const reply = new Promise((resolve) => pending.set(id, resolve));
+    ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 30000));
+    const res = await Promise.race([reply, timeout]);
+    if (res) return res;
+    pending.delete(id);
+    try { ws.close(); } catch {}
+    ws = null;
+  }
+  return { result: { isError: true, content: [{ text: '{"error":"MCP 无响应"}' }] } };
 }
 async function call(name, args = {}) {
   const res = await rpc('tools/call', { name, arguments: args });
@@ -79,8 +119,12 @@ async function call(name, args = {}) {
 }
 
 function focus() {
-  const m = sh('dumpsys window | grep mCurrentFocus').match(/u0 (\S+)\}/);
-  return m ? m[1] : '';
+  for (let i = 0; i < 3; i++) {
+    const m = sh('dumpsys window | grep mCurrentFocus').match(/u0 ([^\s}]+)/);
+    if (m) return m[1];
+    sleepSync(1000);
+  }
+  return '';
 }
 
 async function screenText() {
@@ -113,6 +157,7 @@ async function verify(task, status) {
 }
 
 async function runOne(task, provider, planner) {
+  restoreTunnels();
   const saved = {};
   for (const [k, cmd] of Object.entries(task.save || {})) saved[k] = sh(cmd);
   sh('input keyevent HOME');
@@ -129,7 +174,13 @@ async function runOne(task, provider, planner) {
   }
   if (status.running) await call('agent_stop');
   const seconds = Math.round((Date.now() - started) / 1000);
-  const reasons = await verify(task, status);
+  // 结束那一刻界面可能还在转场：等稳定再验，失败再验一次，避免把"刚好在切换"误判成失败
+  await sleep(1500);
+  let reasons = await verify(task, status);
+  if (reasons.length) {
+    await sleep(2000);
+    reasons = await verify(task, status);
+  }
   for (const cmd of task.restore || []) sh(cmd.replace(/\{(\w+)\}/g, (_, k) => saved[k] ?? ''));
   const lines = String(status.log || '').split('\n');
   return {
@@ -143,7 +194,7 @@ async function runOne(task, provider, planner) {
   };
 }
 
-await connect();
+// 首次连接也走重试：USB 可能刚好掉线
 await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'habitat-eval', version: '1' } });
 const results = [];
 for (const provider of providers) {

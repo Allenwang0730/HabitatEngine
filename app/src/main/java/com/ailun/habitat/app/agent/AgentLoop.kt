@@ -50,12 +50,21 @@ object LoopPolicy {
         return "${action.operation}|$anchor|${observation.packageName}"
     }
 
-    /** 屏幕是否"看起来没变"。文字、前台包、控件数、焦点都算，单看文字会漏判。 */
+    /**
+     * 屏幕是否"看起来没变"。文字、前台包、控件数、焦点、控件状态都算。
+     * 控件状态必须算：真机上拖亮度条、拨开关时文字一个字都不变，旧判定把"已经成功"当成"没变化"，
+     * 于是反复拖、被判兜圈、最后报"达到步数上限"——亮度其实早就到最高了。
+     */
     fun sameScreen(a: ScreenObservation, b: ScreenObservation): Boolean =
         a.visibleText == b.visibleText &&
             a.packageName == b.packageName &&
             a.elements.size == b.elements.size &&
-            a.focusedIndex == b.focusedIndex
+            a.focusedIndex == b.focusedIndex &&
+            controlState(a) == controlState(b)
+
+    private fun controlState(o: ScreenObservation): List<String> =
+        o.elements.filter { it.checkable || it.rangeFraction != null }
+            .map { "${it.checked}|${it.rangeFraction?.let { f -> (f * 100).toInt() }}" }
 
     /**
      * 最近 [window] 步里同一签名出现的次数（不要求连续）。
@@ -117,12 +126,17 @@ object LoopPolicy {
         goal: String,
         history: List<StepNote>,
     ): CatalogAction? {
+        // 滑块失败不换档；工具失败可以换别的工具（「设为最高」失败→「打开显示设置页」），
+        // 但不能换同一工具的另一档（「设为最高」失败改成「设为中等」等于偷换目标）
+        if (failed.operation == "SET_SLIDER") return null
+        val failedTool = failed.toolKey?.substringBefore('|')
         val tried = history.map { it.actionId }.toSet() + failed.id
         // 已经在本屏失败过的锚点不再试（同一 viewId/文字再点一次结果一样）
         val failedAnchors = history.filter { it.changed == false }
             .map { it.signature.substringAfter('|').substringBeforeLast('|') }
             .toSet()
         return catalog.candidatesFor(failed.operation, goal, exclude = tried)
+            .filter { failedTool == null || it.toolKey?.substringBefore('|') != failedTool }
             .firstOrNull { candidate ->
                 val anchor = candidate.viewId.ifEmpty { candidate.matchText ?: candidate.target.orEmpty() }
                 anchor !in failedAnchors
@@ -220,6 +234,8 @@ class AgentLoop(
         var used = 0
         var seq = 0
         var replans = 0
+        /** 本次任务里执行失败过的工具调用（权限不足等），重规划后不再尝试。 */
+        val failedTools = mutableSetOf<String>()
     }
 
     private data class StepOutcome(val status: String, val detail: String)
@@ -303,7 +319,7 @@ class AgentLoop(
 
     private fun replanContext(run: Run, failedStep: String, reason: String) = ReplanContext(
         failedStep = failedStep,
-        reason = reason,
+        reason = if (run.failedTools.isEmpty()) reason else "$reason；本次已失败、不要再用的工具：${run.failedTools.joinToString()}",
         completed = run.completed.toList(),
         path = run.nav.snapshot().path,
         explored = run.nav.explored(),
@@ -350,6 +366,11 @@ class AgentLoop(
     ): StepOutcome {
         val inv = DeviceTools.resolve(step.tool!!, step.args, run.goal, run.apps)
             ?: return runUiStep(run, step, index, total, budget, onStep)
+        val toolKey = "${inv.tool}|${inv.args}"
+        if (toolKey in run.failedTools) {
+            onStep("工具「${inv.label}」本次已失败过，直接在界面上完成这一步")
+            return runUiStep(run, step, index, total, budget, onStep)
+        }
         onStep("工具：${inv.label}")
         val before = run.observation
         val result = runNode(inv.node, inv.params, inv.successFlag, inv.outputs)
@@ -369,6 +390,7 @@ class AgentLoop(
             if (result.outputs.isNotEmpty()) onStep("读到：" + result.outputs.entries.joinToString("，") { "${it.key}=${it.value}" })
             return StepOutcome("done", inv.label)
         }
+        run.failedTools += toolKey
         onStep("工具没起作用（${if (!result.ok) result.detail else "前台不是预期页面"}），改为在界面上完成这一步")
         return runUiStep(run, step, index, total, budget, onStep)
     }
@@ -399,11 +421,12 @@ class AgentLoop(
             // 判重/兜圈只看本步；死路名单看整个任务（重规划后也不再进已证明走不通的入口）
             val stepHistory = run.history.filter { it.planStep == run.seq }
             val ctx = stepContext(run, step, index, total)
-            val catalog = Catalogs.build(run.goal, observation, run.apps, allowGoalUnlock, ctx, step.text)
+            val catalog = Catalogs.build(run.goal, observation, run.apps, allowGoalUnlock, ctx, step.text, run.failedTools, run.facts.keys)
                 .without(LoopPolicy.deadEnds(run.history)) { LoopPolicy.signatureOf(it, observation) }
             onStep("读屏 ${ctx.nav?.path ?: observation.packageName} / ${observation.source} / ${observation.elements.size} 个控件（已用 ${run.used} 步，剩 ${maxSteps - run.used} 步）")
             catalog.guard?.let { onStep("限制：$it") }
             val decision = provider.decide(run.goal, observation, catalog, run.history, ctx)
+            if (decision.fatal) return StepOutcome("fatal", decision.detail)
 
             // 执行器在同一次请求里判断"这一步已经完成"，概率够高就直接推进（只在多步计划里用，最终还有复核兜底）
             val stepDone = decision.stepDone
@@ -499,6 +522,8 @@ class AgentLoop(
             onStep(action.label)
             var result = runNode(action.tool ?: return StepOutcome("error", "动作缺少节点"), action.params, action.successFlag, action.outputs)
             run.used++
+            // 执行器选的工具快捷方式失败（多半是缺权限）：本次任务不再提供它
+            if (!result.ok && action.operation == "USE_TOOL") action.toolKey?.let { run.failedTools += it }
             var executed = action
             if (!result.ok) {
                 onStep("${action.tool} 失败: ${result.detail}")
@@ -516,7 +541,8 @@ class AgentLoop(
             run.facts.putAll(result.outputs)
             delay(700)
             val after = ScreenObserver.observe(context)
-            val changed = !LoopPolicy.sameScreen(after, observation)
+            // 读数工具不改屏幕：读到了值就是进展，不能算"无变化"（否则会被反复调用直到判兜圈）
+            val changed = !LoopPolicy.sameScreen(after, observation) || (result.ok && result.outputs.isNotEmpty())
             record(run, executed, observation, after, changed, result.ok, if (result.ok) "" else result.detail)
             if (!result.ok) return StepOutcome("error", "「${executed.label}」失败: ${result.detail}")
             noChange = if (changed) 0 else noChange + 1

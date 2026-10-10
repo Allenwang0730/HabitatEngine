@@ -47,7 +47,10 @@ class LocalDecisionProvider : DecisionProvider {
 class JevDecisionProvider(
     private val apiKey: String,
     private val model: String = "jev-latest",
+    /** 可选 HTTP 代理 host:port（国内网络直连返回 451）。只用于 Jev 请求。 */
+    private val proxy: String? = null,
 ) : DecisionProvider {
+    private val http: OkHttpClient by lazy { clientFor(proxy) }
     override val id: String = "jev"
 
     override suspend fun decide(
@@ -58,7 +61,7 @@ class JevDecisionProvider(
         step: StepContext?,
     ): Decision {
         if (apiKey.isBlank() || apiKey.any { it == '\r' || it == '\n' }) {
-            return Decision("error", "", detail = "未配置 Jev API key")
+            return Decision("error", "", detail = "未配置 Jev API key", fatal = true)
         }
         val request = Request.Builder()
             .url(ENDPOINT)
@@ -67,7 +70,7 @@ class JevDecisionProvider(
             .build()
         val text = when (val r = postWithRetry(request)) {
             is HttpResult.Ok -> r.body
-            is HttpResult.Fail -> return Decision("error", "", detail = r.message)
+            is HttpResult.Fail -> return Decision("error", "", detail = r.message, fatal = r.fatal)
         }
         val decision = parseJevAnswer(text, catalog)
         return if (step != null && step.multiStep) decision.copy(stepDone = parseStepDone(text)) else decision
@@ -144,7 +147,8 @@ class JevDecisionProvider(
 
     private sealed interface HttpResult {
         data class Ok(val body: String) : HttpResult
-        data class Fail(val message: String) : HttpResult
+        /** fatal：换步骤/重规划也不会好（key 无效、地区被拒），整个任务应立即结束。 */
+        data class Fail(val message: String, val fatal: Boolean = false) : HttpResult
     }
 
     /** 429/5xx/网络错误重试一次（尊重 Retry-After，最多等 5 秒）；401/4xx 不重试。 */
@@ -153,12 +157,15 @@ class JevDecisionProvider(
         for (attempt in 0..1) {
             var waitMs = 1_000L
             try {
-                client.newCall(request).await().use { resp ->
+                http.newCall(request).await().use { resp ->
                     when {
                         resp.isSuccessful -> return HttpResult.Ok(resp.body?.string().orEmpty())
-                        resp.code == 401 || resp.code == 403 -> return HttpResult.Fail("Jev API key 无效")
+                        resp.code == 401 || resp.code == 403 -> return HttpResult.Fail("Jev API key 无效", fatal = true)
                         // 451：服务端按地区拒绝（真机实测国内网络必现），换 key 没用，只能换网络或换决策器
-                        resp.code == 451 -> return HttpResult.Fail("Jev 服务拒绝当前地区访问（HTTP 451），请换网络或改用 DeepSeek")
+                        resp.code == 451 -> return HttpResult.Fail(
+                            "Jev 服务拒绝当前地区访问（HTTP 451）：请给手机开代理/VPN，或在 Agent 页填 Jev 代理，或改用 DeepSeek",
+                            fatal = true,
+                        )
                         resp.code == 429 || resp.code >= 500 -> {
                             last = HttpResult.Fail("Jev HTTP ${resp.code}")
                             resp.header("Retry-After")?.toLongOrNull()?.let { waitMs = (it * 1000).coerceIn(0, 5_000) }
@@ -180,10 +187,25 @@ class JevDecisionProvider(
         const val ENDPOINT = "https://api.typesafe.ai/v1/systemone"
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private val gson = Gson()
-        private val client = OkHttpClient.Builder()
+        private val base = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(45, TimeUnit.SECONDS)
             .build()
+
+        /** host:port → 走 HTTP 代理（HTTPS 经 CONNECT 隧道，代理看不到内容）；空或格式不对就直连。 */
+        fun clientFor(proxy: String?): OkHttpClient {
+            val (host, port) = parseProxy(proxy) ?: return base
+            return base.newBuilder().proxy(java.net.Proxy(java.net.Proxy.Type.HTTP, java.net.InetSocketAddress(host, port))).build()
+        }
+
+        fun parseProxy(proxy: String?): Pair<String, Int>? {
+            val text = proxy?.trim()?.removePrefix("http://")?.trimEnd('/').orEmpty()
+            if (text.isEmpty()) return null
+            val host = text.substringBeforeLast(':', "")
+            val port = text.substringAfterLast(':', "").toIntOrNull() ?: return null
+            if (host.isEmpty() || port !in 1..65535 || host.any { it.isWhitespace() || it == '/' || it == '@' }) return null
+            return host to port
+        }
     }
 }
 
@@ -264,7 +286,7 @@ class DeepSeekDecisionProvider(
         history: List<StepNote>,
         step: StepContext?,
     ): Decision {
-        if (apiKey.isBlank()) return Decision("error", "", detail = "未配置 DeepSeek API key")
+        if (apiKey.isBlank()) return Decision("error", "", detail = "未配置 DeepSeek API key", fatal = true)
         val prompt = buildString {
             appendLine("目标: $goal")
             step?.let { MobilePriors.taskLines(it).forEach(::appendLine) }
