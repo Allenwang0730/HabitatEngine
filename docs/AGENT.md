@@ -57,7 +57,7 @@ $env:AGENT_TOKEN = "<Agent 页复制的令牌>"
 
 ## 实测验证（2026-08-22）
 
-- WiFi 无线连接手机 `<ææº IP>:8931` ✅
+- WiFi 无线连接手机 `<手机局域网 IP>:8931` ✅（当时为局域网直连；现默认只监听 127.0.0.1，需在 Agent 页打开局域网访问）
 - `screen` 返回 Habitat 主界面文本 + 前台应用 ✅
 - `ACTION_LAUNCH_APP` 打开系统设置（`launch_success=True`），再 `screen` 确认设置页 ✅
 - 完整 Agent 循环：观察 → 操作 → 验证 ✅
@@ -102,6 +102,16 @@ node scripts/agent_eval.mjs --providers jev --planner on --repeat 3
 ```
 
 任务在 `scripts/agent_eval_tasks.json`；结果用 adb / 读屏**独立验证**（不相信 agent 的 DONE），跑完恢复亮度等设备状态，明细写到 `selftest_results/`。
+`node scripts/agent_eval_show.mjs [--fail]` 查看每次运行的完整步骤日志。手机经电脑代理访问 Jev 时加 `JEV_PROXY_PORT=<端口>`，脚本会在 adb 重连后恢复 `adb reverse`。
+
+1.9.0 真机结果（vivo / Android 16，每项 2 次）：
+
+| 执行器 | 有规划 | 无规划 |
+|---|:---:|:---:|
+| Jev | 14/14 | 6–7/14 |
+| DeepSeek | 14/14 | 8–10/14 |
+
+无规划时的失败集中在提问类（没有复核环节读答案）和需要找入口的多步任务；有规划时这些都由设备工具一步完成。
 
 ### 安全闸（ActionCatalog）
 

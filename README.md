@@ -273,7 +273,7 @@ The editor renders workflows as interactive directed acyclic graphs on a custom 
 | Layout | Sugiyama-style layered auto-layout |
 | Node colors | Color-coded by category (interaction / system / data / logic / network / sensor) |
 | Edge types | Gray solid (`next`), green (`true` branch), red (`false` branch), orange dashed (loop) |
-| Gestures | One-finger pan, two-finger pinch-zoom (0.3×–3.0×), double-tap reset, tap to select |
+| Gestures | One-finger pan, two-finger pinch-zoom, double-tap reset, tap a node for details |
 | Toggle | Switch between raw JSON editor and DAG visualizer |
 
 Node-level `label` and `description` fields control DAG display labels (optional, fully backward-compatible).
@@ -304,22 +304,51 @@ WorkflowAIGenerator.generate(context, "call 10086 and record")  // → Generated
 
 ## MCP Mobile Agent (AI controls the phone)
 
-The engine exposes an **MCP server** (JSON-RPC 2.0, 85 tools):
+The engine exposes an **MCP server** (JSON-RPC 2.0):
 
-```
-ws://<host>:8931/mcp?token=<token>   # token auth (default habitat-dev-token, change in control page, same LAN)
+```bash
+adb forward tcp:8931 tcp:8931          # the server listens on the phone's 127.0.0.1 by default
+ws://127.0.0.1:8931/mcp                # Authorization: Bearer <token> (or ?token=)
 ```
 
 - `initialize / tools/list / tools/call` standard MCP, any LLM client can connect
+- **Auth**: a random token is generated per install (view / copy / regenerate on the App's Agent page); LAN access is off by default; dangerous nodes (shell, files, SMS, calls, …) are refused for remote callers unless explicitly enabled
 - supports `region`/`occurrence` to precisely target repeated text (e.g. "tap the confirm button at the bottom")
-- App **Agent control page**: service switch / status / LAN IP / port / token
-- **Autonomous mode**: read screen → decide (Jev / DeepSeek / local) → run a node → loop. The model only picks a candidate; execution stays on Habitat nodes. MCP tools: `agent_start` / `agent_stop` / `agent_status`
 - WeChat reading: enable “Habitat 微信读屏” (`SelectToSpeakService`). If the tree is empty, ML Kit Chinese OCR runs on device
-- PC side `scripts/agent_daemon.mjs` (persistent long-connection, read-screen 3.9s→277ms) / `mcp_call.mjs`
+- PC side `scripts/agent_daemon.mjs` (persistent connection) / `mcp_call.mjs` (one-off calls, `--full` for untruncated fields)
+
+### Autonomous mode: planner (DeepSeek) + executor (Jev) + code control
+
+```
+goal ─► DeepSeek plans: a few steps, each with a completion condition visible on screen; uses device tools when possible
+          ▼
+   each step: tool step calls the device directly / UI step lets the executor (Jev / DeepSeek / local) pick one candidate per screen
+          │  stuck (looping / no change / low confidence) → replan the rest from the current screen (≤2 times)
+          ▼
+   DeepSeek review: checks on-screen evidence that the goal is really done; answers question-style goals
+```
+
+- **Models choose, code controls**: the executor only picks from code-built candidates; step progress, navigation stack + page graph, loop detection, recovery and safety gates live in code
+- **Device tools**: jump straight to 15 settings pages, toggle Wi-Fi / Bluetooth / flashlight / DND, set brightness / volume, read battery / time / device info / network. State-changing tools must be named in the user's own goal
+- **Page state**: package + activity + title identify the page; switch on/off, slider %, and input contents go into the candidates; the nav stack tells the model where it is, where Back goes, and which entries were already tried
+- **Safety**: planner output is untrusted — tool/arg allow-lists, typed text must be a substring of the goal, payment buttons / permission dialogs are unlocked only by the user's original goal
+- **Entry points**: the Agent page (executor Jev / DeepSeek / local, "DeepSeek planning & review" switch); MCP `agent_start` (`goal` / `provider` / `max_steps` / `planner`), `agent_stop`, `agent_status`
+- **Jev from mainland China** returns HTTP 451: use a proxy/VPN on the phone, or set "Jev proxy" to `127.0.0.1:<PC proxy port>` and run `adb reverse tcp:<port> tcp:<port>`
+
+**On-device evaluation** (vivo / Android 16, 7 task types × 2 runs, verified independently via adb / screen reads):
+
+| Executor | with planner | without |
+|---|:---:|:---:|
+| Jev | 14/14 | 6–7/14 |
+| DeepSeek | 14/14 | 8–10/14 |
+
+Tasks: open Bluetooth page, search inside Settings, open About phone, switch Clock to stopwatch, max brightness, ask battery level, ask Android version. Reproduce with `node scripts/agent_eval.mjs` (tasks in `scripts/agent_eval_tasks.json`). See [docs/AGENT.md](docs/AGENT.md).
 
 ## Testing
 
+- Unit tests (JVM, no device): `./gradlew :lib:testDebugUnitTest :app:testDebugUnitTest` (104 tests)
 - Engine self-test: `scripts/run_selftest.ps1` (**68 regressions = 53 PASS / 0 FAIL / 15 SKIP**, needs a device)
+- Autonomous-mode device eval: `node scripts/agent_eval.mjs` (`scripts/agent_eval_show.mjs` for details)
 - LLM generation accuracy: `scripts/verify_workflow_gen.ps1` (13 scenarios)
 
 ---
@@ -355,7 +384,7 @@ Habitat/                          # Root project
 ├── lib/                          # :lib — engine (zero Android UI deps)
 │   └── com/ailun/habitat/
 │       ├── api/                  # IAccessibilityProvider, IShellExecutor
-│       ├── handlers/             # 40+ INodeHandler implementations
+│       ├── handlers/             # ~80 INodeHandler implementations
 │       ├── HabitatExecutor.kt    # Coroutine-based execution loop
 │       ├── HabitatJson.kt        # JSON parser + sample workflows
 │       ├── WorkflowGraph.kt      # Graph model (start_node_id + nodes)
@@ -369,6 +398,7 @@ Habitat/                          # Root project
 │       ├── ui/                   # ProfileTab, HabitatSettingsActivity
 │       ├── bridge/               # AppAccessibilityProvider, ShizukuShellExecutor
 │       ├── ai/                   # NodeKnowledge(node docs), WorkflowAIGenerator(LLM gen), WorkflowAIClient(DeepSeek), LLMServiceProvider, LiteRtLLMServiceImpl
+│       ├── agent/                # autonomous mode: Planner, AgentLoop, ActionCatalog, DeviceTools, NavigationState, ScreenObserver
 │       ├── dag/                  # DagView, DagLayoutEngine, DagModel
 │       ├── triggers/             # Notification, SMS, Timer, Clipboard, Key
 │       ├── HabitatDashboard.kt   # Main scaffold + editor in home card + Agent control entry

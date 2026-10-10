@@ -12,23 +12,24 @@
 - **延伸目标**："做成 agent 运行时工具"（让 LLM/AI agent 通过 MCP 直接操控手机）
 - **形态**：JSON 工作流图 → 引擎执行（84 个语义节点）→ 无障碍 + 系统 API 双轨；对外暴露 **MCP server**（AI 客户端可调）。
 - **核心卖点**：扁平 JSON（LLM 易生成）、语义节点（非 UI 原语）、本机离线、事件触发、可视化编辑、可嵌入 AAR。
-- **姊妹项目**：`%USERPROFILE%\SmartCS`（智能客服 App，用 Habitat 引擎的早期拷贝）。
+- **姊妹项目**：SmartCS（智能客服 App，用 Habitat 引擎的早期拷贝，单独的仓库）。
 
 ## 二、仓库 / 环境基本信息
 
 | 项 | 值 |
 |---|---|
-| 引擎仓库 | `%USERPROFILE%\Habitat` · 远程 `git@github.com:Allenwang0730/HabitatEngine.git`（分支 main）|
-| 姊妹仓库 | `%USERPROFILE%\SmartCS`（智能客服，有 git；**其 lib 不动，app 可改但做好版本管理**）|
+| 引擎仓库 | 远程 `git@github.com:Allenwang0730/HabitatEngine.git`（分支 main）|
+| 姊妹仓库 | SmartCS（智能客服，有 git；**其 lib 不动，app 可改但做好版本管理**）|
 | 技术栈 | Kotlin 2.3.20 · Compose M3 · AGP 9.0.1 · compileSdk 36 / minSdk 29 · Gson · Shizuku 13.1.5 · LiteRT-LM 0.11.0 |
 | 模块 | `:lib`（纯引擎，零依赖 app）· `:app`（宿主 UI + 桥接实现）|
 | 构建 | `./gradlew :app:assembleDebug`；APK 在 `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk` |
-| 真机 | iQOO（adb 序列号 `<è®¾å¤åºåå·>`，USB）；手机 WiFi `<ææº IP>`，PC `<çµè IP>` |
-| adb | `%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe` |
-| MCP 服务 | `ws://<手机IP>:8931/mcp?token=habitat-dev-token`（端口/token 在 App「Agent」页可改）|
+| 真机 | vivo / iQOO，Android 16，USB 连接（序列号用 `adb devices` 查看，不写进仓库）|
+| adb | `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` |
+| MCP 服务 | 默认只监听手机 `127.0.0.1:8931`：电脑侧 `adb forward tcp:8931 tcp:8931` 后连 `ws://127.0.0.1:8931/mcp`；令牌每台设备随机生成，在 Agent 页查看（旧的默认令牌已作废）|
+| Jev 网络 | 国内网络直连 Jev 返回 451：手机开代理/VPN，或在 Agent 页「Jev 代理」填 `127.0.0.1:<电脑代理端口>` 并执行 `adb reverse tcp:<端口> tcp:<端口>` |
 | 启动 App | `adb shell am start -n com.ailun.habitat/.app.HabitatMainActivity` |
 | App 包名 | `com.ailun.habitat` |
-| DeepSeek key | **不硬编码**，App「AI 生成」页填（存 SharedPreferences）|
+| DeepSeek / Jev key | **不硬编码**，App 内填写，存加密存储（`SecretStore`）|
 
 ## 三、记忆 / 规则位置（重要）
 
@@ -94,12 +95,12 @@
 
 **已完成能力**
 - 引擎 **84 节点** + 68 条回归（最近一次真机：**53 PASS / 0 FAIL / 15 SKIP**，SKIP 为需权限/Shizuku/手工项）
-- **MCP server**（85 工具）+ **token 鉴权**（`/ws` `/mcp` 需 `?token=`）
-- **自主模式**（1.7.0）：读屏 → 决策（Jev / DeepSeek / 本地）→ 节点执行 → 循环。Agent 页可开；MCP `agent_start` / `agent_stop` / `agent_status`。Jev key 在 Agent 页填，不进代码
+- **MCP server** + **token 鉴权**（随机令牌，`Authorization: Bearer` 或 `?token=`；高危节点远程默认拒绝）
+- **自主模式**（1.9.0）：DeepSeek 规划拆步 → Jev/DeepSeek/本地逐屏选动作 → 代码执行与验证 → DeepSeek 复核；设备工具、导航栈、控件状态。真机评测（7 类任务 × 2 次）：有规划时 Jev 14/14、DeepSeek 14/14（详见 `docs/AGENT.md`）
 - **微信读屏**：系统设置里另开「Habitat 微信读屏」（`SelectToSpeakService`）。树为空时 ML Kit 中文离线 OCR。改过无障碍配置后要关掉再开一次
 - **AI 生成工作流**：`NodeKnowledge` 动态提示词 → DeepSeek，**13 场景 100% 正确**；单次成本 ≈¥0.02–0.05
 - **CLICK/FIND_ELEMENT 支持 `region` + `occurrence`**（多实例文本精准定位，如"下半屏的确定"）
-- **独立 AAR 发布配置**（`:lib` maven-publish → `com.ailun:habitat-engine:1.7.1`）
+- **独立 AAR 发布配置**（`:lib` maven-publish → `com.ailun:habitat-engine:1.8.0`）
 - App UI：4 tab（工作流/AI 生成/Agent/个人主页），编辑器内嵌主页卡片
 - 直拨 `ACTION_CALL_DIRECT` 走 `TelecomManager.placeCall`（后台可拨）
 - 安全：API key 不硬编码、密钥扫描 hook、manifest 权限铁律
@@ -112,9 +113,9 @@
 - SmartCS 侧仍有未修 app 级 bug（BUG-2/3/6/8–12，lib 不动）
 
 **下一步方向（用户关注）**
-1. ~~接 Jev + 自主循环 + 微信读屏~~ 已在 1.7.0 落地（本机执行替代 Mobilerun）。真机还没拿 Jev key 跑通一整轮
-2. 自主循环的步数、失败恢复、更多动作（长按/等待元素）还粗
-3. MCP 更强鉴权、开发者 README、ROM 兼容专项仍未做
+1. ~~接 Jev + 自主循环 + 微信读屏~~ 1.7.0；~~规划/复核、设备工具、导航记忆、评测脚本~~ 1.9.0
+2. 无规划模式（只有执行器）仍弱：真机评测中约一半任务失败，主要是提问类与多步任务
+3. 跨任务路径经验（成功路径缓存）、ROM 兼容专项仍未做
 
 ## 六、硬约束（务必遵守）
 

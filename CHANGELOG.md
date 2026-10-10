@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [1.9.0] - 2026-10-09
+
+App `versionName` 1.9.0（`versionCode` 6）；引擎 AAR `com.ailun:habitat-engine:1.8.0`（`ACTION_LAUNCH_APP` 新增 `intent_action`）。
+
+**真机评测**（vivo / Android 16，7 类任务 × 2 次，adb/读屏独立验证，`scripts/agent_eval.mjs`）：有规划时 Jev 14/14、DeepSeek 14/14；无规划时 Jev 6–7/14、DeepSeek 8–10/14。
 
 ### Added — 自主模式重构：规划（DeepSeek）+ 执行（Jev）+ 代码控制
 - **规划器**（`Planner` / `DeepSeekPlanner`）：先把目标拆成 1~6 步，每步带屏幕上可验证的完成条件，能用设备工具就直接用；执行卡住时从当前屏幕重规划剩下的部分（最多 2 次）；全部完成后按屏幕证据**复核**，提问类目标在复核里读出答案。Agent 页新增「DeepSeek 规划与复核」开关（默认开，需 DeepSeek key）；MCP `agent_start` 新增 `planner` 参数。
@@ -11,9 +15,19 @@
 - `ACTION_LAUNCH_APP` 新增 `intent_action`（只接受 `android.settings.*` 与电池页），用于直接跳转设置页。
 - 评测脚本 `scripts/agent_eval.mjs` + `agent_eval_tasks.json`：固定任务集，adb/读屏独立验证，跑完恢复设备状态，支持按执行器 × 有/无规划对比。
 
+### Fixed（真机评测暴露）
+- 拖滑块、拨开关时文字不变，旧"屏幕是否变化"判定把成功当成无变化后反复操作；现在控件状态也算。
+- 工具失败后把「亮度设为最高」偷换成「设为中等」；现在只能换别的工具，不换同一工具的另一档。失败过的工具本次任务不再提供。
+- 读数工具不改屏幕被判"无变化"而反复调用；读到值算进展，已知事实对应的工具不再提供。
+- 搜索框残留文字被当成同名入口反复点：输入框在候选里写成「输入框，当前内容：…」，已聚焦的输入框不作点击候选。
+- 灵动岛/状态栏控件被当成可点目标；`FrameLayout` 等 View 类名被当成 Activity。
+- 决策器不可用（key 无效、HTTP 451）时不再无意义地重规划，直接结束并提示。
+
 ### Changed
 - 默认最多步数 12 → 20，上限 30 → 40；多步计划里每步最多 8 步。
 - 页面标题识别跳过状态栏时钟。
+- Jev 可配 HTTP 代理（Agent 页「Jev 代理」，只存本机）：国内网络直连返回 451 时，经 `adb reverse` 走电脑代理。
+- 文档与脚本去掉个人信息：设备序列号、局域网 IP、本机路径（`run_selftest.ps1` 改用 `%LOCALAPPDATA%` 与脚本相对路径）。
 
 ### Security
 - 规划器输出一律当不可信：工具/参数白名单与枚举、输入文字必须是目标原文子串、敏感按钮与权限弹窗的放行只看用户目标原文（规划器写进步骤说明的文字不能解锁）。
