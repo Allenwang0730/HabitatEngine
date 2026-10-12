@@ -230,11 +230,12 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `text` | String | — | 文字内容，支持 `${var}`；`submit=true` 时可为空（只提交不改内容） |
-| `mode` | String | "a11y" | 输入模式: a11y / shell / ime |
-| `submit` | Boolean | false | 输入后在焦点框按 IME 回车（搜索/发送/确认）。走无障碍 `ACTION_IME_ENTER`，不需要 Shizuku；不可用时退回 `input keyevent 66` |
+| `mode` | String | "a11y" | 输入模式: a11y / shell / ime。a11y 写入后读回核对，没生效时退回剪贴板粘贴（中文可用） |
+| `target` | String | — | 可选，`"x,y"`：写入包含该点的输入框（先让它获得焦点）。不传时写入当前焦点输入框 |
+| `submit` | Boolean | false | 输入后在输入框按 IME 回车（搜索/发送/确认）。走无障碍 `ACTION_IME_ENTER`，不需要 Shizuku；不可用时退回 `input keyevent 66` |
 | `allow_empty` | Boolean | false | 允许把输入框整框设为空（清空） |
 
-输出: `input_success` (Boolean)
+输出: `input_success` (Boolean；a11y 模式下框里确实是这段文字才为 true)
 
 ### ACTION_GLOBAL_KEY
 

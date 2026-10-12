@@ -117,13 +117,19 @@ class AgentPolicyTest {
     }
 
     @Test
-    fun quotedTextBecomesTypeCandidateOnlyWhenFocused() {
+    fun quotedTextBecomesTypeCandidateWhenThereIsAnInput() {
         val values = Catalogs.textCandidates("在搜索框输入「你好」然后发送")
         assertEquals(listOf("你好"), values)
         val catalog = Catalogs.build("在搜索框输入「你好」", screen(), emptyList())
         assertEquals("你好", catalog.textValues["1"])
-        val unfocused = Catalogs.build("在搜索框输入「你好」", screen().copy(focusedIndex = null), emptyList())
-        assertTrue(unfocused.textValues.isEmpty())
+        // 只有一个输入框时，没报告焦点也给输入（QQ/微信的输入框常常不报焦点）
+        val unreported = screen().copy(
+            focusedIndex = null,
+            elements = screen().elements.map { it.copy(focused = false) },
+        )
+        assertEquals("你好", Catalogs.build("在搜索框输入「你好」", unreported, emptyList()).textValues["1"])
+        val noInput = screen().copy(focusedIndex = null, elements = screen().elements.filter { !it.editable })
+        assertTrue(Catalogs.build("在搜索框输入「你好」", noInput, emptyList()).textValues.isEmpty())
     }
 
     @Test

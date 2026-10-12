@@ -1,6 +1,8 @@
 package com.ailun.habitat.app.agent
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import com.ailun.habitat.NodeHandlerFactory
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
@@ -226,7 +228,13 @@ class AgentLoop(
     }
 
     /** 一次任务的全部可变状态。 */
-    private class Run(val goal: String, val apps: List<AppEntry>, var observation: ScreenObservation) {
+    private class Run(
+        val goal: String,
+        val apps: List<AppEntry>,
+        var observation: ScreenObservation,
+        val intent: ParsedIntent,
+        val scope: ToolScope,
+    ) {
         val history = mutableListOf<StepNote>()
         val facts = linkedMapOf<String, String>()
         val completed = mutableListOf<String>()
@@ -244,13 +252,30 @@ class AgentLoop(
 
     suspend fun run(goal: String, onStep: (String) -> Unit): LoopResult {
         if (goal.isBlank()) return LoopResult("error", 0, "目标为空")
-        val run = Run(goal, ScreenObserver.launcherApps(context), ScreenObserver.observe(context))
+        val intent = IntentParser.parse(goal)
+        val scope = scopeFor(intent)
+        val run = Run(goal, ScreenObserver.launcherApps(context), ScreenObserver.observe(context), intent, scope)
         LoopPolicy.screenVerdict(run.observation)?.let {
             onStep(it)
             return LoopResult("error", 0, it)
         }
         run.nav.enter(run.observation, AppAccessibilityProvider.foregroundActivity)
-        var plan = makePlan(run, null, onStep) ?: return LoopResult("error", 0, "规划失败")
+        if (intent.kind != IntentKind.GENERIC) {
+            val kind = if (intent.kind == IntentKind.CALL) "打电话" else "发消息"
+            onStep("意图：$kind" + listOfNotNull(intent.contact?.let { "对象「$it」" }, intent.text?.let { "内容「$it」" })
+                .joinToString("，", prefix = " ") + (scope.callee?.let { "（号码已在本机查到）" } ?: ""))
+        }
+        var plan = when (val skill = SkillPlans.build(intent, goal, run.apps, scope, ContactResolver.readable(context), allowGoalUnlock)) {
+            is SkillPlans.Result.Ready -> skill.plan.also { p ->
+                onStep("固定做法（${p.steps.size} 步）：" + p.steps.mapIndexed { i, s -> "${i + 1}. ${s.instruction}" }.joinToString("；"))
+            }
+            is SkillPlans.Result.Refuse -> {
+                onStep(skill.reason)
+                return LoopResult("blocked", 0, skill.reason)
+            }
+            SkillPlans.Result.None -> makePlan(run, null, onStep) ?: return LoopResult("error", 0, "规划失败")
+        }
+        val note = plan.note
 
         while (true) {
             var index = 0
@@ -288,6 +313,12 @@ class AgentLoop(
             }
             if (replanned) continue
 
+            // 有意不做完的固定做法（远程发起只填好消息不发送）：复核必然判"没发出去"，再重规划只会去找发送按钮
+            if (note.isNotEmpty()) {
+                onStep(note)
+                return LoopResult("done", run.used, note)
+            }
+
             // 复核：不相信"每一步都选了 DONE"，按屏幕证据再判断一次
             val reviewer = planner ?: return LoopResult("done", run.used, withFacts("完成", run))
             run.observation = ScreenObserver.observe(context)
@@ -317,6 +348,19 @@ class AgentLoop(
     private fun withFacts(detail: String, run: Run): String =
         if (run.facts.isEmpty()) detail else detail + "：" + run.facts.entries.joinToString("，") { "${it.key}=${it.value}" }
 
+    /**
+     * 打电话/发消息的对象在本机查号码（目标里的号码 → 通讯录 → 客服表）。号码只给设备工具用，不进提示词。
+     * 直接拨出：本机发起且有 CALL_PHONE；否则只填进拨号盘。
+     */
+    private fun scopeFor(intent: ParsedIntent): ToolScope {
+        if (intent.kind == IntentKind.GENERIC) return ToolScope()
+        val callee = intent.contact?.let { name ->
+            ServiceNumbers.resolve(name, { ContactResolver.exact(context, it) }, { ContactResolver.fuzzy(context, it) })
+        }
+        val canCall = context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+        return ToolScope(callee = callee, allowDirectCall = allowGoalUnlock && canCall)
+    }
+
     private fun replanContext(run: Run, failedStep: String, reason: String) = ReplanContext(
         failedStep = failedStep,
         reason = if (run.failedTools.isEmpty()) reason else "$reason；本次已失败、不要再用的工具：${run.failedTools.joinToString()}",
@@ -330,7 +374,7 @@ class AgentLoop(
         val single = Plan(listOf(PlanStep(run.goal, "目标在屏幕上已完成")))
         val p = planner ?: return single
         run.observation = ScreenObserver.observe(context)
-        val plan = runCatching { p.plan(run.goal, run.observation, run.apps, replan) }.getOrNull()
+        val plan = runCatching { p.plan(run.goal, run.observation, run.apps, replan, run.scope) }.getOrNull()
         if (plan == null) {
             if (replan != null) return null
             onStep("规划不可用，整件事交给执行器")
@@ -364,7 +408,7 @@ class AgentLoop(
     private suspend fun runToolStep(
         run: Run, step: PlanStep, index: Int, total: Int, budget: Int, onStep: (String) -> Unit,
     ): StepOutcome {
-        val inv = DeviceTools.resolve(step.tool!!, step.args, run.goal, run.apps)
+        val inv = DeviceTools.resolve(step.tool!!, step.args, run.goal, run.apps, run.scope)
             ?: return runUiStep(run, step, index, total, budget, onStep)
         val toolKey = "${inv.tool}|${inv.args}"
         if (toolKey in run.failedTools) {
@@ -418,11 +462,17 @@ class AgentLoop(
                 onStep(it)
                 return StepOutcome("fatal", it)
             }
+            // 技能模板给了代码判定的完成条件：屏幕上成立就推进，不问模型（也不会被模型的 DONE 骗）
+            if (step.check?.satisfied(observation) == true) {
+                onStep("这一步已完成：${step.doneWhen}")
+                return StepOutcome("done", step.doneWhen)
+            }
             // 判重/兜圈只看本步；死路名单看整个任务（重规划后也不再进已证明走不通的入口）
             val stepHistory = run.history.filter { it.planStep == run.seq }
             val ctx = stepContext(run, step, index, total)
-            val catalog = Catalogs.build(run.goal, observation, run.apps, allowGoalUnlock, ctx, step.text, run.failedTools, run.facts.keys)
-                .without(LoopPolicy.deadEnds(run.history)) { LoopPolicy.signatureOf(it, observation) }
+            val catalog = Catalogs.build(
+                run.goal, observation, run.apps, allowGoalUnlock, ctx, step.text, run.failedTools, run.facts.keys, run.scope,
+            ).without(LoopPolicy.deadEnds(run.history)) { LoopPolicy.signatureOf(it, observation) }
             onStep("读屏 ${ctx.nav?.path ?: observation.packageName} / ${observation.source} / ${observation.elements.size} 个控件（已用 ${run.used} 步，剩 ${maxSteps - run.used} 步）")
             catalog.guard?.let { onStep("限制：$it") }
             val decision = provider.decide(run.goal, observation, catalog, run.history, ctx)

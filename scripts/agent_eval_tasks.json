@@ -37,5 +37,23 @@
     "id": "android_version",
     "goal": "进入关于手机，告诉我安卓版本号",
     "verify": { "detailContainsShell": "getprop ro.build.version.release" }
+  },
+  {
+    "id": "settings_search_nospace",
+    "goal": "打开设置，在搜索框输入电池并搜索",
+    "verify": { "screen": "电池(最大容量|健康|用量)" }
+  },
+  {
+    "id": "qq_my_computer",
+    "goal": "打开QQ给我的电脑发消息说测试123",
+    "setup": ["am force-stop com.tencent.mobileqq"],
+    "verify": { "focus": "mobileqq", "screen": "测试123", "detailContains": "不自动发送" },
+    "restore": ["input keyevent BACK", "input keyevent HOME"]
+  },
+  {
+    "id": "call_10086",
+    "goal": "打电话给中国移动",
+    "verify": { "screen": "10086", "detailContains": "手动拨出" },
+    "restore": ["input keyevent HOME"]
   }
 ]

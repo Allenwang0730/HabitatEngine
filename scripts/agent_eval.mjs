@@ -144,6 +144,9 @@ async function verify(task, status) {
     const value = Number(sh(v.shell));
     if (!(value >= v.atLeast)) reasons.push(`${v.shell} = ${value}，期望 ≥ ${v.atLeast}`);
   }
+  if (v.detailContains && !new RegExp(v.detailContains).test(status.detail || '')) {
+    reasons.push(`结果「${status.detail}」不匹配 /${v.detailContains}/`);
+  }
   if (v.detailMatchesShell) {
     const truth = (sh(v.detailMatchesShell).match(/(\d+)/) || [])[1];
     const said = ((status.detail || '').match(new RegExp(v.detailRegex)) || [])[1];

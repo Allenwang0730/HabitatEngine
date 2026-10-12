@@ -11,7 +11,8 @@ package com.ailun.habitat.app.agent
  * - 只有这里登记的工具，参数只能取枚举值或已安装应用；拿不到合法参数就不执行。
  * - 会改设备状态的工具（开关 WLAN/蓝牙/手电/免打扰、调亮度音量）必须由**用户目标原文**点名
  *   （[DeviceTool.gate] 关键词），规划器写进步骤说明的文字不算——否则规划器可以自己"决定"关掉 WLAN。
- * - 不放任何有外部副作用的工具（打电话、发短信、文件、Shell…）。
+ * - 有外部副作用的只有 `call`：号码只能来自 [ToolScope]（代码在本机查通讯录/客服表），规划器给不出号码；
+ *   直接拨出只在本机发起且有 CALL_PHONE 时，远程发起和紧急号码只填进拨号盘。其余（发短信、文件、Shell…）不放。
  */
 object DeviceTools {
 
@@ -60,6 +61,9 @@ object DeviceTools {
     private val ON_OFF = listOf("on", "off")
     private val LEVELS = listOf("max", "high", "mid", "low", "min")
 
+    /** `call` 的门控词：目标原文里写了"打电话"这类词才能拨号。必须在 [ALL] 之前初始化。 */
+    val CALL_WORDS = listOf("打电话", "电话给", "打给", "拨打", "拨给", "呼叫", "致电")
+
     val ALL: List<DeviceTool> = listOf(
         DeviceTool("open_settings", "直接打开系统设置的某一页（不用在设置里翻找）", mapOf("page" to SETTINGS_PAGES.keys.toList())),
         DeviceTool("open_app", "打开一个已安装应用", mapOf("package" to emptyList())),
@@ -73,6 +77,7 @@ object DeviceTools {
             mapOf("stream" to listOf("music", "ring", "alarm", "notification"), "level" to listOf("max", "high", "mid", "low", "mute")),
             gate = listOf("音量", "静音", "声音"),
         ),
+        DeviceTool("call", "给目标里的联系人打电话（号码由代码查好，不用参数）", emptyMap(), gate = CALL_WORDS),
         DeviceTool("read_battery", "读取电量与是否在充电", emptyMap()),
         DeviceTool("read_time", "读取当前日期时间", emptyMap()),
         DeviceTool("read_device_info", "读取手机型号、品牌、安卓版本", emptyMap()),
@@ -81,19 +86,24 @@ object DeviceTools {
 
     private val BY_ID = ALL.associateBy { it.id }
 
-    /** 目标原文点名了才可用（[DeviceTool.gate]）。只看用户目标，不看规划器写的步骤说明。 */
-    fun available(goal: String): List<DeviceTool> {
+    /**
+     * 目标原文点名了才可用（[DeviceTool.gate]）。只看用户目标，不看规划器写的步骤说明。
+     * `call` 还要求代码已经查到号码（[ToolScope.callee]）。
+     */
+    fun available(goal: String, scope: ToolScope = ToolScope()): List<DeviceTool> {
         val folded = goal.lowercase()
-        return ALL.filter { tool -> tool.gate.isEmpty() || tool.gate.any { folded.contains(it) } }
+        return ALL.filter { tool ->
+            (tool.gate.isEmpty() || tool.gate.any { folded.contains(it) }) && (tool.id != "call" || scope.callee != null)
+        }
     }
 
     /**
      * 把规划器/执行器给的 (tool, args) 校验成可执行调用。任何一项不合法返回 null：
      * 工具不存在、没被目标点名、参数不在枚举里、应用没安装。
      */
-    fun resolve(tool: String, args: Map<String, String>, goal: String, apps: List<AppEntry>): Invocation? {
+    fun resolve(tool: String, args: Map<String, String>, goal: String, apps: List<AppEntry>, scope: ToolScope = ToolScope()): Invocation? {
         val spec = BY_ID[tool] ?: return null
-        if (spec !in available(goal)) return null
+        if (spec !in available(goal, scope)) return null
         for ((name, allowed) in spec.args) {
             val value = args[name] ?: return null
             if (allowed.isNotEmpty() && value !in allowed) return null
@@ -114,6 +124,14 @@ object DeviceTools {
                 Invocation(
                     tool, args, "ACTION_LAUNCH_APP", mapOf("package_name" to pkg),
                     "打开 ${app.label}", "launch_success", expectPackage = pkg,
+                )
+            }
+            "call" -> {
+                val callee = scope.callee ?: return null
+                val direct = scope.allowDirectCall && callee.number !in ServiceNumbers.EMERGENCY
+                Invocation(
+                    tool, args, if (direct) "ACTION_CALL_DIRECT" else "ACTION_CALL_PHONE", mapOf("phone_number" to callee.number),
+                    if (direct) "拨打 ${callee.name}" else "打开拨号盘并填好 ${callee.name} 的号码", "call_success",
                 )
             }
             "set_wifi" -> toggle(tool, args, "ACTION_WIFI", "WLAN", "wifi_success", listOf("wifi_enabled"))
@@ -162,7 +180,7 @@ object DeviceTools {
      * 执行器每一步也能用的工具快捷方式（USE_TOOL）：只放"跳到设置某页"和被目标点名的开关，
      * 并且只放跟目标/当前步骤相关的几个——全量列出 15 个设置页只会分散模型注意力。
      */
-    fun shortcuts(goal: String, instruction: String, apps: List<AppEntry>): List<Invocation> {
+    fun shortcuts(goal: String, instruction: String, apps: List<AppEntry>, scope: ToolScope = ToolScope()): List<Invocation> {
         val text = "$goal $instruction".lowercase()
         val out = mutableListOf<Invocation>()
         SETTINGS_PAGES.forEach { (key, page) ->
@@ -174,8 +192,9 @@ object DeviceTools {
         READ_HINTS.forEach { (tool, words) ->
             if (words.any { goal.lowercase().contains(it) }) resolve(tool, emptyMap(), goal, apps)?.let(out::add)
         }
-        for (tool in available(goal).filter { it.gate.isNotEmpty() }) {
+        for (tool in available(goal, scope).filter { it.gate.isNotEmpty() }) {
             when (tool.id) {
+                "call" -> resolve(tool.id, emptyMap(), goal, apps, scope)?.let(out::add)
                 "set_brightness" -> LEVELS.filter { it == "max" || it == "min" || it == "mid" }
                     .mapNotNull { resolve(tool.id, mapOf("level" to it), goal, apps) }.forEach(out::add)
                 "set_volume" -> listOf("max", "mute").mapNotNull {
@@ -188,7 +207,7 @@ object DeviceTools {
     }
 
     /** 规划器提示词里的工具说明（只列目标点名可用的）。 */
-    fun describeFor(goal: String): String = available(goal).joinToString("\n") { tool ->
+    fun describeFor(goal: String, scope: ToolScope = ToolScope()): String = available(goal, scope).joinToString("\n") { tool ->
         val args = if (tool.args.isEmpty()) "无参数" else tool.args.entries.joinToString("，") { (k, v) ->
             if (v.isEmpty()) "$k=<已安装应用包名>" else "$k ∈ ${v.joinToString("/")}"
         }

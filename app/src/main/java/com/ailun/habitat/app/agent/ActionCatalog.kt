@@ -18,7 +18,20 @@ object Catalogs {
         "购买", "下单", "提交订单", "立即支付", "充值", "提现",
         "删除", "清空", "卸载", "恢复出厂", "重置", "注销", "退出登录",
         "允许", "授权", "始终允许", "仅在使用中允许", "同意",
+        // 发消息是对外的动作：目标没说要发，就不能替你点「发送」
+        "发送",
     )
+
+    /**
+     * 敏感词的同义说法：目标写了其中之一也算"点名"了这个敏感动作。
+     * 「给我的电脑发消息说你好」里没有「发送」两个字，但显然是要发。
+     */
+    private val unlockAliases: Map<String, Regex> = mapOf(
+        "发送" to Regex("发送|发(?:个|一个|一条|条)?(?:消息|信息|短信|微信)|发给|回复"),
+    )
+
+    /** 输入完之后要点的提交类按钮。 */
+    private val SUBMIT_WORDS = listOf("发送", "搜索", "确定", "完成", "提交", "前往")
     /** 出现这些文字说明是验证/支付凭据页，模型不能碰任何控件。 */
     val lockedScreenWords = listOf("支付密码", "请输入6位", "验证指纹", "指纹支付", "面容支付", "人脸验证", "刷脸", "银行卡号")
     val guardedPackages = setOf(
@@ -39,21 +52,28 @@ object Catalogs {
     private const val TEXT_PREVIEW = 40
     private const val MAX_SLIDERS = 3
 
-    fun textCandidates(goal: String): List<String> {
-        val quoted = Regex("[\"「『']([^\"」』']{1,40})[\"」』']")
-            .findAll(goal)
-            .map { it.groupValues[1].trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .toList()
-        if (quoted.isNotEmpty()) return quoted.take(MAX_TEXTS)
-        return Regex("(?:输入|填写|键入)\\s+(\\S{1,40})")
-            .findAll(goal)
-            .map { it.groupValues[1].trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .take(MAX_TEXTS)
-            .toList()
+    fun textCandidates(goal: String): List<String> = IntentParser.inputTexts(goal)
+
+    /**
+     * 本屏要往哪个输入框里写：有焦点的那个；没报告焦点但只有一个输入框时就是它。
+     * QQ/微信的输入框点过之后常常不报 isFocused，旧逻辑只认焦点，于是一直不给 TYPE_TEXT，
+     * 模型只能反复点输入框直到判兜圈。多个输入框又都没焦点时不猜，让模型先点一个。
+     */
+    fun inputTarget(observation: ScreenObservation): ScreenElement? {
+        val editable = observation.elements.filter { it.editable && !it.password && !it.system }
+        return editable.firstOrNull { it.index == observation.focusedIndex || it.focused }
+            ?: editable.singleOrNull()
+    }
+
+    /** 打电话/发消息的联系人恰好和某个应用同名（「打电话给中国移动」）：那是人，不是要打开的应用。 */
+    fun namedApps(goal: String, apps: List<AppEntry>, currentPackage: String = ""): List<AppEntry> {
+        val contact = IntentParser.parse(goal).takeIf { it.kind != IntentKind.GENERIC }?.contact
+        return apps.filter { app ->
+            app.packageName != currentPackage &&
+                app.label.length >= 2 &&
+                goal.contains(app.label, ignoreCase = true) &&
+                (contact == null || !(contact.contains(app.label, ignoreCase = true) || app.label.contains(contact, ignoreCase = true)))
+        }.distinctBy { it.packageName }
     }
 
     /**
@@ -71,6 +91,8 @@ object Catalogs {
         failedTools: Set<String> = emptySet(),
         /** 已经读到的事实（变量名）：对应的读数工具不再提供，值已经在 task.facts 里。 */
         knownFacts: Set<String> = emptySet(),
+        /** 设备工具能用的、代码查好的实体（打电话的号码）。 */
+        scope: ToolScope = ToolScope(),
     ): ActionCatalog {
         val actions = mutableListOf<CatalogAction>()
         val operations = linkedMapOf<String, String>()
@@ -82,7 +104,22 @@ object Catalogs {
         val sliderTargets = linkedMapOf<String, String>()
 
         val guard = guardOf(goal, observation, allowGoalUnlock)
-        val taps = if (guard != null) emptyList() else orderedTaps(goal, observation, allowGoalUnlock)
+        val input = if (guard == null) inputTarget(observation) else null
+        // 规划器给的输入文字已经在 PlanPrompts.parsePlan 里校验过是目标原文子串；
+        // 这一步指定了文字就只给它（搜会话这一步不该把消息正文也列出来）
+        val stepTexts = stepText?.let { listOf(it) } ?: textCandidates(goal)
+        // 框里已经是这段文字的不再提供：再输一次屏幕不变，会被判"原地动作无效"
+        val texts = if (input != null) stepTexts.filter { !input.text.contains(it) }.distinct().take(MAX_TEXTS) else emptyList()
+        val typed = input != null && stepTexts.any { it.isNotEmpty() && input.text.contains(it) }
+        val taps = if (guard != null) {
+            emptyList()
+        } else {
+            orderedTaps(goal, observation, allowGoalUnlock)
+                // 有文字可输时，输入框本身不再进点击候选：该做的是 TYPE_TEXT，不是再点一次
+                .filter { texts.isEmpty() || it.index != input?.index }
+                // 文字已经输好：「发送/搜索/确定」排到最前，模型第一眼就看到该提交了
+                .let { list -> if (typed) list.sortedBy { if (SUBMIT_WORDS.any { w -> it.text.trim() == w }) 0 else 1 } else list }
+        }
         if (taps.isNotEmpty()) {
             operations["TAP"] = "点击一个当前可见控件，用来打开、聚焦或选择。列表行也可以直接点。"
             taps.forEach { el ->
@@ -108,18 +145,9 @@ object Catalogs {
             }
         }
 
-        val focused = observation.elements.firstOrNull {
-            it.index == observation.focusedIndex && it.editable && !it.password
-        }
-        val texts = if (focused != null && guard == null) {
-            // 规划器给的输入文字已经在 PlanPrompts.parsePlan 里校验过是目标原文子串
-            (listOfNotNull(stepText) + textCandidates(goal)).distinct().take(MAX_TEXTS)
-        } else {
-            emptyList()
-        }
-        if (texts.isNotEmpty()) {
-            operations["TYPE_TEXT"] = "把当前焦点输入框替换成目标里给出的原文，不要编造。" +
-                "ACTION_SET_TEXT 是整框替换，不需要先清空。"
+        if (texts.isNotEmpty() && input != null) {
+            operations["TYPE_TEXT"] = "把输入框（${describeTarget(input, typeOf(input))}）替换成目标里给出的原文，不要编造。" +
+                "不需要先点输入框，也不需要先清空。"
             texts.forEachIndexed { i, value ->
                 val key = (i + 1).toString()
                 textValues[key] = value
@@ -130,17 +158,16 @@ object Catalogs {
                         target = key,
                         label = "输入「$value」",
                         tool = "ACTION_INPUT_TEXT",
-                        params = mapOf("text" to value, "mode" to "a11y"),
+                        // 按坐标找输入框写入：不依赖它有没有报告焦点
+                        params = mapOf("text" to value, "mode" to "a11y", "target" to "${input.centerX},${input.centerY}"),
+                        // 判重锚点是"这段文字"：同一个框输入不同文字不算重复
+                        matchText = value,
                     ),
                 )
             }
         }
 
-        val named = apps.filter { app ->
-            app.packageName != observation.packageName &&
-                app.label.length >= 2 &&
-                goal.contains(app.label, ignoreCase = true)
-        }.distinctBy { it.packageName }.take(MAX_APPS)
+        val named = namedApps(goal, apps, observation.packageName).take(MAX_APPS)
         if (named.isNotEmpty()) {
             operations["OPEN_APP"] = "直接打开目标里点名的已安装应用，不必从桌面翻找。"
             named.forEachIndexed { i, app ->
@@ -204,36 +231,40 @@ object Catalogs {
             }
         }
 
-        // 输入框有焦点时才给"提交"和"清空"。两者都靠 lib 已有节点实现，没有给 lib 加参数。
-        if (focused != null && guard == null) {
-            operations["PRESS_ENTER"] = "在焦点输入框里按回车，用于提交搜索或确认输入。提交后等待屏幕变化。"
-            actions.add(
-                CatalogAction(
-                    id = "press_enter",
-                    operation = "PRESS_ENTER",
-                    label = "按回车提交",
-                    // 无障碍 IME 回车，不依赖 Shizuku（真机上 input keyevent 在没开 Shizuku 时必失败）
-                    tool = "ACTION_INPUT_TEXT",
-                    params = mapOf("text" to "", "submit" to true, "mode" to "a11y"),
-                ),
-            )
+        // 有输入框时才给"提交"和"清空"。两者都靠 lib 已有节点实现。
+        if (input != null) {
+            // 聊天页里回车就是发送：屏幕上有「发送」而目标没解锁发送时，不给回车，否则能绕开发送按钮的闸
+            val sendVisible = observation.elements.any { it.text.trim() == "发送" }
+            if (!sendVisible || allowedTap(goal, "发送", allowGoalUnlock)) {
+                operations["PRESS_ENTER"] = "在输入框里按回车，用于提交搜索或确认输入。提交后等待屏幕变化。"
+                actions.add(
+                    CatalogAction(
+                        id = "press_enter",
+                        operation = "PRESS_ENTER",
+                        label = "按回车提交",
+                        // 无障碍 IME 回车，不依赖 Shizuku（真机上 input keyevent 在没开 Shizuku 时必失败）
+                        tool = "ACTION_INPUT_TEXT",
+                        params = mapOf("text" to "", "submit" to true, "mode" to "a11y", "target" to "${input.centerX},${input.centerY}"),
+                    ),
+                )
+            }
             // 清空不是"删除键按 N 次"（次数猜不准、且每次动作会被判重挡住）：
             // ACTION_SET_TEXT 是整框替换，allow_empty 写入空串即清空。
-            operations["CLEAR_TEXT"] = "清空当前焦点输入框里已有的内容。"
+            operations["CLEAR_TEXT"] = "清空输入框里已有的内容。"
             actions.add(
                 CatalogAction(
                     id = "clear_text",
                     operation = "CLEAR_TEXT",
                     label = "清空输入框",
                     tool = "ACTION_INPUT_TEXT",
-                    params = mapOf("text" to "", "allow_empty" to true, "mode" to "a11y"),
+                    params = mapOf("text" to "", "allow_empty" to true, "mode" to "a11y", "target" to "${input.centerX},${input.centerY}"),
                 ),
             )
         }
 
-        // 设备工具快捷方式：跳到设置某页、被目标点名的开关/亮度/音量。界面里要翻好几屏的事一步做完。
+        // 设备工具快捷方式：跳到设置某页、被目标点名的开关/亮度/音量、拨号。界面里要翻好几屏的事一步做完。
         if (guard == null) {
-            val shortcuts = DeviceTools.shortcuts(goal, step?.instruction.orEmpty(), apps)
+            val shortcuts = DeviceTools.shortcuts(goal, step?.instruction.orEmpty(), apps, scope)
                 .filter { "${it.tool}|${it.args}" !in failedTools }
                 .filter { inv -> inv.outputs.isEmpty() || inv.outputs.none { it in knownFacts } }
             if (shortcuts.isNotEmpty()) {
@@ -393,7 +424,8 @@ object Catalogs {
 
     fun allowedTap(goal: String, label: String, allowGoalUnlock: Boolean = true): Boolean {
         val hit = sensitiveWords.firstOrNull { label.contains(it) } ?: return true
-        return allowGoalUnlock && goal.contains(hit)
+        if (!allowGoalUnlock) return false
+        return goal.contains(hit) || unlockAliases[hit]?.containsMatchIn(goal) == true
     }
 
     /** 当前屏幕需要整体收紧时返回原因，否则 null。 */

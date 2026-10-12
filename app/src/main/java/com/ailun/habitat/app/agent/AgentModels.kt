@@ -244,9 +244,47 @@ data class PlanStep(
     val args: Map<String, String> = emptyMap(),
     /** 这一步要输入的原文。必须是目标原文的子串（规划器不能编造输入内容）。 */
     val text: String? = null,
+    /** 代码判定的完成条件（技能模板给）；成立就推进，不用问模型。 */
+    val check: StepCheck? = null,
 )
 
-data class Plan(val steps: List<PlanStep>, val summary: String = "")
+data class Plan(
+    val steps: List<PlanStep>,
+    val summary: String = "",
+    /** 跑完后附在结果里的说明（如"远程发起不自动发送"）。 */
+    val note: String = "",
+)
+
+/**
+ * 不靠模型的完成判定。模型判断"这一步做完没有"在聊天页上很不稳（输入框里有字 ≠ 已发送），
+ * 这几种情况屏幕上有确定的证据，代码直接看。
+ */
+sealed interface StepCheck {
+    fun satisfied(o: ScreenObservation): Boolean
+
+    /** 已经进入与 [name] 的会话：顶部有这个名字，且没有输入框里还留着它（那是搜索页）。 */
+    data class ChatWith(val name: String) : StepCheck {
+        override fun satisfied(o: ScreenObservation): Boolean {
+            val top = (o.screenHeight * 0.12).toInt().coerceAtLeast(200)
+            val titled = o.elements.any { !it.editable && it.centerY <= top && it.text.trim() == name }
+            val searching = o.elements.any { it.editable && it.text.contains(name) }
+            return titled && !searching
+        }
+    }
+
+    /** 输入框里已经是 [text]。 */
+    data class InputHas(val text: String) : StepCheck {
+        override fun satisfied(o: ScreenObservation): Boolean =
+            o.elements.any { it.editable && !it.password && it.text.contains(text) }
+    }
+
+    /** [text] 已经发出去：出现在非输入框的控件里，且输入框里已经没有它。 */
+    data class Sent(val text: String) : StepCheck {
+        override fun satisfied(o: ScreenObservation): Boolean =
+            o.elements.any { !it.editable && it.text.contains(text) } &&
+                o.elements.none { it.editable && it.text.contains(text) }
+    }
+}
 
 /** 规划器对"整件事做完没有"的独立判断。 */
 data class Review(val done: Boolean, val reason: String, val answer: String = "")

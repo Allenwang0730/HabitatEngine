@@ -3,6 +3,8 @@ package com.ailun.habitat.app.ui
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -176,8 +178,19 @@ fun AgentScreen() {
         }
     }
 
+    // 打电话/发消息：先要通讯录（按名字查号码）和拨号权限；拒绝了照样开始，只是查不到号码/只填拨号盘
+    val agentPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        persistKeys()
+        message = AgentLoopController.start(context, goal, provider, steps.toInt())
+    }
+
     fun startLoop() {
         persistKeys()
+        val missing = AgentLoopController.permissionsFor(context, goal)
+        if (missing.isNotEmpty()) {
+            agentPermissions.launch(missing.toTypedArray())
+            return
+        }
         message = AgentLoopController.start(context, goal, provider, steps.toInt())
     }
 

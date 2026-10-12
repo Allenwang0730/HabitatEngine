@@ -1,6 +1,8 @@
 package com.ailun.habitat.app.agent
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import com.ailun.habitat.app.ai.WorkflowAIClient
 import com.ailun.habitat.app.auth.SecretStore
 import kotlinx.coroutines.CancellationException
@@ -99,6 +101,23 @@ object AgentLoopController {
     }
 
     fun logText(): String = _state.value.lines.joinToString("\n")
+
+    /**
+     * 这个目标还缺哪些运行时权限：打电话要 CALL_PHONE；对象不是号码也不在客服表里时要 READ_CONTACTS。
+     * 只在本机界面发起前申请；远程发起不弹框（没人看得到）。
+     */
+    fun permissionsFor(context: Context, goal: String): List<String> {
+        val intent = IntentParser.parse(goal)
+        if (intent.kind == IntentKind.GENERIC) return emptyList()
+        val needed = mutableListOf<String>()
+        val contact = intent.contact.orEmpty()
+        if (ServiceNumbers.asNumber(contact) == null && ServiceNumbers.lookup(contact) == null) {
+            // 发 QQ/微信消息按名字在应用里搜，不需要通讯录
+            if (intent.kind == IntentKind.CALL) needed += Manifest.permission.READ_CONTACTS
+        }
+        if (intent.kind == IntentKind.CALL) needed += Manifest.permission.CALL_PHONE
+        return needed.filter { context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+    }
 
     fun statusMap(): Map<String, Any> {
         val s = _state.value
