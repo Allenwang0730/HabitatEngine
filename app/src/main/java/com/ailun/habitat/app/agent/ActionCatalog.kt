@@ -52,6 +52,16 @@ object Catalogs {
     private const val TEXT_PREVIEW = 40
     private const val MAX_SLIDERS = 3
 
+    /**
+     * 文字"以 [name] 开头"的可点控件（第一段 = name，段之间用逗号/空格分隔），从上往下第一个。
+     * 不看输入框（搜索框里正是这个名字）和系统窗口（通知横幅里也可能有这个名字）。
+     */
+    fun leadingMatch(observation: ScreenObservation, name: String): ScreenElement? =
+        observation.elements
+            .filter { it.clickable && !it.editable && !it.system }
+            .filter { el -> el.text.trim().split(',', '，', ' ').firstOrNull()?.trim() == name }
+            .minByOrNull { it.centerY }
+
     fun textCandidates(goal: String): List<String> = IntentParser.inputTexts(goal)
 
     /**
@@ -93,6 +103,8 @@ object Catalogs {
         knownFacts: Set<String> = emptySet(),
         /** 设备工具能用的、代码查好的实体（打电话的号码）。 */
         scope: ToolScope = ToolScope(),
+        /** 这一步里是否已经点过这个控件（按判重签名）；null 表示不知道，按没点过算。 */
+        tappedBefore: ((ScreenElement) -> Boolean)? = null,
     ): ActionCatalog {
         val actions = mutableListOf<CatalogAction>()
         val operations = linkedMapOf<String, String>()
@@ -108,15 +120,17 @@ object Catalogs {
         // 规划器给的输入文字已经在 PlanPrompts.parsePlan 里校验过是目标原文子串；
         // 这一步指定了文字就只给它（搜会话这一步不该把消息正文也列出来）
         val stepTexts = stepText?.let { listOf(it) } ?: textCandidates(goal)
-        // 框里已经是这段文字的不再提供：再输一次屏幕不变，会被判"原地动作无效"
-        val texts = if (input != null) stepTexts.filter { !input.text.contains(it) }.distinct().take(MAX_TEXTS) else emptyList()
-        val typed = input != null && stepTexts.any { it.isNotEmpty() && input.text.contains(it) }
+        // 框里已经正好是这段文字的不再提供：再输一次屏幕不变，会被判"原地动作无效"。
+        // 只"包含"不算（「旧草稿你好」里输「你好」是要整框替换的）
+        val texts = if (input != null) stepTexts.filter { input.text.trim() != it }.distinct().take(MAX_TEXTS) else emptyList()
+        val typed = input != null && stepTexts.any { it.isNotEmpty() && input.text.trim() == it }
         val taps = if (guard != null) {
             emptyList()
         } else {
             orderedTaps(goal, observation, allowGoalUnlock)
-                // 有文字可输时，输入框本身不再进点击候选：该做的是 TYPE_TEXT，不是再点一次
-                .filter { texts.isEmpty() || it.index != input?.index }
+                // 有文字可输、这一步又已经点过这个输入框：不再给点击，该做的是 TYPE_TEXT。
+                // 第一次点击要留着：vivo 设置首页的搜索框只是入口，点了才进真正的搜索页
+                .filter { el -> texts.isEmpty() || el.index != input?.index || tappedBefore?.invoke(el) != true }
                 // 文字已经输好：「发送/搜索/确定」排到最前，模型第一眼就看到该提交了
                 .let { list -> if (typed) list.sortedBy { if (SUBMIT_WORDS.any { w -> it.text.trim() == w }) 0 else 1 } else list }
         }

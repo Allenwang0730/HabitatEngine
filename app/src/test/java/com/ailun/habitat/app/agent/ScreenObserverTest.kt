@@ -85,6 +85,28 @@ class ScreenObserverTest {
     }
 
     @Test
+    fun inputBarDoesNotSwallowItsSendButton() {
+        // QQ 聊天页：整条输入栏可点、标签借了「发送」，里面是输入框和真正的发送按钮
+        val bar = node(
+            text = "发送", x = 720, y = 2944, clickable = true, bounds = ElementBounds(0, 2860, 1440, 3030),
+            className = "android.widget.LinearLayout", viewId = "com.tencent.mobileqq:id/dmj", aggregated = true,
+        )
+        val input = node(
+            text = "", x = 569, y = 2944, clickable = true, editable = true,
+            bounds = ElementBounds(58, 2869, 1080, 3020), className = "android.widget.EditText", viewId = "com.tencent.mobileqq:id/input",
+        )
+        val send = node(
+            text = "发送", x = 1252, y = 2944, clickable = true,
+            bounds = ElementBounds(1123, 2869, 1382, 3020), className = "android.widget.Button", viewId = "com.tencent.mobileqq:id/send_btn",
+        )
+        val obs = ScreenObserver.select(listOf(bar, input, send), 1440, 3200, "a11y")
+        val sends = obs.elements.filter { it.text == "发送" }
+        assertEquals(1, sends.size)
+        assertEquals(1252, sends.single().centerX)
+        assertTrue(obs.elements.any { it.editable })
+    }
+
+    @Test
     fun selfFloatWindowNodesAreExcludedWhenForeignNodesExist() {
         val float = node(
             text = "H", x = 1200, y = 1200, pkg = "com.ailun.habitat", clickable = true,

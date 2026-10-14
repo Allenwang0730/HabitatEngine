@@ -73,6 +73,7 @@ object SkillPlans {
                 "聊天窗口顶部标题是「$contact」",
                 text = contact,
                 check = StepCheck.ChatWith(contact),
+                autoTap = contact,
             ),
             PlanStep("在聊天输入框里输入「$text」", "输入框里是「$text」", text = text, check = StepCheck.InputHas(text)),
         )
@@ -85,6 +86,7 @@ object SkillPlans {
                 steps,
                 summary = "用$appName 给「$contact」发「$text」",
                 note = if (allowSend) "" else "远程发起的任务不自动发送，消息已填好，请在手机上确认后点发送",
+                finishWhen = if (allowSend) StepCheck.Sent(text) else StepCheck.InputHas(text),
             ),
         )
     }

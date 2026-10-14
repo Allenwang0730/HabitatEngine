@@ -248,6 +248,11 @@ data class PlanStep(
     val text: String? = null,
     /** 代码判定的完成条件（技能模板给）；成立就推进，不用问模型。 */
     val check: StepCheck? = null,
+    /**
+     * 先由代码点"文字以它开头"的那一行（会话列表里的「我的电脑, ,已在电脑登录…」、搜索结果里的「我的电脑」），
+     * 点不到或点错了再交给执行器。真机上模型在 QQ 消息列表里反复按返回，几步就耗光了预算。
+     */
+    val autoTap: String? = null,
 )
 
 data class Plan(
@@ -255,6 +260,11 @@ data class Plan(
     val summary: String = "",
     /** 跑完后附在结果里的说明（如"远程发起不自动发送"）。 */
     val note: String = "",
+    /**
+     * 整件事的终点（代码判定）。重规划之后的计划也认它：大模型重规划时会把"点发送"加回来，
+     * 远程发起的任务输入完就该结束，不能卡在被安全闸挡住的发送按钮上。
+     */
+    val finishWhen: StepCheck? = null,
 )
 
 /**
@@ -264,20 +274,25 @@ data class Plan(
 sealed interface StepCheck {
     fun satisfied(o: ScreenObservation): Boolean
 
-    /** 已经进入与 [name] 的会话：顶部有这个名字，且没有输入框里还留着它（那是搜索页）。 */
+    /**
+     * 已经进入与 [name] 的会话：顶部有这个名字，且没有输入框里还留着它（那是搜索页）。
+     * 顶部常是一整条聚合行（QQ：「返回消息未读0 我的电脑 导出手机相册」），按"包含"而不是"相等"匹配。
+     * 还要求屏幕上有输入框：消息列表顶部也可能出现这个名字（置顶会话），但那里没有聊天输入框。
+     */
     data class ChatWith(val name: String) : StepCheck {
         override fun satisfied(o: ScreenObservation): Boolean {
             val top = (o.screenHeight * 0.12).toInt().coerceAtLeast(200)
-            val titled = o.elements.any { !it.editable && it.centerY <= top && it.text.trim() == name }
+            val titled = o.elements.any { !it.editable && it.centerY <= top && it.text.contains(name) }
             val searching = o.elements.any { it.editable && it.text.contains(name) }
-            return titled && !searching
+            val chatInput = o.elements.any { it.editable && !it.password && it.centerY > o.screenHeight / 2 }
+            return titled && !searching && chatInput
         }
     }
 
-    /** 输入框里已经是 [text]。 */
+    /** 输入框里正好是 [text]（忽略首尾空白）。只"包含"不算：「旧草稿测试123」不是要的状态。 */
     data class InputHas(val text: String) : StepCheck {
         override fun satisfied(o: ScreenObservation): Boolean =
-            o.elements.any { it.editable && !it.password && it.text.contains(text) }
+            o.elements.any { it.editable && !it.password && it.text.trim() == text.trim() }
     }
 
     /** [text] 已经发出去：出现在非输入框的控件里，且输入框里已经没有它。 */

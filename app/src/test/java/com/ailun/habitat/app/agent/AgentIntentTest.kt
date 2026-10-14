@@ -38,8 +38,12 @@ class AgentIntentTest {
         val type = c.resolve("TYPE_TEXT", "1")!!
         // 按坐标写入那个输入框，不依赖焦点
         assertEquals("540,2200", type.params["target"])
-        // 有字可输时不再把输入框列成点击候选
-        assertFalse(c.tapTargets.containsKey("8"))
+        // 带提示文字的输入框第一次可以点（vivo 设置首页的搜索框只是入口）；这一步点过之后就只给 TYPE_TEXT
+        val hinted = chat().copy(elements = chat().elements.map { if (it.editable) it.copy(text = "搜索设置项") else it })
+        assertTrue(Catalogs.build("在搜索框输入电池", hinted, apps).tapTargets.containsKey("8"))
+        val again = Catalogs.build("在搜索框输入电池", hinted, apps, tappedBefore = { it.editable })
+        assertFalse(again.tapTargets.containsKey("8"))
+        assertEquals("电池", again.textValues["1"])
     }
 
     @Test
@@ -151,9 +155,32 @@ class AgentIntentTest {
     }
 
     @Test
+    fun leadingMatchFindsTheContactRowNotTheSearchBox() {
+        val list = ScreenObservation(
+            "com.tencent.mobileqq", 1440, 3200,
+            listOf(
+                el("1", "我的电脑", 400, editable = true),
+                el("2", "复活吧我的爱人, ,…", 836),
+                el("3", "我的电脑, ,已在电脑登录，试试在手机上访问电脑文件,13:58,置顶聊天", 1354),
+                el("4", "我的电脑", 1500, clickable = false),
+                ScreenElement("5", "我的电脑 新消息", 540, 300, clickable = true, editable = false, focused = false, system = true),
+            ),
+            "", "a11y",
+        )
+        assertEquals("3", Catalogs.leadingMatch(list, "我的电脑")?.index)
+        assertNull(Catalogs.leadingMatch(list, "张三"))
+    }
+
+    @Test
     fun stepChecksReadTheScreen() {
         val chatWith = StepCheck.ChatWith("我的电脑")
         assertTrue(chatWith.satisfied(chat()))
+        // QQ 真机：标题在一整条聚合行里
+        val qqTitle = chat().copy(elements = listOf(el("1", "返回消息未读0 我的电脑 导出手机相册", 166)) + chat().elements.drop(1))
+        assertTrue(chatWith.satisfied(qqTitle))
+        // 消息列表顶部置顶了「我的电脑」，但没有聊天输入框：还没进会话
+        val list = ScreenObservation("com.tencent.mobileqq", 1080, 2400, listOf(el("1", "我的电脑 置顶聊天", 200)), "", "a11y")
+        assertFalse(chatWith.satisfied(list))
         // 搜索页：顶部搜索框里是「我的电脑」，还没进会话
         val search = ScreenObservation(
             "com.tencent.mobileqq", 1080, 2400,
@@ -163,6 +190,9 @@ class AgentIntentTest {
 
         assertFalse(StepCheck.InputHas("你好").satisfied(chat("", "你好")))
         assertTrue(StepCheck.InputHas("你好").satisfied(chat("你好")))
+        // 上次留下的草稿里"包含"这段文字不算：要整框替换
+        assertFalse(StepCheck.InputHas("你好").satisfied(chat("旧草稿你好")))
+        assertEquals("你好", Catalogs.build("打开qq给我的电脑发消息说你好", chat("旧草稿你好"), apps, stepText = "你好").textValues["1"])
 
         assertFalse(StepCheck.Sent("你好").satisfied(chat("你好")))
         assertTrue(StepCheck.Sent("你好").satisfied(chat("", "你好")))

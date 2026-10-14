@@ -48,12 +48,12 @@
     "goal": "打开QQ给我的电脑发消息说测试123",
     "setup": ["am force-stop com.tencent.mobileqq"],
     "verify": { "focus": "mobileqq", "screen": "测试123", "detailContains": "不自动发送" },
-    "restore": ["input keyevent BACK", "input keyevent HOME"]
+    "restore": ["input keyevent 123 67 67 67 67 67 67 67 67 67 67 67 67", "input keyevent BACK", "input keyevent BACK", "input keyevent HOME"]
   },
   {
     "id": "call_10086",
     "goal": "打电话给中国移动",
-    "verify": { "screen": "10086", "detailContains": "手动拨出" },
+    "verify": { "focus": "(dialer|Dialer|contacts)", "screen": "1\\s?0\\s?0\\s?8\\s?6", "detailContains": "手动拨出" },
     "restore": ["input keyevent HOME"]
   }
 ]

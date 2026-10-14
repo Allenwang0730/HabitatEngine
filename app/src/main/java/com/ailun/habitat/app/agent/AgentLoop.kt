@@ -276,12 +276,27 @@ class AgentLoop(
             SkillPlans.Result.None -> makePlan(run, null, onStep) ?: return LoopResult("error", 0, "规划失败")
         }
         val note = plan.note
+        val finish = plan.finishWhen
+        /**
+         * 终点已在屏幕上成立：直接结束（远程只填不发 → 带说明；本机已发送 → 代码已核实，不再复核）。
+         * 「已发送」必须是本次任务自己输入过这段文字之后：聊天记录里可能早就有同样的话。
+         * 「输入框里正好是这段文字」不要求：那就是要的状态（QQ 会保留上次没发的草稿）。
+         */
+        fun finished(): LoopResult? {
+            if (finish == null) return null
+            if (finish is StepCheck.Sent && !typedInRun(run, finish.text)) return null
+            if (!finish.satisfied(run.observation)) return null
+            val detail = note.ifEmpty { "已发送" }
+            onStep(detail)
+            return LoopResult("done", run.used, detail)
+        }
 
         while (true) {
             var index = 0
             var replanned = false
             while (index < plan.steps.size) {
                 if (stopRequested) return LoopResult("stopped", run.used, "已停止")
+                finished()?.let { return it }
                 if (run.used >= maxSteps) return LoopResult("blocked", run.used, "达到步数上限 $maxSteps")
                 val step = plan.steps[index]
                 run.seq++
@@ -299,6 +314,8 @@ class AgentLoop(
                     "stopped" -> return LoopResult("stopped", run.used, outcome.detail)
                     "fatal" -> return LoopResult("error", run.used, outcome.detail)
                     else -> {
+                        // 卡住时先看终点：远程任务卡在被挡住的发送按钮上，其实消息已经填好了
+                        finished()?.let { return it }
                         if (planner == null || run.replans >= MAX_REPLANS || run.used >= maxSteps) {
                             return LoopResult(if (outcome.status == "error") "error" else "blocked", run.used, outcome.detail)
                         }
@@ -312,6 +329,7 @@ class AgentLoop(
                 }
             }
             if (replanned) continue
+            finished()?.let { return it }
 
             // 有意不做完的固定做法（远程发起只填好消息不发送）：复核必然判"没发出去"，再重规划只会去找发送按钮
             if (note.isNotEmpty()) {
@@ -343,6 +361,10 @@ class AgentLoop(
                 ?: return LoopResult("blocked", run.used, "复核未通过：${review.reason}")
         }
     }
+
+    /** 本次任务里成功执行过「输入 X」。 */
+    private fun typedInRun(run: Run, text: String): Boolean =
+        run.history.any { it.operation == "TYPE_TEXT" && it.error.isEmpty() && it.label.contains("「$text」") }
 
     /** 没有复核时，把读到的事实（电量、时间…）带进结果，提问类目标也有答案可看。 */
     private fun withFacts(detail: String, run: Run): String =
@@ -454,6 +476,7 @@ class AgentLoop(
         var noChange = 0
         var recoveries = 0
         var invalidPicks = 0
+        var autoTaps = 0
         val start = run.used
         while (run.used - start < budget && run.used < maxSteps) {
             if (stopRequested) return StepOutcome("stopped", "已停止")
@@ -467,11 +490,30 @@ class AgentLoop(
                 onStep("这一步已完成：${step.doneWhen}")
                 return StepOutcome("done", step.doneWhen)
             }
+            // 代码先点名字对得上的那一行（最多两次）；点错了屏幕会变，下一轮由 check 或执行器接手
+            val auto = step.autoTap?.takeIf { autoTaps < MAX_AUTO_TAPS }?.let { Catalogs.leadingMatch(observation, it) }
+            if (auto != null) {
+                autoTaps++
+                val action = CatalogAction(
+                    id = "auto_${auto.index}", operation = "TAP", target = auto.index,
+                    label = "点击「${step.autoTap}」", tool = "ACTION_CLICK",
+                    params = mapOf("target" to "${auto.centerX},${auto.centerY}"),
+                    centerX = auto.centerX, centerY = auto.centerY, matchText = auto.text, viewId = auto.viewId,
+                )
+                onStep(action.label)
+                val changed = execute(run, action, observation)
+                noChange = if (changed) 0 else noChange + 1
+                continue
+            }
             // 判重/兜圈只看本步；死路名单看整个任务（重规划后也不再进已证明走不通的入口）
             val stepHistory = run.history.filter { it.planStep == run.seq }
             val ctx = stepContext(run, step, index, total)
             val catalog = Catalogs.build(
                 run.goal, observation, run.apps, allowGoalUnlock, ctx, step.text, run.failedTools, run.facts.keys, run.scope,
+                tappedBefore = { el ->
+                    val sig = "TAP|${el.viewId.ifEmpty { el.text }}|${observation.packageName}"
+                    stepHistory.any { it.signature == sig }
+                },
             ).without(LoopPolicy.deadEnds(run.history)) { LoopPolicy.signatureOf(it, observation) }
             onStep("读屏 ${ctx.nav?.path ?: observation.packageName} / ${observation.source} / ${observation.elements.size} 个控件（已用 ${run.used} 步，剩 ${maxSteps - run.used} 步）")
             catalog.guard?.let { onStep("限制：$it") }
@@ -691,6 +733,9 @@ class AgentLoop(
 
         /** 多步计划里每步最多用几步。 */
         const val STEP_BUDGET = 8
+
+        /** 技能步里代码自己点名字对得上的那一行，最多几次。 */
+        const val MAX_AUTO_TAPS = 2
 
         /** Jev 判断"当前步骤已完成"的概率达到这个值，代码就推进到下一步。 */
         const val STEP_DONE_THRESHOLD = 0.7

@@ -127,7 +127,12 @@ class JevDecisionProvider(
             MobilePriors.pageTitle(observation)?.let { addProperty("pageTitle", it) }
             MobilePriors.shortActivity(AppAccessibilityProvider.foregroundActivity)?.let { addProperty("activity", it) }
             MobilePriors.stateOfInput(observation)?.let { addProperty("inputState", it) }
-            add("elements", gson.toJsonTree(observation.elements.take(30).map { MobilePriors.elementBrief(it) }))
+            add("elements", gson.toJsonTree(observation.elements.take(30).map { el ->
+                MobilePriors.elementBrief(el).let { brief ->
+                    // 可点但不在 TAP 候选里：标出来，模型别照着元素表选它
+                    if (el.clickable && el.index !in catalog.tapTargets) brief + ("offered" to false) else brief
+                }
+            }))
             add("recentActions", gson.toJsonTree(MobilePriors.recentActions(history)))
         }
         return JsonObject().apply {
@@ -307,6 +312,8 @@ class DeepSeekDecisionProvider(
                         if (el.selectable) append("[行]")
                         if (el.focused) append("[焦点]")
                         append(Catalogs.stateOf(el))
+                        // 可点但不在 TAP 候选里（试过没用/被安全闸挡住）：明说，否则模型照着一览一直选它
+                        if (el.clickable && el.index !in catalog.tapTargets) append("[不可选]")
                     }
                     "${el.index}=${el.text.take(60)}(${Catalogs.typeOf(el)})$suffix$mark"
                 },

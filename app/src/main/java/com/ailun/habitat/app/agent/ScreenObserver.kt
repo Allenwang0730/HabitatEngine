@@ -286,13 +286,22 @@ object ScreenObserver {
     private fun dropShadowed(nodes: List<RawNode>, width: Int, height: Int): List<RawNode> {
         // 只有"行"大小的容器才去重。整屏/半屏的可点容器（桌面图标网格、整页 WebView）不能把里面的控件全吞掉：
         // 真机实测桌面 59 个图标被一个全屏可点容器聚合成了 1 个元素「时钟天气 时钟天气 日历」。
-        val containers = nodes.filter { it.clickable && it.bounds != null && !isPageSized(it.bounds, width, height) }
-        if (containers.isEmpty()) return nodes
-        return nodes.filter { node ->
+        val rowSized = nodes.filter { it.clickable && it.bounds != null && !isPageSized(it.bounds, width, height) }
+        // 包着输入框的容器是"输入栏"（输入框 + 发送/表情按钮），不是列表行：里面的按钮各自有用，不能被它吞掉。
+        // 真机（QQ 聊天页）：整条输入栏可点，标签借了子按钮的「发送」，中心却落在输入框上——点「发送」等于点输入框。
+        val inputBars = rowSized.filter { c -> nodes.any { it !== c && it.editable && it.bounds != null && c.bounds!!.contains(it.bounds) } }
+            .toSet()
+        val containers = rowSized.filter { it !in inputBars }
+        val kept = nodes.filter { node ->
             val bounds = node.bounds
             val shadowed = bounds != null && containers.any { it !== node && it.bounds!!.contains(bounds) }
             // 滑块即使在可点的行里也要留下：它要用 SET_SLIDER 拖，不是点行
             !shadowed || node.editable || node.focused || node.rangeFraction != null
+        }
+        // 输入栏的标签只是借来的子控件文字：子控件本身留下了，输入栏就不再重复出现
+        return kept.filterNot { bar ->
+            bar in inputBars && bar.aggregated &&
+                kept.any { it !== bar && !it.editable && it.text == bar.text && it.bounds != null && bar.bounds!!.contains(it.bounds) }
         }
     }
 

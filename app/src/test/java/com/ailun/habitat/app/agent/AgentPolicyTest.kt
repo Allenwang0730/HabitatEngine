@@ -423,6 +423,16 @@ class AgentPolicyTest {
             screenHeight = 3200,
         )
         assertEquals("关于手机", MobilePriors.pageTitle(page))
+        // QQ 聊天页：标题在聚合行里；正文里的「下载」不能当标题
+        val qq = page.copy(
+            screenHeight = 3200,
+            elements = listOf(
+                ScreenElement("1", "返回消息未读0 我的电脑 导出手机相册", 720, 166, clickable = true, editable = false, focused = false),
+                ScreenElement("4", "下载", 242, 618, clickable = true, editable = false, focused = false),
+            ),
+        )
+        assertEquals("我的电脑", MobilePriors.pageTitle(qq))
+        assertEquals(null, MobilePriors.pageTitle(qq.copy(elements = qq.elements.drop(1))))
         assertEquals("BluetoothSettingsActivity", MobilePriors.shortActivity("com.android.settings.Settings\$BluetoothSettingsActivity"))
     }
 
