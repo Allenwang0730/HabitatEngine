@@ -136,6 +136,8 @@ data class ActionCatalog(
     val toolTargets: Map<String, String> = emptyMap(),
     /** SET_SLIDER 的候选：`序号:max|min|mid` → 说明。 */
     val sliderTargets: Map<String, String> = emptyMap(),
+    /** 输入框里已经是要输入的文字，第一个 TAP 候选就是「发送/搜索/确定」。 */
+    val submitReady: Boolean = false,
 ) {
     fun resolve(operation: String, target: String?): CatalogAction? = when (operation) {
         "TAP" -> actions.find { it.operation == "TAP" && it.target == target }

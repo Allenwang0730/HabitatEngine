@@ -9,6 +9,15 @@ fun decideLocal(goal: String, catalog: ActionCatalog, history: List<StepNote>): 
     catalog.actions.firstOrNull { it.operation == "USE_TOOL" && history.none { h -> h.actionId == it.id } }?.let {
         return actionDecision(it, "本地使用工具「${it.label}」")
     }
+    // 有原文可输入就先输入（候选只在有输入框时出现，而且框里已经是这段文字的不会再给）
+    catalog.actions.firstOrNull { it.operation == "TYPE_TEXT" }?.let {
+        return actionDecision(it, "本地输入「${it.matchText}」")
+    }
+    // 文字已经输好：点「发送/搜索/确定」（死路名单可能去掉了它，所以按文字找，不按位置）
+    if (catalog.submitReady) {
+        catalog.actions.firstOrNull { it.operation == "TAP" && it.matchText?.trim() in Catalogs.SUBMIT_WORDS }
+            ?.let { return actionDecision(it, "本地提交「${it.matchText}」") }
+    }
     val best = catalog.actions
         .filter { it.operation == "TAP" }
         .maxByOrNull { score(goal, it.matchText.orEmpty()) }

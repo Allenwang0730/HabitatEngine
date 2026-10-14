@@ -137,6 +137,20 @@ class AgentIntentTest {
     }
 
     @Test
+    fun localPolicyTypesThenSubmits() {
+        val goal = "打开qq给我的电脑发消息说你好"
+        val empty = Catalogs.build(goal, chat(), apps, stepText = "你好")
+        assertEquals("TYPE_TEXT", decideLocal(goal, empty, emptyList()).operation)
+        val typed = Catalogs.build(goal, chat("你好"), apps, stepText = "你好")
+        assertTrue(typed.submitReady)
+        val d = decideLocal(goal, typed, emptyList())
+        assertEquals("TAP", d.operation)
+        assertEquals("发送", d.action?.matchText)
+        // 目标没要发：发送按钮不在候选里，也就不会 submitReady
+        assertFalse(Catalogs.build("打开qq看看我的电脑", chat("你好"), apps, stepText = "你好").submitReady)
+    }
+
+    @Test
     fun stepChecksReadTheScreen() {
         val chatWith = StepCheck.ChatWith("我的电脑")
         assertTrue(chatWith.satisfied(chat()))

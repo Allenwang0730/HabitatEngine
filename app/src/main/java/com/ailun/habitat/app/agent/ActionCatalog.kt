@@ -31,7 +31,7 @@ object Catalogs {
     )
 
     /** 输入完之后要点的提交类按钮。 */
-    private val SUBMIT_WORDS = listOf("发送", "搜索", "确定", "完成", "提交", "前往")
+    val SUBMIT_WORDS = listOf("发送", "搜索", "确定", "完成", "提交", "前往")
     /** 出现这些文字说明是验证/支付凭据页，模型不能碰任何控件。 */
     val lockedScreenWords = listOf("支付密码", "请输入6位", "验证指纹", "指纹支付", "面容支付", "人脸验证", "刷脸", "银行卡号")
     val guardedPackages = setOf(
@@ -312,6 +312,7 @@ object Catalogs {
         return ActionCatalog(
             actions, operations, tapTargets, textValues, appTargets, longPressTargets, guard,
             toolTargets = toolTargets, sliderTargets = sliderTargets,
+            submitReady = typed && taps.firstOrNull()?.let { el -> SUBMIT_WORDS.any { el.text.trim() == it } } == true,
         )
     }
 
