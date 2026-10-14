@@ -34,6 +34,7 @@ class FloatWindowManager private constructor(private val application: Applicatio
 
     companion object {
         private const val TAG = "FloatWindowManager"
+        private const val MAX_FLOAT_LOGS = 200
         @Volatile private var instance: FloatWindowManager? = null
 
         fun getInstance(application: Application): FloatWindowManager =
@@ -61,6 +62,8 @@ class FloatWindowManager private constructor(private val application: Applicatio
 
     val floatLogs = mutableStateListOf<String>()
     private var currentRunningId: String? = null
+    /** 由悬浮窗启动的 run id：destroy 时只停这些，不影响触发器/Agent/主界面启动的工作流 */
+    private val floatRunIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     val mountedWorkflows: List<HabitatWorkflow>
         get() = allWorkflows.filter { it.id in mountedIds }
@@ -96,10 +99,7 @@ class FloatWindowManager private constructor(private val application: Applicatio
 
     fun showFloatWindow() {
         if (isOverlayShowing) return // already visible
-        if (!mainScope.isActive) {
-            mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        }
-        mainScope.launch { ensureOverlayPermissionAndShow() }
+        ensureScope().launch { ensureOverlayPermissionAndShow() }
     }
 
     fun hideFloatWindow() {
@@ -118,13 +118,26 @@ class FloatWindowManager private constructor(private val application: Applicatio
 
     fun destroy() {
         isOverlayShowing = false
-        libObserverJob?.cancel()
-        HabitatExecutionService.activeWorkflowIds().forEach { HabitatExecutionService.stop(it) }
+        libObserverJob?.cancel(); libObserverJob = null
+        floatRunIds.toList().forEach { HabitatExecutionService.stop(it) }
+        floatRunIds.clear()
         removeOverlay()
+        mainScope.cancel() // 下次 showFloatWindow/refreshWorkflows 时由 ensureScope 重建
+    }
+
+    private fun ensureScope(): CoroutineScope {
+        if (!mainScope.isActive) mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        return mainScope
+    }
+
+    private fun addFloatLog(line: String) {
+        floatLogs.add(line)
+        val overflow = floatLogs.size - MAX_FLOAT_LOGS
+        if (overflow > 0) floatLogs.removeRange(0, overflow)
     }
 
     fun refreshWorkflows() {
-        mainScope.launch {
+        ensureScope().launch {
             withContext(Dispatchers.IO) { allWorkflows = WorkflowRepository.getAll(application); mountedIds = WorkflowRepository.getFloatMountedWorkflowIds(application) }
         }
     }
@@ -137,7 +150,7 @@ class FloatWindowManager private constructor(private val application: Applicatio
         removeOverlay()
         withContext(Dispatchers.IO) { allWorkflows = WorkflowRepository.getAll(application); mountedIds = WorkflowRepository.getFloatMountedWorkflowIds(application) }
         createOverlay()
-        libObserverJob = mainScope.launch {
+        libObserverJob = ensureScope().launch {
             HabitatStateStore.libraryVersion.collect { version ->
                 if (version > 0) {
                     allWorkflows = withContext(Dispatchers.IO) { WorkflowRepository.getAll(application) }
@@ -172,6 +185,7 @@ class FloatWindowManager private constructor(private val application: Applicatio
                         },
                         onWorkflowStop = { wf ->
                             HabitatExecutionService.stop(wf.id)
+                            floatRunIds.remove(wf.id)
                             onWorkflowStop?.invoke(wf)
                         },
                         onWorkflowToggle = { wf, enabled ->
@@ -351,17 +365,27 @@ class FloatWindowManager private constructor(private val application: Applicatio
     // ── EXECUTION ──
 
     private fun executeHabitatWorkflow(wf: HabitatWorkflow) {
+        if (HabitatExecutionService.isRunning(wf.id)) {
+            addFloatLog("已在运行中: ${wf.name}")
+            return
+        }
         floatLogs.clear()
-        floatLogs.add("— 开始执行: ${wf.name} —")
+        addFloatLog("— 开始执行: ${wf.name} —")
         currentRunningId = wf.id
         val factory = NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(application)).apply {
             applyAppHandlers(application)
         }
-        HabitatExecutionService.start(wf.id, wf.jsonContent, application, factory, onLog = { line ->
-            mainScope.launch {
-                floatLogs.add(line)
-            }
-        })
+        val scope = ensureScope()
+        floatRunIds.add(wf.id) // 先登记，避免极快结束时 onComplete 早于登记
+        val ok = HabitatExecutionService.start(
+            wf.id, wf.jsonContent, application, factory,
+            onComplete = { floatRunIds.remove(wf.id) },
+            onLog = { line ->
+                HabitatLogger.habitat(line)
+                scope.launch { addFloatLog(line) }
+            },
+        )
+        if (!ok) floatRunIds.remove(wf.id)
     }
 
     // ── LIFECYCLE ──

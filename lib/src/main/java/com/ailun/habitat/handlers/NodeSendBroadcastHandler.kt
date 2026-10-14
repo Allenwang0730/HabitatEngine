@@ -19,8 +19,8 @@ class NodeSendBroadcastHandler : INodeHandler {
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         val rawAction = node.params?.get("action")?.toString()?.trim().orEmpty()
         if (rawAction.isEmpty()) {
-            context.variables["broadcast_success"] = false
-            context.variables["broadcast_error"] = "缺少 'action' 参数"
+            context.putVariable("broadcast_success", false)
+            context.putVariable("broadcast_error", "缺少 'action' 参数")
             return node.next
         }
         val action = context.interpolate(rawAction)
@@ -33,21 +33,27 @@ class NodeSendBroadcastHandler : INodeHandler {
             node.params?.get("component")?.toString()?.takeIf { it.isNotBlank() }?.let {
                 intent.setComponent(android.content.ComponentName.unflattenFromString(context.interpolate(it)))
             }
-            applyExtras(intent, node.params?.get("extras")?.toString())
+            applyExtras(intent, node.params?.get("extras"), context)
 
             context.appContext.sendBroadcast(intent)
-            context.variables["broadcast_success"] = true
+            context.putVariable("broadcast_success", true)
             context.log("SendBroadcast: $action")
         } catch (e: Exception) {
-            context.variables["broadcast_success"] = false
-            context.variables["broadcast_error"] = e.message ?: "Unknown error"
+            context.putVariable("broadcast_success", false)
+            context.putVariable("broadcast_error", e.message ?: "Unknown error")
             context.log("SendBroadcast FAILED: ${e.message}")
         }
         return node.next
     }
 
-    private fun applyExtras(intent: Intent, raw: String?) {
-        if (raw.isNullOrBlank()) return
+    private fun applyExtras(intent: Intent, extras: Any?, context: WorkflowContext) {
+        // extras 可为 JSON 字符串或已解析的对象（Gson Map）；字符串值做变量插值
+        val raw = when (extras) {
+            null -> return
+            is Map<*, *> -> com.google.gson.Gson().toJson(extras)
+            else -> extras.toString()
+        }
+        if (raw.isBlank()) return
         try {
             val json = JSONObject(raw)
             val keys = json.keys()
@@ -58,7 +64,7 @@ class NodeSendBroadcastHandler : INodeHandler {
                     is Long -> intent.putExtra(key, v)
                     is Double -> intent.putExtra(key, v)
                     is Boolean -> intent.putExtra(key, v)
-                    else -> intent.putExtra(key, v.toString())
+                    else -> intent.putExtra(key, context.interpolate(v.toString()))
                 }
             }
         } catch (_: Exception) {

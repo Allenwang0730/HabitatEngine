@@ -83,7 +83,7 @@
 
 | 类型 | 功能 | key 参数 | 输出变量 |
 |------|------|----------|---------|
-| `ACTION_SHELL` | 执行 Shell | `command`: 命令, `mode`: `"auto"`/`"shizuku"`/`"root"` | `shell_output`, `shell_success` |
+| `ACTION_SHELL` | 执行 Shell | `command`: 命令（`${var}` 自动转义，勿加引号）, `mode`: `"auto"`/`"shizuku"`/`"root"` | `shell_output`, `shell_success` |
 | `ACTION_LAUNCH_APP` | 启动应用 | `package_name`: 包名 | 无 |
 | `ACTION_FORCE_STOP_APP` | 强制停止 | `package_name`: 包名 | 无 |
 | `ACTION_SCREEN_WAKE` | 唤醒/锁屏 | `action`: `"wake"`/`"sleep"` | 无 |
@@ -147,7 +147,9 @@
 
 - `${varName}` — 引用上下文变量，引擎自动插值替换
 - 变量作用域：整个工作流执行期间（`WorkflowContext.variables`，ConcurrentHashMap 线程安全）
-- 插值是递归的（最多 5 层），支持嵌套引用 `${outer}` → 解析为含 `${inner}` 的字符串 → 继续解析
+- 插值只替换一轮：变量值里如果本身含有 `${...}`，会原样保留，不再展开（防止短信/通知等外部文本二次展开读出其他变量）
+- 变量名允许字母、数字、下划线和点（`${a.b}` 查找名为 `a.b` 的变量，不做路径解析）
+- `ACTION_SHELL` 的 `command` 里每个 `${var}` 替换时会自动用单引号转义成一个完整的 shell 参数，**不要再自己给 `${var}` 加引号**（`echo '${x}'` 会变成双重引号）。确需旧行为时设 `raw_interpolation: true`
 
 ### 3.2 变量读写
 

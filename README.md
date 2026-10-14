@@ -1,18 +1,45 @@
-# Habitat — Embeddable, LLM-Driven Android Automation Runtime
+# Habitat — Let AI Agents Drive Android
 
-> An **embeddable** Android automation runtime. Define workflows as flat JSON
-> (LLM-generatable), run them via **accessibility + system APIs**.
-> Drop the `:lib` into any app — or use it as the execution layer for **device AI agents**.
+> An **embeddable Android automation runtime** with an **on-device MCP server** and an
+> **autonomous agent** (DeepSeek plans, TypeSafe Jev picks each tap, code verifies).
+> Workflows are flat JSON that LLMs can write; execution goes through accessibility + system APIs.
 
-> **One line**: the library that lets LLMs & AI agents control Android, and lets developers
-> embed JSON-workflow automation into their own apps.
-
+[![CI](https://github.com/Allenwang0730/HabitatEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/Allenwang0730/HabitatEngine/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Allenwang0730/HabitatEngine)](https://github.com/Allenwang0730/HabitatEngine/releases)
+[![JitPack](https://jitpack.io/v/Allenwang0730/HabitatEngine.svg)](https://jitpack.io/#Allenwang0730/HabitatEngine)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-purple)]()
 [![Min SDK](https://img.shields.io/badge/API-29+-green)]()
-[![Nodes](https://img.shields.io/badge/Nodes-84-blue)]()
-[![MCP](https://img.shields.io/badge/MCP-LM_accessible-green)]()
-[![Compose](https://img.shields.io/badge/UI-Compose_M3-orange)]()
-[![License](https://img.shields.io/badge/License-Apache--2.0-blue)]()
+[![MCP](https://img.shields.io/badge/MCP-server-green)]()
+[![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+
+[中文文档](README_CN.md)
+
+**What you get**
+
+- **Tell the phone what to do** — "open Settings and go to Bluetooth", "turn brightness to max", "what's my battery?" The agent plans, uses device tools directly when it can, taps through the UI when it must, and verifies the result on screen. On-device eval: with planning, **28/28** for both Jev and DeepSeek executors (2026-10-09, 13–18/28 without) — [method and raw data](docs/EVAL.md).
+- **An MCP server on the phone** — any MCP client (Claude, Cursor, your own agent) can read the screen and call ~80 automation nodes over `ws://127.0.0.1:8931/mcp`, token-authenticated, dangerous tools off by default.
+- **An embeddable engine** — drop `:lib` into your own app (JitPack) and run LLM-generated JSON workflows: triggers, branches, loops, variables, shell, HTTP, sensors, notifications.
+
+## Try it in 2 minutes
+
+1. Install the APK from [Releases](https://github.com/Allenwang0730/HabitatEngine/releases) on Android 10+ — `app-standard-arm64-v8a-release.apk` fits almost every phone (`universal` if unsure).
+2. Open Habitat, enable its **accessibility service** when prompted.
+3. **Agent** tab → pick an executor (Jev / DeepSeek / Local), paste your API key (stored encrypted on the device), type a goal, tap **Start**.
+   - No key? Choose **Local** — it runs offline with simple heuristics.
+   - Calling Jev from mainland China returns HTTP 451; see [Jev network](#autonomous-mode-planner-deepseek--executor-jev--code-control).
+
+Prefer workflows? **AI 生成** tab → describe a task in plain language → DeepSeek writes the JSON → save & run.
+
+### Use the engine in your app
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement { repositories { maven("https://jitpack.io") } }
+// build.gradle.kts
+implementation("com.github.Allenwang0730:HabitatEngine:v1.9.0")
+```
+
+See [docs/ENGINE_USAGE.md](docs/ENGINE_USAGE.md) for initialization and permissions.
 
 ---
 
@@ -95,7 +122,7 @@ The engine has 84 node types across categories. Common / core ones below (same l
 | ACTION_PARSE_JSON | json, path, output_var | parse JSON | |
 | ACTION_HTTP_REQUEST | url, method, output_var, timeout | HTTP request | needs network |
 | ACTION_LAUNCH_APP | package_name | launch app | |
-| ACTION_CLICK | target, region, occurrence | click | needs a11y |
+| ACTION_CLICK | target, region, occurrence, offset_x, offset_y | click | needs a11y |
 | ACTION_INPUT_TEXT | text, mode | input text | needs a11y |
 | ACTION_READ_SCREEN | keyword, output_var | read screen | needs a11y |
 | ACTION_FIND_ELEMENT | selector, search_mode, region, timeout_ms, output_var | find element | needs a11y |
@@ -120,7 +147,7 @@ Full categories in each `NodeModules`; `NodeKnowledge` is the single source for 
 ### Interaction (6)
 | Type | What it does |
 |------|-------------|
-| `ACTION_CLICK` | Click coordinates or accessibility element |
+| `ACTION_CLICK` | Click coordinates or accessibility element (`offset_x`/`offset_y` shift from the target center) |
 | `ACTION_SWIPE` | Linear swipe gesture |
 | `ACTION_LONG_PRESS` | Long press |
 | `ACTION_INPUT_TEXT` | Type text (a11y / shell / clipboard) |
@@ -273,7 +300,7 @@ The editor renders workflows as interactive directed acyclic graphs on a custom 
 | Layout | Sugiyama-style layered auto-layout |
 | Node colors | Color-coded by category (interaction / system / data / logic / network / sensor) |
 | Edge types | Gray solid (`next`), green (`true` branch), red (`false` branch), orange dashed (loop) |
-| Gestures | One-finger pan, two-finger pinch-zoom (0.3×–3.0×), double-tap reset, tap to select |
+| Gestures | One-finger pan, two-finger pinch-zoom, double-tap reset, tap a node for details |
 | Toggle | Switch between raw JSON editor and DAG visualizer |
 
 Node-level `label` and `description` fields control DAG display labels (optional, fully backward-compatible).
@@ -304,20 +331,52 @@ WorkflowAIGenerator.generate(context, "call 10086 and record")  // → Generated
 
 ## MCP Mobile Agent (AI controls the phone)
 
-The engine exposes an **MCP server** (JSON-RPC 2.0, 82 tools):
+The engine exposes an **MCP server** (JSON-RPC 2.0):
 
-```
-ws://<host>:8931/mcp?token=<token>   # token auth (default habitat-dev-token, change in control page, same LAN)
+```bash
+adb forward tcp:8931 tcp:8931          # the server listens on the phone's 127.0.0.1 by default
+ws://127.0.0.1:8931/mcp                # Authorization: Bearer <token> (or ?token=)
 ```
 
 - `initialize / tools/list / tools/call` standard MCP, any LLM client can connect
+- **Auth**: a random token is generated per install (view / copy / regenerate on the App's Agent page); LAN access is off by default; dangerous nodes (shell, files, SMS, calls, …) are refused for remote callers unless explicitly enabled
 - supports `region`/`occurrence` to precisely target repeated text (e.g. "tap the confirm button at the bottom")
-- App **Agent control page**: service switch / status / LAN IP / port / token
-- PC side `scripts/agent_daemon.mjs` (persistent long-connection, read-screen 3.9s→277ms) / `mcp_call.mjs`
+- WeChat reading: only in the `wechat` build flavor (`./gradlew :app:assembleWechatDebug`), which adds a reader service named `SelectToSpeakService` — WeChat only exposes its UI tree to that class name, so this impersonates a Google component: personal use only, not for store distribution. The default `standard` flavor doesn't include it and falls back to on-device ML Kit OCR
+- PC side `scripts/agent_daemon.mjs` (persistent connection) / `mcp_call.mjs` (one-off calls, `--full` for untruncated fields)
+
+### Autonomous mode: planner (DeepSeek) + executor (Jev) + code control
+
+```
+goal ─► DeepSeek plans: a few steps, each with a completion condition visible on screen; uses device tools when possible
+          ▼
+   each step: tool step calls the device directly / UI step lets the executor (Jev / DeepSeek / local) pick one candidate per screen
+          │  stuck (looping / no change / low confidence) → replan the rest from the current screen (≤2 times)
+          ▼
+   DeepSeek review: checks on-screen evidence that the goal is really done; answers question-style goals
+```
+
+- **Models choose, code controls**: the executor only picks from code-built candidates; step progress, navigation stack + page graph, loop detection, recovery and safety gates live in code
+- **Device tools**: jump straight to 15 settings pages, toggle Wi-Fi / Bluetooth / flashlight / DND, set brightness / volume, read battery / time / device info / network. State-changing tools must be named in the user's own goal
+- **Page state**: package + activity + title identify the page; switch on/off, slider %, and input contents go into the candidates; the nav stack tells the model where it is, where Back goes, and which entries were already tried
+- **Safety**: planner output is untrusted — tool/arg allow-lists, typed text must be a substring of the goal, payment buttons / permission dialogs are unlocked only by the user's original goal
+- **Entry points**: the Agent page (executor Jev / DeepSeek / local, "DeepSeek planning & review" switch); MCP `agent_start` (`goal` / `provider` / `max_steps` / `planner`), `agent_stop`, `agent_status`
+- **Jev from mainland China** returns HTTP 451: use a proxy/VPN on the phone, or set "Jev proxy" to `127.0.0.1:<PC proxy port>` and run `adb reverse tcp:<port> tcp:<port>`
+
+**On-device evaluation** (one vivo phone, Android 16; results verified independently via adb / screen reads, not the agent's own DONE). Method, raw data and limitations: [docs/EVAL.md](docs/EVAL.md).
+
+| Executor | with planner | without | date / commit |
+|---|:---:|:---:|---|
+| Jev | 28/28 | 13/28 | 2026-10-09 · `09b0632`, 7 tasks × 4 runs |
+| DeepSeek | 28/28 | 18/28 | 2026-10-09 · `09b0632`, 7 tasks × 4 runs |
+| DeepSeek | 10/10 | 7/10 | 2026-10-14 · `9069155`, 10 tasks (adds messaging / calling) |
+
+Tasks: open Bluetooth page, search inside Settings, open About phone, switch Clock to stopwatch, max brightness, ask battery level, ask Android version; since 2026-10-14 also search without quotes, type a QQ message, call a carrier by name. Reproduce with `node scripts/agent_eval.mjs` (tasks in `scripts/agent_eval_tasks.json`). See [docs/AGENT.md](docs/AGENT.md).
 
 ## Testing
 
+- Unit tests (JVM, no device): `./gradlew :lib:testDebugUnitTest :app:testDebugUnitTest` (126 tests)
 - Engine self-test: `scripts/run_selftest.ps1` (**68 regressions = 53 PASS / 0 FAIL / 15 SKIP**, needs a device)
+- Autonomous-mode device eval: `node scripts/agent_eval.mjs` (`scripts/agent_eval_show.mjs` for details)
 - LLM generation accuracy: `scripts/verify_workflow_gen.ps1` (13 scenarios)
 
 ---
@@ -353,7 +412,7 @@ Habitat/                          # Root project
 ├── lib/                          # :lib — engine (zero Android UI deps)
 │   └── com/ailun/habitat/
 │       ├── api/                  # IAccessibilityProvider, IShellExecutor
-│       ├── handlers/             # 40+ INodeHandler implementations
+│       ├── handlers/             # ~80 INodeHandler implementations
 │       ├── HabitatExecutor.kt    # Coroutine-based execution loop
 │       ├── HabitatJson.kt        # JSON parser + sample workflows
 │       ├── WorkflowGraph.kt      # Graph model (start_node_id + nodes)
@@ -367,6 +426,7 @@ Habitat/                          # Root project
 │       ├── ui/                   # ProfileTab, HabitatSettingsActivity
 │       ├── bridge/               # AppAccessibilityProvider, ShizukuShellExecutor
 │       ├── ai/                   # NodeKnowledge(node docs), WorkflowAIGenerator(LLM gen), WorkflowAIClient(DeepSeek), LLMServiceProvider, LiteRtLLMServiceImpl
+│       ├── agent/                # autonomous mode: Planner, AgentLoop, ActionCatalog, DeviceTools, NavigationState, ScreenObserver
 │       ├── dag/                  # DagView, DagLayoutEngine, DagModel
 │       ├── triggers/             # Notification, SMS, Timer, Clipboard, Key
 │       ├── HabitatDashboard.kt   # Main scaffold + editor in home card + Agent control entry

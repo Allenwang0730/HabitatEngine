@@ -24,14 +24,66 @@ object WorkflowRepository {
                 saveAllInternal(prefs, seeded)
                 return seeded
             }
-            val type = object : TypeToken<MutableList<HabitatWorkflow>>() {}.type
-            val list: MutableList<HabitatWorkflow>? = try {
-                gson.fromJson(raw, type)
+            parse(raw)?.let { return it }
+            // 整体解析失败：备份原始串（不覆盖已有备份），再逐项宽松恢复；完全无法解析才用默认列表。
+            // 两种情况都不写回 KEY_WORKFLOWS——用户下次保存前原数据保持不动。
+            backupCorrupt(prefs, raw)
+            return parseItems(raw) ?: defaultWorkflows()
+        }
+    }
+
+    /** 整体解析；失败返回 null。结果经 [sanitize] 过滤。 */
+    internal fun parse(raw: String): List<HabitatWorkflow>? = try {
+        gson.fromJson<List<HabitatWorkflow?>>(raw, object : TypeToken<List<HabitatWorkflow?>>() {}.type)
+            ?.let(::sanitize)
+    } catch (e: Exception) {
+        Log.e(TAG, "解析工作流数据失败，尝试逐项恢复", e)
+        null
+    }
+
+    /** 逐元素宽松解析（跳过坏项）；不是 JSON 数组则返回 null。 */
+    internal fun parseItems(raw: String): List<HabitatWorkflow>? {
+        val array = try {
+            com.google.gson.JsonParser.parseString(raw).takeIf { it.isJsonArray }?.asJsonArray
+        } catch (e: Exception) {
+            Log.e(TAG, "工作流数据无法按数组解析", e)
+            null
+        } ?: return null
+        val recovered = array.mapNotNull { el ->
+            try {
+                gson.fromJson(el, HabitatWorkflow::class.java)
             } catch (e: Exception) {
-                Log.e(TAG, "解析工作流数据失败，回退到默认列表", e)
+                Log.w(TAG, "跳过损坏的工作流项: ${e.message}")
                 null
             }
-            return list ?: defaultWorkflows().also { saveAllInternal(prefs, it) }
+        }
+        Log.w(TAG, "逐项恢复 ${recovered.size}/${array.size()} 个工作流")
+        return sanitize(recovered)
+    }
+
+    /** Gson 绕过构造函数，非空字段可能为 null：过滤 id/name/jsonContent 为 null 的项，description 补 ""。 */
+    @Suppress("SENSELESS_COMPARISON")
+    private fun sanitize(list: List<HabitatWorkflow?>): List<HabitatWorkflow> =
+        list.mapNotNull { wf ->
+            when {
+                wf == null || wf.id == null || wf.name == null || wf.jsonContent == null -> null
+                wf.description == null -> wf.copy(description = "")
+                else -> wf
+            }
+        }
+
+    /** 备份到 `workflows_json_corrupt_<时间戳>`；内容与已有备份相同则跳过，从不覆盖已有备份键。 */
+    private fun backupCorrupt(prefs: android.content.SharedPreferences, raw: String) {
+        try {
+            val prefix = "${KEY_WORKFLOWS}_corrupt_"
+            if (prefs.all.any { (k, v) -> k.startsWith(prefix) && v == raw }) return
+            var key = prefix + System.currentTimeMillis()
+            var n = 1
+            while (prefs.contains(key)) key = prefix + System.currentTimeMillis() + "_" + n++
+            prefs.edit().putString(key, raw).commit()
+            Log.w(TAG, "已备份损坏的工作流数据到 '$key'")
+        } catch (e: Exception) {
+            Log.e(TAG, "备份损坏的工作流数据失败", e)
         }
     }
 

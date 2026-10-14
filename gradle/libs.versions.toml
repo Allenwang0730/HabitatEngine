@@ -28,6 +28,7 @@ shizuku = "13.1.5"
 okhttp = "4.12.0"
 security-crypto = "1.1.0-alpha06"
 ktor = "3.2.3"
+mlkit-text-chinese = "16.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -60,9 +61,9 @@ shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
 ktor-server-core = { group = "io.ktor", name = "ktor-server-core", version.ref = "ktor" }
-ktor-server-cio = { group = "io.ktor", name = "ktor-server-cio", version.ref = "ktor" }
 ktor-server-netty = { group = "io.ktor", name = "ktor-server-netty", version.ref = "ktor" }
 ktor-server-websockets = { group = "io.ktor", name = "ktor-server-websockets", version.ref = "ktor" }
+mlkit-text-recognition-chinese = { group = "com.google.mlkit", name = "text-recognition-chinese", version.ref = "mlkit-text-chinese" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -25,7 +25,7 @@ class NodeReadCallLogHandler : INodeHandler {
             != PackageManager.PERMISSION_GRANTED
         ) {
             Log.e(TAG, "ReadCallLog failed: READ_CALL_LOG permission not granted")
-            context.variables["call_log_found"] = false
+            context.putVariable("call_log_found", false)
             return node.next
         }
 
@@ -40,12 +40,12 @@ class NodeReadCallLogHandler : INodeHandler {
         }
 
         val (number, type, date) = queryLatest(context.appContext, typeFilter)
-        context.variables["call_log_number"] = number
-        context.variables["call_log_found"] = number != null
-        context.variables["call_log_type"] = type
-        context.variables["call_log_date"] = date
+        context.putVariable("call_log_number", number)
+        context.putVariable("call_log_found", number != null)
+        context.putVariable("call_log_type", type)
+        context.putVariable("call_log_date", date)
         if (outputVar != "call_log_number") {
-            context.variables[outputVar] = number
+            context.putVariable(outputVar, number)
         }
         Log.i(TAG, "ReadCallLog: number=$number type=$type")
         return node.next

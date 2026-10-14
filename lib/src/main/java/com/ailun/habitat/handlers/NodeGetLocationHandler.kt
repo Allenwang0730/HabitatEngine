@@ -25,8 +25,20 @@ class NodeGetLocationHandler : INodeHandler {
         try {
             val lm = context.appContext.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
             if (lm == null) {
-                context.variables["location_success"] = false
-                context.variables["location_error"] = "LocationManager not available"
+                context.putVariable("location_success", false)
+                context.putVariable("location_error", "LocationManager not available")
+                return node.next
+            }
+
+            val ctx = context.appContext
+            val fine = ctx.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            val coarse = ctx.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!fine && !coarse) {
+                context.putVariable("location_success", false)
+                context.putVariable("location_error", "缺少定位权限（ACCESS_FINE/COARSE_LOCATION）")
+                context.log("GetLocation FAILED (location permission missing)")
                 return node.next
             }
 
@@ -39,25 +51,25 @@ class NodeGetLocationHandler : INodeHandler {
             }
 
             if (best != null) {
-                context.variables["latitude"] = best.latitude
-                context.variables["longitude"] = best.longitude
-                context.variables["location_accuracy"] = best.accuracy
-                context.variables["location_time"] = best.time
-                context.variables[outputVar] = "${best.latitude},${best.longitude}"
-                context.variables["location_success"] = true
+                context.putVariable("latitude", best.latitude)
+                context.putVariable("longitude", best.longitude)
+                context.putVariable("location_accuracy", best.accuracy)
+                context.putVariable("location_time", best.time)
+                context.putVariable(outputVar, "${best.latitude},${best.longitude}")
+                context.putVariable("location_success", true)
                 context.log("GetLocation OK: ${best.latitude},${best.longitude} (acc=${best.accuracy}m)")
             } else {
-                context.variables["location_success"] = false
-                context.variables["location_error"] = "无最近已知位置（需开启定位且至少定位过一次）"
+                context.putVariable("location_success", false)
+                context.putVariable("location_error", "无最近已知位置（需开启定位且至少定位过一次）")
                 context.log("GetLocation: no last known location")
             }
         } catch (e: SecurityException) {
-            context.variables["location_success"] = false
-            context.variables["location_error"] = "缺少定位权限: ${e.message}"
+            context.putVariable("location_success", false)
+            context.putVariable("location_error", "缺少定位权限: ${e.message}")
             context.log("GetLocation FAILED (location permission missing)")
         } catch (e: Exception) {
-            context.variables["location_success"] = false
-            context.variables["location_error"] = e.message ?: "Unknown error"
+            context.putVariable("location_success", false)
+            context.putVariable("location_error", e.message ?: "Unknown error")
             context.log("GetLocation FAILED: ${e.message}")
         }
         return node.next

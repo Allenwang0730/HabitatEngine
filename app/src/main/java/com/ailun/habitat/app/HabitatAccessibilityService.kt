@@ -31,6 +31,11 @@ class HabitatAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        AppAccessibilityProvider.onServiceDestroyed()
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
         AppAccessibilityProvider.onServiceDestroyed()
         super.onDestroy()

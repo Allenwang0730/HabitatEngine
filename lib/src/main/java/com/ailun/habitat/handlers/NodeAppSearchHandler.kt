@@ -83,21 +83,21 @@ class NodeAppSearchHandler : INodeHandler {
 
             val appListJson = JSONArray(results).toString()
 
-            context.variables["app_list"] = appListJson
-            context.variables["app_count"] = results.size
-            context.variables["app_search_success"] = true
+            context.putVariable("app_list", appListJson)
+            context.putVariable("app_count", results.size)
+            context.putVariable("app_search_success", true)
 
             if (outputVar != "app_list") {
-                context.variables[outputVar] = appListJson
+                context.putVariable(outputVar, appListJson)
             }
 
             Log.i(TAG, "App search: query='${query ?: ""}', found ${results.size} apps")
         } catch (e: Exception) {
             Log.e(TAG, "App search failed: ${e.message}", e)
-            context.variables["app_search_success"] = false
-            context.variables["app_list"] = "[]"
-            context.variables["app_count"] = 0
-            context.variables["app_search_error"] = e.message ?: "Unknown error"
+            context.putVariable("app_search_success", false)
+            context.putVariable("app_list", "[]")
+            context.putVariable("app_count", 0)
+            context.putVariable("app_search_error", e.message ?: "Unknown error")
         }
 
         return node.next

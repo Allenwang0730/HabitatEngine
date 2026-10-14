@@ -22,7 +22,7 @@ class NodeShareHandler : INodeHandler {
 
         val rawText = params["text"]?.toString()?.trim() ?: run {
             Log.w(TAG, "No text specified for sharing")
-            context.variables["share_success"] = false
+            context.putVariable("share_success", false)
             return node.next
         }
 
@@ -48,12 +48,12 @@ class NodeShareHandler : INodeHandler {
 
             context.appContext.startActivity(chooserIntent)
 
-            context.variables["share_success"] = true
+            context.putVariable("share_success", true)
             Log.i(TAG, "Share intent launched: type=$mimeType, text=${text.take(50)}...")
         } catch (e: Exception) {
             Log.e(TAG, "Share failed: ${e.message}", e)
-            context.variables["share_success"] = false
-            context.variables["share_error"] = e.message ?: "Unknown error"
+            context.putVariable("share_success", false)
+            context.putVariable("share_error", e.message ?: "Unknown error")
         }
 
         return node.next

@@ -18,13 +18,13 @@ import com.ailun.habitat.WorkflowNode
 class NodeGetSettingHandler : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val key = node.params?.get("key")?.toString()?.trim().orEmpty()
+        val key = node.params?.get("key")?.toString()?.let { context.interpolate(it) }?.trim().orEmpty()
         if (key.isEmpty()) {
-            context.variables["setting_success"] = false
-            context.variables["setting_error"] = "缺少 key"
+            context.putVariable("setting_success", false)
+            context.putVariable("setting_error", "缺少 key")
             return node.next
         }
-        val namespace = node.params?.get("namespace")?.toString()?.trim()?.lowercase() ?: "system"
+        val namespace = node.params?.get("namespace")?.toString()?.let { context.interpolate(it) }?.trim()?.lowercase() ?: "system"
         val outputVar = node.params?.get("output_var")?.toString()?.trim()?.ifEmpty { null }
             ?: "setting_value"
         val resolver = context.appContext.contentResolver
@@ -36,18 +36,18 @@ class NodeGetSettingHandler : INodeHandler {
                 else -> Settings.System.getString(resolver, key)
             }
             if (value != null) {
-                context.variables[outputVar] = value
-                context.variables["setting_key"] = key
-                context.variables["setting_namespace"] = namespace
-                context.variables["setting_success"] = true
+                context.putVariable(outputVar, value)
+                context.putVariable("setting_key", key)
+                context.putVariable("setting_namespace", namespace)
+                context.putVariable("setting_success", true)
                 context.log("GetSetting $namespace/$key = $value")
             } else {
-                context.variables["setting_success"] = false
-                context.variables["setting_error"] = "设置项 $namespace/$key 不存在或无权限读取"
+                context.putVariable("setting_success", false)
+                context.putVariable("setting_error", "设置项 $namespace/$key 不存在或无权限读取")
             }
         } catch (e: Exception) {
-            context.variables["setting_success"] = false
-            context.variables["setting_error"] = e.message ?: "Unknown error"
+            context.putVariable("setting_success", false)
+            context.putVariable("setting_error", e.message ?: "Unknown error")
         }
         return node.next
     }

@@ -13,9 +13,12 @@ import android.util.Size
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * [ACTION_CAPTURE_PHOTO]：拍照并保存 JPEG（需 CAMERA 运行时权限）。
@@ -31,6 +34,7 @@ import java.io.File
 class NodeCapturePhotoHandler : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
+        context.putVariable("photo_success", false)
         val rawPath = node.params?.get("path")?.toString()
         val outputVar = node.params?.get("output_var")?.toString()?.trim()?.ifEmpty { null }
             ?: "photo_path"
@@ -43,14 +47,18 @@ class NodeCapturePhotoHandler : INodeHandler {
 
         val cm = context.appContext.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         if (cm == null) {
-            context.variables["photo_success"] = false
-            context.variables["photo_error"] = "CameraManager not available"
+            context.putVariable("photo_success", false)
+            context.putVariable("photo_error", "CameraManager not available")
             return node.next
         }
 
         val thread = HandlerThread("HabitatCamera").apply { start() }
         val handler = Handler(thread.looper)
         val imageReady = CompletableDeferred<Boolean>()
+        var reader: android.media.ImageReader? = null
+        val openedRef = AtomicReference<CameraDevice?>(null)
+        // 超时/异常后置 true：晚到的 onOpened 直接关闭相机，避免泄漏占用
+        val abandoned = AtomicBoolean(false)
 
         try {
             val cameraId = cm.cameraIdList.firstOrNull()
@@ -64,8 +72,9 @@ class NodeCapturePhotoHandler : INodeHandler {
                 return node.next
             }
 
-            val reader = android.media.ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
-            reader.setOnImageAvailableListener({ r ->
+            val imageReader = android.media.ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
+            reader = imageReader
+            imageReader.setOnImageAvailableListener({ r ->
                 val image = r.acquireLatestImage()
                 if (image != null) {
                     try {
@@ -86,26 +95,32 @@ class NodeCapturePhotoHandler : INodeHandler {
 
             val opened = CompletableDeferred<CameraDevice?>()
             cm.openCamera(cameraId, object : CameraDevice.StateCallback() {
-                override fun onOpened(camera: CameraDevice) { opened.complete(camera) }
+                override fun onOpened(camera: CameraDevice) {
+                    if (abandoned.get()) { camera.close(); return }
+                    openedRef.set(camera)
+                    opened.complete(camera)
+                    // 与 finally 竞争：若此刻已放弃，由这里关闭（close 可重复调用）
+                    if (abandoned.get()) camera.close()
+                }
                 override fun onDisconnected(camera: CameraDevice) { camera.close(); opened.complete(null) }
                 override fun onError(camera: CameraDevice, error: Int) { camera.close(); opened.complete(null) }
             }, handler)
 
-            val camera = withTimeoutOrNull(5_000) { opened.await() }
-            if (camera == null) {
-                reader.close()
+            val cam = withTimeoutOrNull(5_000) { opened.await() }
+            if (cam == null) {
                 fail(context, "openCamera failed（相机被占用？）")
                 return node.next
             }
 
             val sessionReady = CompletableDeferred<Boolean>()
-            camera.createCaptureSession(
-                listOf(reader.surface),
+            @Suppress("DEPRECATION")
+            cam.createCaptureSession(
+                listOf(imageReader.surface),
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
                         try {
-                            val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                                addTarget(reader.surface)
+                            val request = cam.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                                addTarget(imageReader.surface)
                                 set(CaptureRequest.JPEG_QUALITY, 95)
                             }
                             session.capture(request.build(), null, handler)
@@ -129,42 +144,45 @@ class NodeCapturePhotoHandler : INodeHandler {
                 false
             }
 
-            camera.close()
-            reader.close()
-
             if (captured && File(path).length() > 0) {
-                context.variables["photo_path"] = path
-                if (outputVar != null) context.variables[outputVar] = path
-                context.variables["photo_success"] = true
+                context.putVariable("photo_path", path)
+                if (outputVar != null) context.putVariable(outputVar, path)
+                context.putVariable("photo_success", true)
                 context.log("CapturePhoto OK: $path")
             } else {
                 fail(context, "capture failed（相机被占用或配置失败）")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: SecurityException) {
             fail(context, "缺少 CAMERA 权限: ${e.message}")
         } catch (e: Exception) {
             fail(context, e.message ?: "Unknown error")
         } finally {
-            thread.quitSafely()
+            abandoned.set(true)
+            runCatching { openedRef.get()?.close() }
+            runCatching { reader?.close() }
+            if (openedRef.get() == null) {
+                // openCamera 可能仍在进行：保留回调线程一段时间，让晚到的 onOpened 能被投递并关闭相机
+                handler.postDelayed({ thread.quitSafely() }, 10_000)
+            } else {
+                thread.quitSafely()
+            }
         }
         return node.next
     }
 
     private fun fail(context: WorkflowContext, error: String) {
-        context.variables["photo_success"] = false
-        context.variables["photo_error"] = error
+        context.putVariable("photo_success", false)
+        context.putVariable("photo_error", error)
         context.log("CapturePhoto FAILED: $error")
     }
 
+    /** 从相机支持的 JPEG 尺寸中选：宽 ≤ 2560 的最大者（避免大图 OOM）；都超过则取最小的。 */
     private fun pickJpegSize(ch: CameraCharacteristics): Size? {
         val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
-        val best = map.getOutputSizes(ImageFormat.JPEG)?.maxByOrNull { it.width * it.height }
-            ?: return null
-        // 限制到 2560 宽以内，避免大图 OOM
-        return if (best.width > 2560) {
-            Size(2560, (2560.0 * best.height / best.width).toInt())
-        } else {
-            best
-        }
+        val sizes = map.getOutputSizes(ImageFormat.JPEG)?.takeIf { it.isNotEmpty() } ?: return null
+        return sizes.filter { maxOf(it.width, it.height) <= 2560 }.maxByOrNull { it.width.toLong() * it.height }
+            ?: sizes.minByOrNull { it.width.toLong() * it.height }
     }
 }

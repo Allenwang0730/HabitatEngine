@@ -6,8 +6,7 @@ import android.util.Log
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
-import com.ailun.habitat.api.IAccessibilityProvider
-import com.ailun.habitat.api.IShellExecutor
+import com.ailun.habitat.paramIntOrNull
 
 /**
  * [ACTION_VOLUME]：控制音量及获取音量信息。
@@ -16,14 +15,13 @@ import com.ailun.habitat.api.IShellExecutor
  *   - `action`（必填："set"/"get"/"up"/"down"/"mute"/"unmute"）
  *   - `stream`（可选："music"/"ring"/"alarm"/"notification"/"system"/"call"，默认 "music"）
  *   - `value`（用于 set：0-100 百分比）
+ * 输出：volume_current、volume_max、volume_success
  */
-class NodeVolumeHandler(
-    private val provider: IAccessibilityProvider? = null,
-    private val shellExecutor: IShellExecutor? = null,
-) : INodeHandler {
+class NodeVolumeHandler : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val action = node.params?.get("action")?.toString()?.trim()?.lowercase().orEmpty()
+        context.putVariable("volume_success", false)
+        val action = node.params?.get("action")?.toString()?.let { context.interpolate(it) }?.trim()?.lowercase().orEmpty()
         if (action.isEmpty()) {
             Log.e(TAG, "Volume failed: 'action' parameter is empty")
             return node.next
@@ -40,17 +38,23 @@ class NodeVolumeHandler(
         }
 
         try {
-            when (action) {
+            val ok = when (action) {
                 "set" -> handleSet(node, context, audioManager, streamType)
-                "get" -> handleGet(context, audioManager, streamType)
-                "up" -> handleAdjust(audioManager, streamType, AudioManager.ADJUST_RAISE)
-                "down" -> handleAdjust(audioManager, streamType, AudioManager.ADJUST_LOWER)
-                "mute" -> handleMute(audioManager, streamType, true)
-                "unmute" -> handleMute(audioManager, streamType, false)
+                "get" -> { handleGet(context, audioManager, streamType); true }
+                "up" -> { handleAdjust(audioManager, streamType, AudioManager.ADJUST_RAISE); true }
+                "down" -> { handleAdjust(audioManager, streamType, AudioManager.ADJUST_LOWER); true }
+                "mute" -> { handleMute(audioManager, streamType, true); true }
+                "unmute" -> { handleMute(audioManager, streamType, false); true }
                 else -> {
                     Log.e(TAG, "Volume failed: unknown action '$action'")
+                    false
                 }
             }
+            if (ok && action != "set" && action != "get") {
+                context.putVariable("volume_current", audioManager.getStreamVolume(streamType))
+                context.putVariable("volume_max", audioManager.getStreamMaxVolume(streamType))
+            }
+            context.putVariable("volume_success", ok)
         } catch (e: Exception) {
             Log.e(TAG, "Volume error for action '$action': ${e.message}", e)
         }
@@ -63,14 +67,10 @@ class NodeVolumeHandler(
         context: WorkflowContext,
         audioManager: AudioManager,
         streamType: Int,
-    ) {
-        val valueParam = node.params?.get("value")
-        val percentage = when (valueParam) {
-            is Number -> valueParam.toInt()
-            else -> valueParam?.toString()?.toIntOrNull()
-        } ?: run {
+    ): Boolean {
+        val percentage = paramIntOrNull(node, context, "value") ?: run {
             Log.e(TAG, "Volume set failed: 'value' parameter is missing or invalid")
-            return
+            return false
         }
 
         val clamped = percentage.coerceIn(0, 100)
@@ -78,9 +78,10 @@ class NodeVolumeHandler(
         val targetVolume = (clamped / 100.0f * maxVolume).toInt()
 
         audioManager.setStreamVolume(streamType, targetVolume, 0)
-        context.variables["volume_current"] = targetVolume
-        context.variables["volume_max"] = maxVolume
+        context.putVariable("volume_current", targetVolume)
+        context.putVariable("volume_max", maxVolume)
         Log.i(TAG, "Volume set to $clamped% ($targetVolume/$maxVolume) on stream $streamType")
+        return true
     }
 
     private fun handleGet(
@@ -90,8 +91,8 @@ class NodeVolumeHandler(
     ) {
         val current = audioManager.getStreamVolume(streamType)
         val max = audioManager.getStreamMaxVolume(streamType)
-        context.variables["volume_current"] = current
-        context.variables["volume_max"] = max
+        context.putVariable("volume_current", current)
+        context.putVariable("volume_max", max)
         Log.i(TAG, "Volume get: current=$current, max=$max on stream $streamType")
     }
 

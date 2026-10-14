@@ -14,22 +14,22 @@
 ## 0.5 本地路径速查（先找路）
 
 **项目仓库：**
-- Habitat 引擎本体（原厂）：`C:\Users\wang\Habitat`
-  - 引擎源码：`C:\Users\wang\Habitat\lib\src\main\java\com\ailun\habitat\`
-  - Habitat App：`C:\Users\wang\Habitat\app\`
-  - 引擎文档：`C:\Users\wang\Habitat\docs\`（ENGINE_EXTENDING.md / ROADMAP.md / ENGINE_MASTER_PLAN.md / CHANGELOG.md）
-- SmartCS 智能客服（嵌引擎拷贝）：`C:\Users\wang\SmartCS`
-  - 引擎拷贝：`C:\Users\wang\SmartCS\lib\src\main\java\com\ailun\habitat\`
-  - SmartCS App：`C:\Users\wang\SmartCS\app\src\main\java\com\ailun\smartcs\`
-- Java 后端（RAG/LLM 生成/工作流校验）：`C:\Users\wang\Desktop\IDEA Projects\habitat`
+- Habitat 引擎本体（原厂）：`%USERPROFILE%\Habitat`
+  - 引擎源码：`%USERPROFILE%\Habitat\lib\src\main\java\com\ailun\habitat\`
+  - Habitat App：`%USERPROFILE%\Habitat\app\`
+  - 引擎文档：`%USERPROFILE%\Habitat\docs\`（ENGINE_EXTENDING.md / ROADMAP.md / ENGINE_MASTER_PLAN.md / CHANGELOG.md）
+- SmartCS 智能客服（嵌引擎拷贝）：`%USERPROFILE%\SmartCS`
+  - 引擎拷贝：`%USERPROFILE%\SmartCS\lib\src\main\java\com\ailun\habitat\`
+  - SmartCS App：`%USERPROFILE%\SmartCS\app\src\main\java\com\ailun\smartcs\`
+- Java 后端（RAG/LLM 生成/工作流校验）：`%USERPROFILE%\Desktop\IDEA Projects\habitat`
   - 白名单：`...\src\main\java\com\habitat\service\WorkflowGenerationService.java` 和 `WorkflowJsonValidator.java`
   - RAG：`...\src\main\java\com\habitat\service\RAGService.java`
   - 知识库：`...\src\main\resources\docs\habitat_api_knowledge.md`
 
 **工具：**
-- adb：`C:\Users\wang\AppData\Local\Android\Sdk\platform-tools\adb.exe`
-- Android SDK：`C:\Users\wang\AppData\Local\Android\Sdk`
-- Maven：后端用 `./mvnw`（在 `C:\Users\wang\Desktop\IDEA Projects\habitat`）
+- adb：`%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe`
+- Android SDK：`%USERPROFILE%\AppData\Local\Android\Sdk`
+- Maven：后端用 `./mvnw`（在 `%USERPROFILE%\Desktop\IDEA Projects\habitat`）
 - Gradle：两仓库各自 `./gradlew`
 
 **设备：**
@@ -44,8 +44,8 @@
 
 | 仓库 | 路径 | 说明 |
 |------|------|------|
-| **Habitat**（引擎本体）| `C:\Users\wang\Habitat` | 原厂。`:lib` 引擎 + `:app`(Habitat UI)。GitHub: `Allenwang0730/HabitatEngine`（MIT 开源）|
-| **SmartCS**（智能客服）| `C:\Users\wang\SmartCS` | 独立 App，嵌了引擎拷贝。版本 v0.3.3 |
+| **Habitat**（引擎本体）| `%USERPROFILE%\Habitat` | 原厂。`:lib` 引擎 + `:app`(Habitat UI)。GitHub: `Allenwang0730/HabitatEngine`（MIT 开源）|
+| **SmartCS**（智能客服）| `%USERPROFILE%\SmartCS` | 独立 App，嵌了引擎拷贝。版本 v0.3.3 |
 
 ### 引擎现状
 - **84 个节点**（`:lib` 注册 82 + 2 个 app 侧 SEND_NOTIFICATION/DYNAMIC_ISLAND）—— 51 个既有 + 阶段 C 16 个 + 第一批纯逻辑 5 个 + 第二批零权限 4 个（GEOCODE/SAY_TO_FILE/GET_TRAFFIC/GET_SETTING）

@@ -2,6 +2,7 @@ package com.ailun.habitat
 
 import com.ailun.habitat.api.IAccessibilityProvider
 import com.ailun.habitat.api.IShellExecutor
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 节点处理器工厂（阶段 B：模块化）。
@@ -19,8 +20,9 @@ class NodeHandlerFactory(
     extra: Map<String, NodeFactory> = emptyMap(),
 ) {
 
-    private val registry = mutableMapOf<String, NodeFactory>()
-    private val cache = mutableMapOf<String, INodeHandler>()
+    // FORK 分支并发调用 get()：注册表与缓存需线程安全
+    private val registry = ConcurrentHashMap<String, NodeFactory>()
+    private val cache = ConcurrentHashMap<String, INodeHandler>()
 
     init {
         val selected = modules ?: NodeModule.entries.toSet()
@@ -46,9 +48,8 @@ class NodeHandlerFactory(
         if (type == null) return null
         cache[type]?.let { return it }
         val factory = registry[type] ?: return null
-        val handler = factory(a11y, shell)
-        cache[type] = handler
-        return handler
+        // 并发首次 get 时只保留一个实例
+        return cache.putIfAbsent(type, factory(a11y, shell)) ?: cache[type]
     }
 
     /** 当前注册的全部节点类型（调试/文档/LLM 生成可用）。 */
@@ -146,7 +147,7 @@ class NodeHandlerFactory(
         const val ACTION_GET_TRAFFIC = "ACTION_GET_TRAFFIC"
         const val ACTION_GET_SETTING = "ACTION_GET_SETTING"
         // FORK/JOIN 由 HabitatExecutor 内建处理（不注册 handler，仅声明常量供白名单/LLM）
-        const val ACTION_FORK = "ACTION_FORK"
-        const val ACTION_JOIN = "ACTION_JOIN"
+        const val ACTION_FORK = HabitatExecutor.ACTION_FORK
+        const val ACTION_JOIN = HabitatExecutor.ACTION_JOIN
     }
 }

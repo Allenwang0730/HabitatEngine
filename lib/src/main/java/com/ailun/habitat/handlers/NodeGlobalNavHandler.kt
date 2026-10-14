@@ -21,46 +21,46 @@ class NodeGlobalNavHandler(
 ) : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val action = node.params?.get("action")?.toString()?.trim()?.lowercase().orEmpty()
+        val action = node.params?.get("action")?.toString()?.let { context.interpolate(it) }?.trim()?.lowercase().orEmpty()
         if (action.isEmpty()) {
-            context.variables["nav_success"] = false
-            context.variables["nav_error"] = "缺少 'action' 参数"
+            context.putVariable("nav_success", false)
+            context.putVariable("nav_error", "缺少 'action' 参数")
             return node.next
         }
 
         val service = provider?.getService()
         if (service == null) {
-            context.variables["nav_success"] = false
-            context.variables["nav_error"] = "无障碍服务未连接"
+            context.putVariable("nav_success", false)
+            context.putVariable("nav_error", "无障碍服务未连接")
             context.log("GlobalNav FAILED: a11y not connected")
             return node.next
         }
 
         val globalAction = ACTION_MAP[action]
         if (globalAction == null) {
-            context.variables["nav_success"] = false
-            context.variables["nav_error"] = "未知 action: $action（可用: ${ACTION_MAP.keys}）"
+            context.putVariable("nav_success", false)
+            context.putVariable("nav_error", "未知 action: $action（可用: ${ACTION_MAP.keys}）")
             return node.next
         }
 
-        // power_dialog / take_screenshot 需要 API 30+
-        if ((action == "power_dialog" || action == "take_screenshot") && Build.VERSION.SDK_INT < 30) {
-            context.variables["nav_success"] = false
-            context.variables["nav_error"] = "action '$action' 需要 Android 11+"
+        // lock_screen / take_screenshot 需要 API 28+（POWER_DIALOG 自 API 21 即可用，minSdk 29 已满足）
+        if ((action == "lock_screen" || action == "take_screenshot") && Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            context.putVariable("nav_success", false)
+            context.putVariable("nav_error", "action '$action' 需要 Android 9+")
             return node.next
         }
 
         val ok = try {
             service.performGlobalAction(globalAction)
         } catch (e: Exception) {
-            context.variables["nav_success"] = false
-            context.variables["nav_error"] = e.message ?: "Unknown error"
+            context.putVariable("nav_success", false)
+            context.putVariable("nav_error", e.message ?: "Unknown error")
             context.log("GlobalNav FAILED: ${e.message}")
             return node.next
         }
 
-        context.variables["nav_success"] = ok
-        if (!ok) context.variables["nav_error"] = "performGlobalAction 返回 false"
+        context.putVariable("nav_success", ok)
+        if (!ok) context.putVariable("nav_error", "performGlobalAction 返回 false")
         context.log("GlobalNav action=$action → $ok")
         return node.next
     }

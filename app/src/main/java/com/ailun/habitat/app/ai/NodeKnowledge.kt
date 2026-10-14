@@ -33,7 +33,7 @@ object NodeKnowledge {
         NodeDoc("ACTION_READ_SCREEN", "keyword, output_var", "读屏幕(变量 screen_data=是否找到)", "需无障碍"),
         NodeDoc("ACTION_FIND_ELEMENT", "selector, search_mode=text, region(可选), timeout_ms, output_var", "找元素(变量 element_found)", "需无障碍"),
         NodeDoc("ACTION_GLOBAL_KEY", "key=back/home/recents", "全局按键", "需无障碍"),
-        NodeDoc("ACTION_SHELL", "command, mode=auto", "shell 命令", "需 Shizuku/root，无则 Runtime.exec 兜底"),
+        NodeDoc("ACTION_SHELL", "command, mode=auto", "shell 命令", "需 Shizuku/root，无则 Runtime.exec 兜底；command 里的 \${var} 会自动单引号转义，不要再给它加引号"),
         NodeDoc("ACTION_GET_BATTERY", "output_var", "电量(battery_level)"),
         NodeDoc("ACTION_NETWORK_STATUS", "action=all", "网络(network_type)"),
         NodeDoc("ACTION_GET_DEVICE_INFO", "", "设备信息"),
@@ -65,6 +65,7 @@ object NodeKnowledge {
         "能用'直接 API'节点就不用 UI 点击模拟。例如拨号用 ACTION_CALL_DIRECT，不要用 LAUNCH_APP+CLICK+INPUT_TEXT 一条龙点 UI。",
         "打开应用、发通知、截图、设备信息等都有直接节点；UI 点击（CLICK/SWIPE/INPUT_TEXT）只在没有专门节点（如填表单、点特殊按钮）时才用。",
         "UI 文本可能多处出现（如多个'确定'/'发送'）。用 region 限定区域（\"bottom\"=下半屏 / \"top\"=上半屏 / 归一化\"0,0.5,1,1\"=下半屏）或 occurrence 取第 N 个（屏幕从上到下，0 起），避免点错。",
+        "拨号用 ACTION_CALL_DIRECT（直接拨出，最优先，走系统 TelecomManager.placeCall 可靠）；它需要 CALL_PHONE 权限。若不希望直拨（或权限受限）才用 ACTION_CALL_PHONE（打开拨号器填号再点'拨打'）。",
         "网络节点（HTTP_REQUEST/GET_WEATHER/GEOCODE）需网络；对不稳定第三方服务设合理 timeout 并用 on_error=skip 容错。",
     )
 
@@ -72,6 +73,6 @@ object NodeKnowledge {
     val examples: List<String> = listOf(
         """需求"启动应用并显示提示"→{"name":"启动设置","description":"打开系统设置后弹提示","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_LAUNCH_APP","params":{"package_name":"com.android.settings"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":1500},"next":"s3"},"s3":{"id":"s3","type":"ACTION_TOAST","params":{"message":"已打开设置"}}}}}""",
         """需求"读取网络状态，wifi则提示当前WiFi否则提示没有网络"→{"name":"网络检查","workflow":{"start_node_id":"n1","nodes":{"n1":{"id":"n1","type":"ACTION_NETWORK_STATUS","params":{"action":"all"},"next":"n2"},"n2":{"id":"n2","type":"CONDITION_SWITCH","params":{"expression":"network_type == wifi"},"branches":{"true":"n3","false":"n4"}},"n3":{"id":"n3","type":"ACTION_TOAST","params":{"message":"当前WiFi"}},"n4":{"id":"n4","type":"ACTION_TOAST","params":{"message":"没有网络"}}}}}""",
-        """需求"拨打10086并开启录音"→{"name":"拨号录音","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CALL_DIRECT","params":{"phone_number":"10086"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_TOAST","params":{"message":"已拨打10086"}}}}}""",
+        """需求"拨打10086并开启录音"→{"name":"拨号录音","description":"直拨10086并点录音","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CALL_DIRECT","params":{"phone_number":"10086"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":3000},"next":"s3"},"s3":{"id":"s3","type":"ACTION_CLICK","params":{"target":"录音"}}}}}}""",
     )
 }

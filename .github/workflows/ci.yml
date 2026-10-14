@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'fix/**', 'feat/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 本地 wrapper 指向腾讯镜像（国内加速）；CI 在海外，改回官方源更快更稳
+      - name: Use official Gradle distribution
+        run: sed -i 's#mirrors.cloud.tencent.com/gradle#services.gradle.org/distributions#' gradle/wrapper/gradle-wrapper.properties
+
+      - name: Unit tests
+        run: ./gradlew :lib:testDebugUnitTest :app:testStandardDebugUnitTest --console=plain
+
+      - name: Build standard debug APK
+        run: ./gradlew :app:assembleStandardDebug --console=plain
+
+      - name: Build engine AAR
+        run: ./gradlew :lib:assembleRelease --console=plain
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            lib/build/reports/tests
+            app/build/reports/tests

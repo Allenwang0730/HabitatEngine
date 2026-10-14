@@ -21,13 +21,13 @@ class NodeBase64Handler : INodeHandler {
 
         val action = params["action"]?.toString()?.trim()?.lowercase() ?: run {
             Log.w(TAG, "No action specified")
-            context.variables["base64_success"] = false
+            context.putVariable("base64_success", false)
             return node.next
         }
 
         val rawData = params["data"]?.toString()?.trim() ?: run {
             Log.w(TAG, "No data provided")
-            context.variables["base64_success"] = false
+            context.putVariable("base64_success", false)
             return node.next
         }
 
@@ -44,21 +44,21 @@ class NodeBase64Handler : INodeHandler {
                 }
                 else -> {
                     Log.w(TAG, "Unknown action: $action, expected 'encode' or 'decode'")
-                    context.variables["base64_success"] = false
+                    context.putVariable("base64_success", false)
                     return node.next
                 }
             }
 
             val resultKey = outputVar ?: "base64_result"
-            context.variables["base64_result"] = result
-            context.variables[resultKey] = result
-            context.variables["base64_success"] = true
+            context.putVariable("base64_result", result)
+            context.putVariable(resultKey, result)
+            context.putVariable("base64_success", true)
 
             Log.i(TAG, "Base64 $action successful: ${result.length} chars")
         } catch (e: Exception) {
             Log.e(TAG, "Base64 $action failed: ${e.message}", e)
-            context.variables["base64_success"] = false
-            context.variables["base64_error"] = e.message ?: "Unknown error"
+            context.putVariable("base64_success", false)
+            context.putVariable("base64_error", e.message ?: "Unknown error")
         }
 
         return node.next

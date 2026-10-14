@@ -20,15 +20,15 @@ class NodeMediaControlHandler(
         val cmd = node.params?.get("cmd")?.toString()?.trim()?.lowercase() ?: "play"
         val keyCode = KEYCODES[cmd]
         if (keyCode == null) {
-            context.variables["media_success"] = false
-            context.variables["media_error"] = "未知 cmd: $cmd（play/pause/play_pause/next/prev/stop）"
+            context.putVariable("media_success", false)
+            context.putVariable("media_error", "未知 cmd: $cmd（play/pause/play_pause/next/prev/stop）")
             return node.next
         }
 
         val executor = shell
         if (executor == null) {
-            context.variables["media_success"] = false
-            context.variables["media_error"] = "需要 Shizuku（shell 执行器不可用）"
+            context.putVariable("media_success", false)
+            context.putVariable("media_error", "需要 Shizuku（shell 执行器不可用）")
             context.log("MediaControl FAILED: no shell executor")
             return node.next
         }
@@ -36,21 +36,23 @@ class NodeMediaControlHandler(
         try {
             val out = executor.exec("input keyevent $keyCode")
             val ok = !out.contains("Error", ignoreCase = true) && !out.contains("exception", ignoreCase = true)
-            context.variables["media_success"] = ok
-            if (!ok) context.variables["media_error"] = out.take(200)
+            context.putVariable("media_success", ok)
+            if (!ok) context.putVariable("media_error", out.take(200))
             context.log("MediaControl $cmd (keyevent $keyCode) → $ok")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            context.variables["media_success"] = false
-            context.variables["media_error"] = e.message ?: "Unknown error"
+            context.putVariable("media_success", false)
+            context.putVariable("media_error", e.message ?: "Unknown error")
             context.log("MediaControl FAILED: ${e.message}")
         }
         return node.next
     }
 
     companion object {
-        // KEYCODE_MEDIA_PLAY_PAUSE=85, NEXT=87, PREVIOUS=88, STOP=86
+        // KEYCODE_MEDIA_PLAY=126, PAUSE=127, PLAY_PAUSE=85, NEXT=87, PREVIOUS=88, STOP=86
         private val KEYCODES = mapOf(
-            "play" to 85, "pause" to 85, "play_pause" to 85,
+            "play" to 126, "pause" to 127, "play_pause" to 85,
             "next" to 87, "prev" to 88, "previous" to 88,
             "stop" to 86,
         )

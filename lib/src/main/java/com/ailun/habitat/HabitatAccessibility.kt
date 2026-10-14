@@ -34,20 +34,38 @@ object HabitatAccessibility {
         return dispatchGestureAwait(service, gesture)
     }
 
-    private suspend fun dispatchGestureAwait(
+    /** 原地按住 [durationMs] 毫秒（长按）。 */
+    suspend fun dispatchLongPress(service: AccessibilityService, x: Int, y: Int, durationMs: Long): Boolean {
+        if (x < 0 || y < 0) return false
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val duration = durationMs.coerceAtLeast(1L)
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+            .build()
+        return dispatchGestureAwait(service, gesture, timeoutMs = duration + 5000)
+    }
+
+    /** 派发任意手势并挂起等待结果；dispatchGesture 返回 false / 抛异常 / 超时均返回 false。 */
+    suspend fun dispatchGestureAwait(
         service: AccessibilityService,
         gesture: GestureDescription,
+        timeoutMs: Long = 5000,
     ): Boolean {
         val deferred = CompletableDeferred<Boolean>()
-        val dispatched = service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
-            override fun onCompleted(gesture: GestureDescription?) { deferred.complete(true) }
-            override fun onCancelled(gesture: GestureDescription?) { deferred.complete(false) }
-        }, null)
+        val dispatched = try {
+            service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(gesture: GestureDescription?) { deferred.complete(true) }
+                override fun onCancelled(gesture: GestureDescription?) { deferred.complete(false) }
+            }, null)
+        } catch (e: IllegalArgumentException) {
+            // 手势时长/坐标超出系统限制
+            false
+        }
         if (!dispatched) {
             // 手势未派发（服务未就绪/队列忙/屏幕灭）→ 立即返回 false，避免 deferred 永挂
             return false
         }
-        // 超时兜底：正常派发但回调可能丢失（如屏幕瞬间变化）→ 5s 无回调也返回 false
-        return withTimeoutOrNull(5000) { deferred.await() } ?: false
+        // 超时兜底：正常派发但回调可能丢失（如屏幕瞬间变化）→ 超时无回调也返回 false
+        return withTimeoutOrNull(timeoutMs) { deferred.await() } ?: false
     }
 }

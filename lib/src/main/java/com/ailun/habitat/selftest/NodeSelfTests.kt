@@ -268,7 +268,10 @@ object NodeSelfTests {
           }
         }
         """.trimIndent(),
-        verify = { v -> v["wf_completed"] == true && v["call_ended"] == true },
+        // 未授予 READ_PHONE_STATE 时节点如实失败（call_ended=false + call_error），不再把 SecurityException 当 IDLE
+        verify = { v ->
+            v["wf_completed"] == true && (v["call_ended"] == true || v["call_error"] != null)
+        },
     )
 
     // ── 异常处理/通用查询/系统媒体（v1.4.2）──
@@ -769,7 +772,7 @@ object NodeSelfTests {
         {
           "start_node_id": "drop",
           "nodes": {
-            "drop":   {"id":"drop","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"DROP TABLE IF EXISTS t"},"next":"create"},
+            "drop":   {"id":"drop","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","create":true,"query":"DROP TABLE IF EXISTS t"},"next":"create"},
             "create": {"id":"create","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"CREATE TABLE t(x INTEGER, y TEXT)"},"next":"insert"},
             "insert": {"id":"insert","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"INSERT INTO t(x,y) VALUES(1,'a'),(2,'b'),(3,'c')"},"next":"select"},
             "select": {"id":"select","type":"ACTION_SQLITE_QUERY","params":{"database":"${'$'}{filesDir}/selftest.db","query":"SELECT * FROM t ORDER BY x","output_var":"rows"},"next":"done"},

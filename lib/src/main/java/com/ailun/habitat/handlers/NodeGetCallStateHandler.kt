@@ -24,17 +24,17 @@ class NodeGetCallStateHandler : INodeHandler {
                 TelephonyManager.CALL_STATE_OFFHOOK -> "offhook"
                 else -> "unknown"
             }
-            context.variables["call_state"] = state
-            context.variables["call_state_name"] = name
-            context.variables["call_success"] = true
+            context.putVariable("call_state", state)
+            context.putVariable("call_state_name", name)
+            context.putVariable("call_success", true)
             context.log("CallState=$state($name)")
         } catch (e: SecurityException) {
-            context.variables["call_success"] = false
-            context.variables["call_error"] = "缺少 READ_PHONE_STATE 权限: ${e.message}"
+            context.putVariable("call_success", false)
+            context.putVariable("call_error", "缺少 READ_PHONE_STATE 权限: ${e.message}")
             context.log("CallState FAILED (READ_PHONE_STATE missing)")
         } catch (e: Exception) {
-            context.variables["call_success"] = false
-            context.variables["call_error"] = e.message ?: "Unknown error"
+            context.putVariable("call_success", false)
+            context.putVariable("call_error", e.message ?: "Unknown error")
             context.log("CallState FAILED: ${e.message}")
         }
         return node.next

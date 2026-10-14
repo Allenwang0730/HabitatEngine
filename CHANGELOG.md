@@ -1,5 +1,154 @@
 # Changelog
 
+## [1.9.0] - 2026-10-09
+
+App `versionName` 1.9.0（`versionCode` 6）；引擎 AAR `com.ailun:habitat-engine:1.8.0`（`ACTION_LAUNCH_APP` 新增 `intent_action`）。
+
+**真机评测**（vivo / Android 16，7 类任务 × 2 次，adb/读屏独立验证，`scripts/agent_eval.mjs`）：有规划时 Jev 14/14、DeepSeek 14/14；无规划时 Jev 6–7/14、DeepSeek 8–10/14。
+
+### Added — 自主模式重构：规划（DeepSeek）+ 执行（Jev）+ 代码控制
+- **规划器**（`Planner` / `DeepSeekPlanner`）：先把目标拆成 1~6 步，每步带屏幕上可验证的完成条件，能用设备工具就直接用；执行卡住时从当前屏幕重规划剩下的部分（最多 2 次）；全部完成后按屏幕证据**复核**，提问类目标在复核里读出答案。Agent 页新增「DeepSeek 规划与复核」开关（默认开，需 DeepSeek key）；MCP `agent_start` 新增 `planner` 参数。
+- **设备工具**（`DeviceTools`）：`open_settings`（15 个设置页直接跳转）、`open_app`、`set_wifi/bluetooth/flashlight/dnd`、`set_brightness`、`set_volume`、`read_battery/time/device_info/network`。执行器每屏也能看到相关的 `USE_TOOL` 快捷方式。会改设备状态的工具必须由用户目标原文点名。
+- **导航栈 + 页面图**（`NavigationState`）：当前位置（`设置 > 蓝牙`，第几层、返回到哪）、本页试过的入口与结果、是否已滚到底，带给执行器和重规划。
+- **控件状态**：开关 `[已开启]/[已关闭]`（含"包着一个开关的列表行"）、滑块百分比、灰掉的控件进入观测和候选；新增 `SET_SLIDER`（拖到最大/最小/中间）。
+- **步骤完成判定**：Jev 在同一次请求里额外回答 `step_status`（当前步骤完成条件是否成立），≥0.7 由代码推进到下一步，不加延迟。
+- `ACTION_LAUNCH_APP` 新增 `intent_action`（只接受 `android.settings.*` 与电池页），用于直接跳转设置页。
+- 评测脚本 `scripts/agent_eval.mjs` + `agent_eval_tasks.json`：固定任务集，adb/读屏独立验证，跑完恢复设备状态，支持按执行器 × 有/无规划对比。
+
+### Fixed（真机评测暴露）
+- 拖滑块、拨开关时文字不变，旧"屏幕是否变化"判定把成功当成无变化后反复操作；现在控件状态也算。
+- 工具失败后把「亮度设为最高」偷换成「设为中等」；现在只能换别的工具，不换同一工具的另一档。失败过的工具本次任务不再提供。
+- 读数工具不改屏幕被判"无变化"而反复调用；读到值算进展，已知事实对应的工具不再提供。
+- 搜索框残留文字被当成同名入口反复点：输入框在候选里写成「输入框，当前内容：…」，已聚焦的输入框不作点击候选。
+- 灵动岛/状态栏控件被当成可点目标；`FrameLayout` 等 View 类名被当成 Activity。
+- 决策器不可用（key 无效、HTTP 451）时不再无意义地重规划，直接结束并提示。
+
+### Changed
+- 默认最多步数 12 → 20，上限 30 → 40；多步计划里每步最多 8 步。
+- 页面标题识别跳过状态栏时钟。
+- Jev 可配 HTTP 代理（Agent 页「Jev 代理」，只存本机）：国内网络直连返回 451 时，经 `adb reverse` 走电脑代理。
+- 文档与脚本去掉个人信息：设备序列号、局域网 IP、本机路径（`run_selftest.ps1` 改用 `%LOCALAPPDATA%` 与脚本相对路径）。
+
+### Security
+- 规划器输出一律当不可信：工具/参数白名单与枚举、输入文字必须是目标原文子串、敏感按钮与权限弹窗的放行只看用户目标原文（规划器写进步骤说明的文字不能解锁）。
+- 规划器开启时屏幕文字也会发给 DeepSeek：即使执行器选 Jev/本地，首次也会弹出 DeepSeek 的隐私提示。
+
+## [1.8.1] - 2026-10-09
+
+App `versionName` 1.8.1（`versionCode` 5）；引擎 AAR `com.ailun:habitat-engine:1.7.1`。
+
+### Fixed — 自主模式「找不到控件 / 干不了活」（真机 vivo V2329A / Android 16 定位）
+- **列表行进不了候选**：设置页 19 个可点节点里 17 个是没有自带文字的行容器，文字在子 TextView 上，旧读屏只收"有文字"的节点。现在可点容器聚合后代文字成一个元素，`clickable` 改为真实语义（自身/祖先/后代可点），不再把"有文字"当可点。设置首页 TAP 候选 2 → 11。
+- **状态栏挤占名额**：通知图标一条一个节点，页面节点少时占满剩余名额（实测 53 个元素里 41 个是"xx通知："）。非活动系统窗口只留 6 个可点元素。
+- **桌面图标被吞**：整屏可点容器（桌面图标网格）把 59 个图标聚合成 1 个元素；面积超过屏幕 35% 的容器不再参与聚合/去重。
+- **`OPEN_APP` 找不到应用**：`queryIntentActivities` 用了 `MATCH_DEFAULT_ONLY`，大多数桌面入口不声明 `CATEGORY_DEFAULT` 被滤掉（「打开时钟」永远没有候选）。
+- **提示里的编号与候选对不上**：控件一览按元素序号，TAP 候选按排序后重新编号，模型照一览选号会点错或报"候选里没有"。统一用元素序号；选到候选外的目标改为重选（最多 2 次），不整轮报废。
+- **转场中误 OCR**：页面切换时树文字少，旧逻辑立刻 OCR，坐标是猜的，点进了错误的 App。现在先等 600ms 再读一次树，树里有可点控件就不 OCR。
+- **回车无效**：`PRESS_ENTER` 原来走 `input keyevent`，没开 Shizuku 时必失败；改走无障碍 `ACTION_IME_ENTER`（`ACTION_INPUT_TEXT` 新增 `submit`、`allow_empty` 参数）。`CLEAR_TEXT` 改为真正清空。
+- **锁屏时盲目决策**：锁屏读到的只有验证指纹页；现在直接报"屏幕已锁定，请先解锁"。
+
+### Changed — 循环策略
+- 低置信不再丢步：两个云端模型实测都给 0.2~0.3，旧阈值 0.3 等于全丢。现在 < 0.15 才跳过，0.15~0.3 照做并记日志。
+- 动作失败换同操作的次优候选重试一次；失败原因写进 history 供模型换招。
+- 重复/兜圈不再直接停：先替模型换一次招（重复的是滚动就先返回），换两次还在重复才停。新增窗口内循环检测（最近 6 步同一动作 3 次）；滚动且屏幕在变的不算兜圈。
+- 死路名单：原地动作（提交/清空/输入/长按）做了没变化、点进外部 App 又被拉回、进子菜单又退出来的入口，本次任务内不再提供。
+- 提示词补"操作手机的先验"（列表行可点、找不到先翻到底、进过的子菜单不再进、页面标题已是目标就 DONE 等），并给决策器 `pageTitle`、`activity`、控件类型与 `viewId`。
+- 新增动作：`LONG_PRESS`、`PRESS_ENTER`、`CLEAR_TEXT`。
+- `ACTION_CLICK` 支持 `id:<resource-id>` 选择器；文本精确匹配不到时退回递归子串匹配（行容器的聚合文字）。
+
+### Added
+- Agent 调试工具 `debug_screen`（WS/MCP）：每个窗口的类型/活动状态/包名/节点数 + 元素列表 + 当前候选。
+- `scripts/mcp_call.mjs --full`：不截断长字段（看完整步骤日志）。
+
+### Known issues
+- **Jev 在国内网络返回 HTTP 451**（服务端按地区拒绝，与 key 无关），现在会给出明确提示；需换网络或改用 DeepSeek。
+- 真机 DeepSeek 结果（最终版之前一轮）：蓝牙 3/3、设置内搜索 2/2、时钟秒表 3/3、「关于手机」0/3。针对「关于手机」的修复（编号对齐、子菜单死路、先翻到底）单测已覆盖，**未能在真机复测**（USB 连接反复断开）。
+
+## [1.8.0] - 2026-09-30
+
+App `versionName` 1.8.0（`versionCode` 4）；引擎 AAR `com.ailun:habitat-engine:1.7.0`。
+
+### ⚠️ 行为变更（升级前请看）
+- **Agent 服务**：默认只监听 `127.0.0.1`，电脑侧先 `adb forward tcp:8931 tcp:8931`；局域网直连需在 Agent 页打开「局域网访问」。旧令牌 `habitat-dev-token` 作废，改为每台设备随机生成（Agent 页查看/复制/重新生成），支持 `Authorization: Bearer`。远程调用高危节点（Shell、文件、拨号、短信/通话记录、加解密、压缩、SQLite、强停、广播、壁纸、录音、拍照、写语音文件）默认拒绝。
+- **变量插值只替换一轮**：变量值里的 `${...}` 不再展开（防外部文本二次展开读出其他变量）。
+- **`ACTION_SHELL`**：`command` 里每个 `${var}` 自动单引号转义为一个参数，不要再自己加引号；`raw_interpolation: true` 恢复旧行为。
+- **Shell 回退**：选了 Shizuku 模式时 Shizuku 不可用直接失败，不再静默改走 `su`。
+- **文件类节点**：加路径守卫（拒绝系统目录、他人 `Android/data`）；删除目录需 `recursive: true`，存储根和一级公共目录不可删。
+- **`ACTION_WAIT_UNTIL_TIME`**：等待超过 29 分钟需设 `node_timeout_ms: 0`（`0` = 不设节点超时，新语义）。
+- **`ACTION_SQLITE_QUERY`**：数据库不存在时默认不再自动创建（`create: true` 开启）。
+- **release 包**：非 https 且非本机地址的服务器不再发送登录凭据。
+- 关闭应用备份（`allowBackup=false`）：加密存储的密钥不随备份迁移，恢复到新设备会崩溃。
+
+### Security
+- 自测 Activity 加 `DUMP` 权限，只有 adb 能拉起（此前任何 App 可借它启动 Agent）。
+- 强停、亮屏解锁等节点的命令注入修复（`ShellQuote`）；短信/通知内容作为变量拼进 shell 不再可注入。
+- Zip Slip 修复；解压总量上限；XML 解析禁用 DOCTYPE/外部实体。
+- 登录接口不再把密码和 JWT 打进 Logcat；用户 CA 只在 debug 信任。
+- API key / Agent 令牌改存 `SecretStore`（EncryptedSharedPreferences），自动迁移旧明文。
+- `agent_daemon.mjs` 本地 HTTP 口加 `X-Habitat-Key` 鉴权、拒绝浏览器跨站请求；脚本不再硬编码令牌。
+
+### Fixed — 自主模式 / Jev 链路
+- 读屏按窗口优先级取控件（活动窗口 > 应用 > 输入法 > 状态栏）：此前按 y 截前 40 个会被状态栏图标占满，前台包被认成 systemui（真机实测）。
+- 远程发起的目标不能解锁敏感按钮；敏感词扩到支付/删除/卸载/授权等；支付密码/刷脸页只允许返回；系统权限弹窗需本机目标写明"授权"。
+- 密码框文字不发给决策器。低置信（< 0.3）不执行；连续等待 3 次停止；判重改用"操作+文字+前台包"；每步回报屏幕是否变化。
+- 点击前复查与 OCR 限频冲突导致点击必被拦；Jev 请求可取消（停止立即生效）、429/5xx 重试一次；响应字段类型错误不再抛异常；启动/停止竞态。
+- OCR 截图/位图泄漏；OCR 坐标换算改用整屏尺寸。
+
+### Fixed — 引擎
+- 连续/嵌套 `ACTION_FORK` 互相覆盖；分支结束隐式等待未 join 的子分支。
+- 节点抛 `Error`（OOM、LinkageError）不再让 App 崩溃。
+- 执行服务竞态：同一工作流可能并发两份、`stop` 停不掉、`onComplete` 回调两次。
+- 工作流库解析失败不再用默认列表覆盖用户数据（先备份，再逐项宽松解析）。
+- 大整数解析丢精度。
+- 新增 `HabitatJson.lint(graph, knownTypes)`：悬空连线、未注册类型、不可达节点。
+
+### Fixed — 节点
+- WiFi/蓝牙开关在新系统上失效（改走 `svc`）；`quick_settings`/`power_dialog` 按键映射错误（后者会直接锁屏）；媒体 play/pause 反转；息屏误亮屏。
+- 解密密码错误会清空原文件；长按祖先节点死循环；读通知只能读到本 App 的（改走通知监听服务）。
+- 多处向 ConcurrentHashMap 写 null 导致 NPE；SQLite `limit` 不生效；重试节点多节点链路误判；Click `occurrence` 越界静默点第一个。
+- `ACTION_SET_VARIABLE` 字符串值现在会插值；数字参数接受字符串/变量（`ParamUtils`）。
+- 阻塞 IO 移到 `Dispatchers.IO`；Shell 读 stdout/stderr 死锁与无超时；拍照尺寸不合法与相机泄漏；TTS 重复 resume；HTTP 响应上限、PATCH 通过 `X-HTTP-Method-Override`。
+
+### Fixed — 触发器 / 生命周期
+- 旋转屏幕、切深色模式会停掉所有工作流并清空触发器（初始化移到 `HabitatApp`）；进程重启后恢复已启用触发器。
+- 排队补跑、`repeat` 并发无上限且禁用停不掉、编辑后仍执行旧 JSON、通知触发器自触发死循环。
+- 定时触发器改为每工作流独立调度（精确到 `interval_ms`，默认不立即触发）。
+- 部分 ROM 一次复制回调两次导致剪贴板触发器跑两遍（真机实测 vivo）。
+- 按键触发器从未生效（缺 `canRequestFilterKeyEvents`）；去掉会改变整机触控的触摸浏览 flag。
+- Agent 服务改为前台服务；悬浮窗前台服务启动失败不再崩溃；本地 LLM 线程安全与原生内存泄漏。
+
+### Changed — 界面
+- 新设计系统：配色（完整 M3 色阶、深色模式）、字体层级、形状/间距/动效令牌、语义色与节点类别色；通用组件库。
+- 工作流列表：搜索、按触发类型筛选、实时状态、滑动删除可撤销。
+- 编辑器：JSON/结构图切换、行号、格式化、实时 lint、未保存提示；单行 JSON 打开时自动展开。
+- 结构图：修复带循环时节点全叠在 (0,0)、连线方向错误、顶部被裁；节点详情面板；适配缩放不低于 0.75，保证文字可读。
+- Agent 页：令牌管理、局域网/高危开关、自主模式时间线、首次使用云端决策器的隐私提示。
+- 设置/引导：Android 13+ 通知权限申请；授权返回后自动刷新；Root 检测移出主线程（此前可能 ANR）。
+- 删除无效的「API 密钥管理」（只存打码前缀、无人读取）。
+
+### Tests
+- 新增 JVM 单测：引擎 32 条（解析、lint、插值、执行器、仓库解析），Agent 策略 14 条。
+- 真机（vivo V2329A / Android 16）节点自测 68 条：53 通过、0 失败、15 跳过（需人工/特定权限）。
+
+## [1.7.0] - 2026-09-22
+
+### Added — 自主模式（Jev / DeepSeek / 本地）+ 微信读屏
+- **Agent loop**：读屏 → 决策 → Habitat 节点执行 → 再读屏。决策器只从当前屏幕候选里选题，不发明坐标或包名。同一动作连续三次、或点击目标已离开原位置，则停止。
+- 决策器可切换：
+  - **Jev**（TypeSafe `https://api.typesafe.ai/v1/systemone`，模型默认 `jev-latest`，key 在 Agent 页填写，不进代码）
+  - **DeepSeek**（复用 AI 生成页的 key）
+  - **本地**（不联网：点目标原文里出现的控件，否则打开点名应用，再否则向下滚两次）
+- 支付类按钮（转账/红包/付款/支付）默认不进入候选，除非目标原文写了同一个词。
+- MCP/WS 增加 `agent_start` / `agent_stop` / `agent_status`（85 个工具）。
+- **微信读屏**：新增无障碍服务，类名 `com.google.android.accessibility.selecttospeak.SelectToSpeakService`。树为空时用 ML Kit 捆绑中文模型离线 OCR（限频、失败退避）。升级后需把无障碍关掉再打开，截屏能力才生效。
+- App `versionName` 对齐到 `1.7.0`（`versionCode` 3）。引擎 AAR 仍为 `1.6.1`（本版无引擎 API 变更）。
+
+## [1.6.1] - 2026-09-22
+
+### Added
+- `ACTION_CLICK` 增加 `offset_x` / `offset_y`：相对目标中心偏移后再点击（屏幕 Y 向下为正，负值向上）。坐标形式的 `target`（`x,y`）不加偏移。
+- `HABITAT_API.md` 与中英文 README 同步点击参数（含已有的 `region` / `occurrence`）。
+
 ## [1.6.0] - 2026-08-22
 
 ### Added — 引擎修复 + AI 工作流生成 + MCP Agent + 第二批节点

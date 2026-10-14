@@ -4,14 +4,22 @@
 //   node scripts/mcp_call.mjs                     # initialize + tools/list + tools/call(screen)
 //   node scripts/mcp_call.mjs ACTION_LAUNCH_APP '{"package_name":"com.android.settings"}'
 //   node scripts/mcp_call.mjs --list              # 只列工具
-const args = process.argv.slice(2);
+//   node scripts/mcp_call.mjs --full agent_status # 不截断长字段（看完整步骤日志）
+const argv = process.argv.slice(2);
+const full = argv.includes('--full');
+const args = argv.filter((a) => a !== '--full');
 const listOnly = args.includes('--list');
 const tool = listOnly ? null : (args[0] || 'screen');
 const toolArgs = listOnly ? null : (args[1] ? JSON.parse(args[1]) : {});
 
-const HOST = process.env.AGENT_HOST || '192.168.0.103';
+// 令牌：环境变量 AGENT_TOKEN（手机 Agent 页查看）。默认经 adb forward 连 127.0.0.1:8931。
+const HOST = process.env.AGENT_HOST || '127.0.0.1';
 const PORT = process.env.AGENT_PORT || '8931';
-const TOKEN = process.env.AGENT_TOKEN || 'habitat-dev-token';
+const TOKEN = process.env.AGENT_TOKEN;
+if (!TOKEN) {
+  console.error('缺少令牌：请设置环境变量 AGENT_TOKEN');
+  process.exit(2);
+}
 const ws = new WebSocket(`ws://${HOST}:${PORT}/mcp?token=${encodeURIComponent(TOKEN)}`);
 
 let nextId = 1;
@@ -24,8 +32,8 @@ function send(method, params) {
 }
 
 ws.onmessage = (ev) => {
-  const msg = JSON.parse(ev.data);
-  if (msg.id && pending.has(msg.id)) {
+  const msg = tryJson(ev.data);
+  if (msg && msg.id && pending.has(msg.id)) {
     pending.get(msg.id)(msg);
     pending.delete(msg.id);
   }
@@ -62,7 +70,7 @@ ws.onopen = async () => {
     const parsed = tryJson(content);
     if (parsed) {
       for (const [k, v] of Object.entries(parsed)) {
-        const s = typeof v === 'string' && v.length > 400 ? v.slice(0, 400) + '...' : JSON.stringify(v);
+        const s = typeof v === 'string' && !full && v.length > 400 ? v.slice(0, 400) + '...' : JSON.stringify(v);
         console.log(`    ${k} = ${s}`);
       }
     } else {

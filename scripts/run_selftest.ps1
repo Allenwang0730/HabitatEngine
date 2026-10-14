@@ -1,16 +1,16 @@
 # 节点自测驱动脚本（阶段 A · 自跑测试架）
 # 用法：
 #   .\scripts\run_selftest.ps1                 # 直接跑（用已构建的 APK）
-#   .\scripts\run_selftest.ps1 -Build          # 先 gradlew assembleDebug 再跑
+#   .\scripts\run_selftest.ps1 -Build          # 先 gradlew assembleStandardDebug 再跑
 #   .\scripts\run_selftest.ps1 -Only "ACTION_MATH"   # 只跑指定名称用例
 # 产物：
 #   selftest_results\latest.json               # 本机结果报告
 #   /sdcard/Habitat/test_results.json          # 设备端结果（adb push）
 param(
-    [string]$Adb = "C:\Users\wang\AppData\Local\Android\Sdk\platform-tools\adb.exe",
+    [string]$Adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe",
     [string]$Package = "com.ailun.habitat",
-    [string]$Repo = "C:\Users\wang\Habitat",
-    [string]$Apk = "$Repo\app\build\outputs\apk\debug\app-arm64-v8a-debug.apk",
+    [string]$Repo = (Resolve-Path "$PSScriptRoot\..").Path,
+    [string]$Apk = "$Repo\app\build\outputs\apk\standard\debug\app-standard-arm64-v8a-debug.apk",
     [switch]$Build,
     [switch]$SkipInstall,
     [string]$Only = "",
@@ -29,7 +29,7 @@ Write-Host "== Habitat 节点自测 ==" -ForegroundColor Cyan
 if ($Build) {
     Write-Host "[1/5] 构建 $Repo ..." -ForegroundColor Cyan
     Push-Location $Repo
-    try { & .\gradlew.bat :app:assembleDebug --console=plain -q; if ($LASTEXITCODE -ne 0) { throw "gradle build failed" } }
+    try { & .\gradlew.bat :app:assembleStandardDebug --console=plain -q; if ($LASTEXITCODE -ne 0) { throw "gradle build failed" } }
     finally { Pop-Location }
 }
 

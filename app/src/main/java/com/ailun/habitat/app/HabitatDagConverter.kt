@@ -1,104 +1,107 @@
 package com.ailun.habitat.app
 
+import com.ailun.habitat.NodeHandlerFactory
 import com.ailun.habitat.WorkflowGraph
-import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.app.dag.DagEdge
 import com.ailun.habitat.app.dag.DagEdgeType
 import com.ailun.habitat.app.dag.DagGraph
 import com.ailun.habitat.app.dag.DagNode
+import com.ailun.habitat.app.ui.theme.NodeCategories
+import com.ailun.habitat.app.ui.theme.NodeCategory
 
+/**
+ * WorkflowGraph → DagGraph。
+ * 从 startNodeId 做 DFS：指向递归栈中节点的边标为 BACK_EDGE（循环写法 next 指回前面节点），
+ * 布局时忽略这些边，避免 Kahn 拓扑排序因环而漏掉节点。
+ */
 object HabitatDagConverter {
+
+    /** 参数中引用其他节点的键（与 lib WorkflowLint 保持一致）。 */
+    private val PARAM_REFS: Map<String, List<Pair<String, String>>> = mapOf(
+        NodeHandlerFactory.ACTION_FORK to listOf("targets" to "并行"),
+        NodeHandlerFactory.ACTION_LOOP to listOf("body_node" to "循环体"),
+        NodeHandlerFactory.ACTION_RETRY to listOf("target" to "重试"),
+    )
 
     fun convert(graph: WorkflowGraph): DagGraph {
         val nodeMap = graph.nodes ?: return DagGraph(emptyList(), emptyList())
-        val startId = graph.startNodeId
+        val startId = graph.startNodeId?.takeIf { it in nodeMap }
 
-        val nodes = mutableListOf<DagNode>()
-        val edges = mutableListOf<DagEdge>()
-
-        // Assign stable indices
-        val idToIndex = mutableMapOf<String, Int>()
-        var idx = 0
-        for ((nodeId, _) in nodeMap) {
-            idToIndex[nodeId] = idx
-            idx++
-        }
-
-        // Create DagNodes
-        for ((nodeId, wn) in nodeMap) {
+        val nodes = nodeMap.entries.mapIndexed { index, (nodeId, wn) ->
             val type = wn.type ?: "UNKNOWN"
             val isStart = nodeId == startId
-            nodes.add(
-                DagNode(
-                    stepId = nodeId,
-                    stepIndex = idToIndex[nodeId] ?: 0,
-                    moduleId = type,
-                    label = wn.label ?: wn.description ?: type,
-                    moduleName = typeToDisplayName(type),
-                    categoryId = typeToCategory(type),
-                    isTrigger = isStart
-                )
+            DagNode(
+                stepId = nodeId,
+                stepIndex = index,
+                moduleId = type,
+                label = wn.label?.takeIf { it.isNotBlank() }
+                    ?: wn.description?.takeIf { it.isNotBlank() }
+                    ?: NodeCategories.displayName(type),
+                moduleName = NodeCategories.displayName(type),
+                category = NodeCategories.of(type),
+                isTrigger = isStart,
+                source = wn,
             )
         }
 
-        // Create edges from next/branches
+        val raw = mutableListOf<DagEdge>()
         for ((nodeId, wn) in nodeMap) {
-            // Sequential edge via next
-            if (!wn.next.isNullOrBlank() && wn.next in nodeMap) {
-                edges.add(
-                    DagEdge(
-                        fromNodeId = nodeId,
-                        toNodeId = wn.next!!,
-                        type = DagEdgeType.SEQUENTIAL
-                    )
-                )
+            val next = wn.next
+            if (!next.isNullOrBlank() && next in nodeMap) {
+                raw += DagEdge(nodeId, next, DagEdgeType.SEQUENTIAL)
             }
-
-            // Branch edges
             wn.branches?.forEach { (branchName, targetId) ->
                 if (!targetId.isNullOrBlank() && targetId in nodeMap) {
-                    val edgeType = when (branchName.lowercase()) {
-                        "true", "yes", "success" -> DagEdgeType.BRANCH_TRUE
-                        "false", "no", "failure" -> DagEdgeType.BRANCH_FALSE
-                        else -> DagEdgeType.SEQUENTIAL
-                    }
-                    edges.add(
-                        DagEdge(
-                            fromNodeId = nodeId,
-                            toNodeId = targetId,
-                            type = edgeType,
-                            label = branchName
-                        )
-                    )
+                    raw += DagEdge(nodeId, targetId, branchType(branchName), label = branchName)
+                }
+            }
+            PARAM_REFS[wn.type]?.forEach { (key, label) ->
+                parseIds(wn.params?.get(key)).filter { it in nodeMap }.forEach { target ->
+                    raw += DagEdge(nodeId, target, DagEdgeType.JUMP, label = label)
                 }
             }
         }
+        val edges = raw.distinctBy { Triple(it.fromNodeId, it.toNodeId, it.type) }
 
-        return DagGraph(nodes, edges)
+        // DFS 着色：0 未访问 / 1 在栈中 / 2 完成
+        val out = edges.groupBy { it.fromNodeId }
+        val color = HashMap<String, Int>()
+        val back = HashSet<DagEdge>()
+        fun dfs(id: String) {
+            color[id] = 1
+            for (e in out[id].orEmpty()) {
+                when (color[e.toNodeId] ?: 0) {
+                    0 -> dfs(e.toNodeId)
+                    1 -> back += e
+                }
+            }
+            color[id] = 2
+        }
+        startId?.let { dfs(it) }
+        for (id in nodeMap.keys) if ((color[id] ?: 0) == 0) dfs(id)
+
+        val finalEdges = edges.map { e ->
+            if (e in back) e.copy(type = DagEdgeType.BACK_EDGE, baseType = e.type) else e
+        }
+        return DagGraph(nodes, finalEdges, startId)
     }
 
-    private fun typeToDisplayName(type: String): String = when {
-        type.startsWith("CONDITION_") -> type.removePrefix("CONDITION_").lowercase()
-            .replace("_", " ").replaceFirstChar { it.uppercase() }
-        type.startsWith("ACTION_") -> type.removePrefix("ACTION_").lowercase()
-            .replace("_", " ").replaceFirstChar { it.uppercase() }
-        else -> type
+    private fun branchType(name: String): DagEdgeType = when (name.trim().lowercase()) {
+        "true", "yes", "success", "ok", "1", "then" -> DagEdgeType.BRANCH_TRUE
+        "false", "no", "failure", "fail", "error", "0", "else", "default", "catch" -> DagEdgeType.BRANCH_FALSE
+        else -> DagEdgeType.SEQUENTIAL
     }
 
-    private fun typeToCategory(type: String): String = when {
-        type.contains("TOAST") || type.contains("VIBRATE") -> "interaction"
-        type.startsWith("CONDITION_") -> "logic"
-        type.contains("DELAY") || type.contains("LOOP") || type.contains("TRY_CATCH") -> "logic"
-        type.contains("CLICK") || type.contains("SWIPE") || type.contains("INPUT_TEXT") -> "interaction"
-        type.contains("GLOBAL_KEY") || type.contains("KEY_EVENT") -> "interaction"
-        type.contains("SET_VARIABLE") || type.contains("MATH") || type.contains("CLIPBOARD") -> "data"
-        type.contains("PARSE_JSON") || type.contains("PARSE_XML") -> "data"
-        type.contains("HTTP") -> "network"
-        type.contains("SHELL") || type.contains("LAUNCH_APP") || type.contains("WIFI") -> "device"
-        type.contains("SCREENSHOT") || type.contains("READ_SCREEN") || type.contains("READ_SMS") -> "data"
-        type.contains("AI_CHAT") || type.contains("LLM") -> "feishu"
-        type.contains("FILE") -> "file"
-        type.contains("LOG") || type.contains("TOAST") -> "interaction"
-        else -> "core"
+    /** targets 可能是 List、JSON 数组字符串或逗号分隔字符串。 */
+    private fun parseIds(value: Any?): List<String> = when (value) {
+        null -> emptyList()
+        is Collection<*> -> value.mapNotNull { it?.toString()?.trim()?.takeIf(String::isNotEmpty) }
+        else -> value.toString().trim().removePrefix("[").removeSuffix("]")
+            .split(',')
+            .map { it.trim().trim('"', '\'').trim() }
+            .filter { it.isNotEmpty() }
     }
+
+    /** 兼容旧调用：类别枚举。 */
+    fun categoryOf(type: String?): NodeCategory = NodeCategories.of(type)
 }

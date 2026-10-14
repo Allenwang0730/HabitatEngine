@@ -28,3 +28,14 @@ keys.txt
 id_rsa*
 *.api-key
 api_keys.json
+
+# VPN / 证书 / 配置备份（可能含密钥，绝不提交）
+openvpn_config_backup/
+*.ovpn
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# 本地 IDE/助手配置（含本机路径）
+.codemoss/

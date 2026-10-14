@@ -3,6 +3,8 @@ package com.ailun.habitat.handlers
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.paramInt
+import com.ailun.habitat.paramString
 import kotlin.random.Random
 
 /**
@@ -16,17 +18,24 @@ import kotlin.random.Random
  */
 class NodeRandomHandler : INodeHandler {
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val min = (node.params?.get("min") as? Number)?.toInt() ?: 0
-        val max = (node.params?.get("max") as? Number)?.toInt() ?: 100
-        val type = node.params?.get("type")?.toString()?.lowercase() ?: "int"
+        var min = paramInt(node, context, "min", 0)
+        var max = paramInt(node, context, "max", 100)
+        if (min > max) {
+            context.log("Random: min($min) > max($max)，已交换")
+            val t = min; min = max; max = t
+        }
+        val type = paramString(node, context, "type")?.trim()?.lowercase() ?: "int"
         val outputVar = node.params?.get("output_var")?.toString()?.ifEmpty { null } ?: "random_value"
 
         when (type) {
-            "float" -> context.variables[outputVar] = Random.nextDouble(min.toDouble(), max.toDouble() + 1.0)
-            "boolean" -> context.variables[outputVar] = Random.nextBoolean()
-            else -> context.variables[outputVar] = Random.nextInt(min, max + 1)
+            "float" -> context.putVariable(
+                outputVar,
+                if (min == max) min.toDouble() else Random.nextDouble(min.toDouble(), max.toDouble()),
+            )
+            "boolean" -> context.putVariable(outputVar, Random.nextBoolean())
+            else -> context.putVariable(outputVar, Random.nextLong(min.toLong(), max.toLong() + 1).toInt())
         }
-        context.variables["random_success"] = true
+        context.putVariable("random_success", true)
         context.log("Random type=$type min=$min max=$max → ${context.variables[outputVar]}")
         return node.next
     }

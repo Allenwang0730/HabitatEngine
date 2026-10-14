@@ -1,12 +1,15 @@
 package com.ailun.habitat.handlers
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.telephony.TelephonyManager
 import android.util.Log
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.paramLong
 import kotlinx.coroutines.delay
 
 /**
@@ -23,9 +26,18 @@ import kotlinx.coroutines.delay
 class NodeWaitCallEndHandler : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val timeoutMs = (node.params?.get("timeout_ms") as? Number)?.toLong() ?: 600_000L
+        val timeoutMs = paramLong(node, context, "timeout_ms", 600_000L).coerceAtLeast(0L)
+        // 无 READ_PHONE_STATE 时 callState 抛 SecurityException，不能当作 IDLE（会误判"已挂断/未接通"）
+        if (context.appContext.checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            context.putVariable("call_ended", false)
+            context.putVariable("call_error", "缺少 READ_PHONE_STATE 权限")
+            context.log("WaitCallEnd FAILED: 缺少 READ_PHONE_STATE 权限")
+            return node.next
+        }
         val ended = waitForCallEnd(context.appContext, timeoutMs)
-        context.variables["call_ended"] = ended
+        context.putVariable("call_ended", ended)
         Log.i(TAG, "WaitCallEnd finished: call_ended=$ended")
         return node.next
     }

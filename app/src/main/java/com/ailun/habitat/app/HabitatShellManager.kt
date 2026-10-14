@@ -5,11 +5,13 @@ import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import rikka.shizuku.Shizuku
 import java.io.DataOutputStream
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -19,6 +21,7 @@ import kotlin.coroutines.resumeWithException
 object HabitatShellManager {
     private const val TAG = "HabitatShell"
     private const val BIND_TIMEOUT_MS = 3000L
+    private const val ROOT_CHECK_TIMEOUT_MS = 3000L
     private const val MAX_RETRY = 3
 
     enum class ShellMode { AUTO, SHIZUKU, ROOT }
@@ -31,12 +34,20 @@ object HabitatShellManager {
         Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
     } catch (_: Exception) { false }
 
-    fun isRootAvailable(): Boolean = try {
-        val p = Runtime.getRuntime().exec("su")
-        val os = DataOutputStream(p.outputStream)
-        os.writeBytes("exit\n"); os.flush()
-        p.waitFor() == 0
-    } catch (_: Exception) { false }
+    /** 检测 su 是否可用；su 可能弹授权框卡住，限时 [ROOT_CHECK_TIMEOUT_MS] 后强杀。阻塞调用，勿在主线程。 */
+    fun isRootAvailable(): Boolean {
+        var p: Process? = null
+        return try {
+            p = Runtime.getRuntime().exec("su")
+            val os = DataOutputStream(p.outputStream)
+            os.writeBytes("exit\n"); os.flush()
+            p.waitFor(ROOT_CHECK_TIMEOUT_MS, TimeUnit.MILLISECONDS) && p.exitValue() == 0
+        } catch (_: Exception) {
+            false
+        } finally {
+            p?.let { if (it.isAlive) it.destroyForcibly() }
+        }
+    }
 
     fun proactiveConnect(context: Context) {
         if (shellService?.asBinder()?.isBinderAlive == true) return
@@ -45,28 +56,30 @@ object HabitatShellManager {
 
     suspend fun execShellCommand(context: Context, command: String, mode: ShellMode = ShellMode.AUTO): String =
         withContext(Dispatchers.IO) {
+            val rootPreferred = context.getSharedPreferences("habitat_prefs", Context.MODE_PRIVATE)
+                .getString("default_shell_mode", "shizuku") == "root"
             val finalMode = if (mode == ShellMode.AUTO) {
-                val prefs = context.getSharedPreferences("habitat_prefs", Context.MODE_PRIVATE)
-                if (prefs.getString("default_shell_mode", "shizuku") == "root") ShellMode.ROOT else ShellMode.SHIZUKU
+                if (rootPreferred) ShellMode.ROOT else ShellMode.SHIZUKU
             } else mode
 
             if (finalMode == ShellMode.ROOT) execRoot(command)
-            else execShizuku(context, command)
+            else execShizuku(context, command, allowRootFallback = rootPreferred)
         }
 
     private fun execRoot(command: String): String = try {
-        val p = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-        val out = p.inputStream.bufferedReader().readText().trim()
-        val err = p.errorStream.bufferedReader().readText().trim()
-        p.waitFor()
-        out.ifEmpty { err }.ifEmpty { "OK" }
+        ShellProcessRunner.run(arrayOf("su", "-c", command), ShellProcessRunner.DEFAULT_TIMEOUT_MS).trim()
     } catch (e: Exception) { "Error: ${e.message}" }
 
-    private suspend fun execShizuku(context: Context, command: String): String {
-        val svc = getService(context) ?: return try {
-            execRoot(command)
-        } catch (_: Exception) {
-            "Error: Shell service unavailable"
+    /** Shizuku 不可用时只有用户在引导页选了 root 模式才回退 su，不静默提权。 */
+    private suspend fun execShizuku(context: Context, command: String, allowRootFallback: Boolean): String {
+        val svc = getService(context)
+        if (svc == null) {
+            if (allowRootFallback) {
+                Log.w(TAG, "Shizuku 不可用，按设置回退 su")
+                return execRoot(command)
+            }
+            Log.w(TAG, "Shizuku 不可用，未启用 root 模式，不回退 su")
+            return "Error: Shizuku 不可用（未授权或未运行）"
         }
         return try { svc.exec(command) } catch (e: Exception) { "Error: ${e.message}" }
     }
@@ -96,7 +109,7 @@ object HabitatShellManager {
 
                 val conn = object : ServiceConnection {
                     override fun onServiceConnected(name: android.content.ComponentName?, service: IBinder?) {
-                        cont.resume(IHabitatShizukuService.Stub.asInterface(service))
+                        if (cont.isActive) cont.resume(IHabitatShizukuService.Stub.asInterface(service))
                     }
                     override fun onServiceDisconnected(name: android.content.ComponentName?) {
                         shellService = null
@@ -107,7 +120,7 @@ object HabitatShellManager {
                     try {
                         Shizuku.bindUserService(args, conn)
                     } catch (e: Exception) {
-                        cont.resumeWithException(e)
+                        if (cont.isActive) cont.resumeWithException(e)
                     }
                 }
             }

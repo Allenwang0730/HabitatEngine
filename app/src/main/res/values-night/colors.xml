@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="habitat_primary">#FF5FDBC9</color>
+    <color name="habitat_on_primary">#FF003731</color>
+    <color name="habitat_primary_container">#FF005048</color>
+    <color name="habitat_secondary">#FFB0CCC6</color>
+    <color name="habitat_background">#FF0F1417</color>
+    <color name="habitat_on_background">#FFDFE3E6</color>
+</resources>

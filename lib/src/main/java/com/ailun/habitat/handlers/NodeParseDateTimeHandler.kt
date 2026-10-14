@@ -3,6 +3,7 @@ package com.ailun.habitat.handlers
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.paramLong
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -37,7 +38,7 @@ class NodeParseDateTimeHandler : INodeHandler {
             when (action) {
                 "now" -> {
                     epochMs = System.currentTimeMillis()
-                    applyOffsets(node, epochMs).let { epochMs = it }
+                    applyOffsets(node, context, epochMs).let { epochMs = it }
                 }
 
                 "parse" -> {
@@ -51,7 +52,7 @@ class NodeParseDateTimeHandler : INodeHandler {
                     }
                     epochMs = LocalDateTime.parse(input, formatter)
                         .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    applyOffsets(node, epochMs).let { epochMs = it }
+                    applyOffsets(node, context, epochMs).let { epochMs = it }
                 }
 
                 else -> { // format
@@ -61,40 +62,40 @@ class NodeParseDateTimeHandler : INodeHandler {
                     epochMs = input.toLongOrNull()
                         ?: LocalDateTime.parse(input, DateTimeFormatter.ofPattern(inputFormat))
                             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    applyOffsets(node, epochMs).let { epochMs = it }
+                    applyOffsets(node, context, epochMs).let { epochMs = it }
                 }
             }
 
             val formatter = DateTimeFormatter.ofPattern(outputFormat)
             val dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ZoneId.systemDefault())
 
-            context.variables[outputVar] = dt.format(formatter)
-            context.variables["datetime_epoch"] = epochMs
-            context.variables["datetime_year"] = dt.year
-            context.variables["datetime_month"] = dt.monthValue
-            context.variables["datetime_day"] = dt.dayOfMonth
-            context.variables["datetime_hour"] = dt.hour
-            context.variables["datetime_minute"] = dt.minute
-            context.variables["datetime_second"] = dt.second
-            context.variables["datetime_weekday"] = dt.dayOfWeek.value // 1=Monday
-            context.variables["datetime_success"] = true
+            context.putVariable(outputVar, dt.format(formatter))
+            context.putVariable("datetime_epoch", epochMs)
+            context.putVariable("datetime_year", dt.year)
+            context.putVariable("datetime_month", dt.monthValue)
+            context.putVariable("datetime_day", dt.dayOfMonth)
+            context.putVariable("datetime_hour", dt.hour)
+            context.putVariable("datetime_minute", dt.minute)
+            context.putVariable("datetime_second", dt.second)
+            context.putVariable("datetime_weekday", dt.dayOfWeek.value) // 1=Monday
+            context.putVariable("datetime_success", true)
             context.log("DateTime $action → ${dt.format(formatter)} (epoch=$epochMs)")
         } catch (e: Exception) {
-            context.variables["datetime_success"] = false
-            context.variables["datetime_error"] = e.message ?: "Unknown error"
+            context.putVariable("datetime_success", false)
+            context.putVariable("datetime_error", e.message ?: "Unknown error")
             context.log("DateTime FAILED: ${e.message}")
         }
         return node.next
     }
 
-    private fun applyOffsets(node: WorkflowNode, base: Long): Long {
+    private fun applyOffsets(node: WorkflowNode, context: WorkflowContext, base: Long): Long {
         var ms = base
         val zone = ZoneId.systemDefault()
         val dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), zone)
-        val days = (node.params?.get("add_days") as? Number)?.toLong() ?: 0L
-        val hours = (node.params?.get("add_hours") as? Number)?.toLong() ?: 0L
-        val minutes = (node.params?.get("add_minutes") as? Number)?.toLong() ?: 0L
-        val seconds = (node.params?.get("add_seconds") as? Number)?.toLong() ?: 0L
+        val days = paramLong(node, context, "add_days", 0L)
+        val hours = paramLong(node, context, "add_hours", 0L)
+        val minutes = paramLong(node, context, "add_minutes", 0L)
+        val seconds = paramLong(node, context, "add_seconds", 0L)
         if (days != 0L || hours != 0L || minutes != 0L || seconds != 0L) {
             ms = dt.plusDays(days).plusHours(hours).plusMinutes(minutes).plusSeconds(seconds)
                 .atZone(zone).toInstant().toEpochMilli()

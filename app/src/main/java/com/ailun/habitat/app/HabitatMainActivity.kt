@@ -5,19 +5,16 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
-import com.ailun.habitat.R
-import com.ailun.habitat.app.TriggerManager
-import com.ailun.habitat.app.auth.AuthStateManager
-import com.ailun.habitat.app.network.HabitatApiClient
-import com.ailun.habitat.app.ui.HabitatSettingsActivity
-import com.ailun.habitat.app.ui.ProfilePrefs
+import com.ailun.habitat.WorkflowRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-/** Habitat 应用主入口。 */
+/**
+ * Habitat 应用主入口。
+ * 进程级初始化（鉴权、API 客户端、触发器恢复）在 [HabitatApp] 中完成，这里不再重置任何状态。
+ */
 class HabitatMainActivity : ComponentActivity() {
 
     companion object {
@@ -25,8 +22,8 @@ class HabitatMainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        window.isNavigationBarContrastEnforced = false
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -38,30 +35,19 @@ class HabitatMainActivity : ComponentActivity() {
             return
         }
 
-        // Reset all workflow states on app restart
-        TriggerManager.resetAll(this)
-
-        // Initialize auth and API client on startup
-        AuthStateManager.init(this)
-        HabitatApiClient.init(ProfilePrefs.getServerUrl(this))
-
-        // Normal launch → dashboard
         lifecycleScope.launch(Dispatchers.IO) {
             HabitatShellManager.proactiveConnect(this@HabitatMainActivity)
         }
 
         setContent {
-            MaterialTheme(colorScheme = habitatColorScheme()) {
-                Surface(color = MaterialTheme.colorScheme.background) {
-                    HabitatDashboard(this)
-                }
-            }
+            HabitatTheme { HabitatDashboard(this) }
         }
     }
 
     override fun onStart() {
         super.onStart()
-        val mountedIds = com.ailun.habitat.WorkflowRepository.getFloatMountedWorkflowIds(this)
+        if (isFinishing) return
+        val mountedIds = WorkflowRepository.getFloatMountedWorkflowIds(this)
         if (mountedIds.isNotEmpty()) {
             HabitatFloatService.start(this)
         }

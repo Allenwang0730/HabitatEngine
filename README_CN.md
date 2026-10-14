@@ -1,12 +1,44 @@
-# Habitat — JSON 驱动的 Android 自动化工作流引擎
+# Habitat — 让 AI Agent 操控安卓手机
 
-> 轻量、AI 友好、84+ 节点类型。工作流定义为扁平 JSON——专为 LLM 生成设计，非手工编写。
+> **可嵌入的安卓自动化运行时**，自带**手机端 MCP 服务**和**自主 Agent**（DeepSeek 规划、TypeSafe Jev 逐屏选动作、代码验证）。
+> 工作流是 LLM 能直接生成的扁平 JSON，执行走无障碍 + 系统 API 双轨。
 
+[![CI](https://github.com/Allenwang0730/HabitatEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/Allenwang0730/HabitatEngine/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Allenwang0730/HabitatEngine)](https://github.com/Allenwang0730/HabitatEngine/releases)
+[![JitPack](https://jitpack.io/v/Allenwang0730/HabitatEngine.svg)](https://jitpack.io/#Allenwang0730/HabitatEngine)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-purple)]()
 [![Min SDK](https://img.shields.io/badge/API-29+-green)]()
-[![Nodes](https://img.shields.io/badge/Nodes-84-blue)]()
-[![MCP](https://img.shields.io/badge/MCP-LM_accessible-green)]()
-[![Compose](https://img.shields.io/badge/UI-Compose_M3-orange)]()
+[![MCP](https://img.shields.io/badge/MCP-server-green)]()
+[![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+
+[English](README.md)
+
+**能做什么**
+
+- **一句话让手机自己做**——"打开设置进入蓝牙""亮度调到最高""现在电量多少"。Agent 先规划，能用设备工具就直接用，不能就在界面上点，最后按屏幕证据复核。真机评测：有规划时 Jev、DeepSeek 两种执行器都是 **28/28**（2026-10-09，无规划 13–18/28）——[方法与原始数据](docs/EVAL.md)。
+- **手机上的 MCP 服务**——任意 MCP 客户端（Claude、Cursor、自己的 Agent）经 `ws://127.0.0.1:8931/mcp` 读屏、调用约 80 个自动化节点；令牌鉴权，高危节点默认关闭。
+- **可嵌入的引擎**——把 `:lib` 引入你自己的 App（JitPack），运行 LLM 生成的 JSON 工作流：触发器、分支、循环、变量、Shell、HTTP、传感器、通知。
+
+## 两分钟上手
+
+1. 从 [Releases](https://github.com/Allenwang0730/HabitatEngine/releases) 下载安装包装到 Android 10+ 手机：绝大多数手机用 `app-standard-arm64-v8a-release.apk`，不确定就用 `universal`。
+2. 打开 Habitat，按提示开启**无障碍服务**。
+3. 底栏 **Agent** → 选执行器（Jev / DeepSeek / 本地）→ 填 API Key（只加密存在手机上）→ 输入目标 → **开始**。
+   - 没有 key：选「本地」，离线可用（策略简单）。
+   - 国内网络直连 Jev 会返回 451，见下文 [Jev 网络](#自主模式规划deepseek-执行jev-代码控制)。
+
+想用工作流：底栏 **AI 生成** → 用一句话描述 → DeepSeek 生成 JSON → 保存运行。
+
+### 在你的 App 里使用引擎
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement { repositories { maven("https://jitpack.io") } }
+// build.gradle.kts
+implementation("com.github.Allenwang0730:HabitatEngine:v1.9.0")
+```
+
+初始化与权限见 [docs/ENGINE_USAGE.md](docs/ENGINE_USAGE.md)。
 
 ---
 
@@ -72,7 +104,7 @@ HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
 | ACTION_PARSE_JSON | json, path, output_var | 解析 JSON | |
 | ACTION_HTTP_REQUEST | url, method, output_var, timeout | HTTP 请求 | 需网络 |
 | ACTION_LAUNCH_APP | package_name | 打开应用 | |
-| ACTION_CLICK | target, region, occurrence | 点击 | 需无障碍 |
+| ACTION_CLICK | target, region, occurrence, offset_x, offset_y | 点击 | 需无障碍 |
 | ACTION_INPUT_TEXT | text, mode | 输入文字 | 需无障碍 |
 | ACTION_READ_SCREEN | keyword, output_var | 读屏幕 | 需无障碍 |
 | ACTION_FIND_ELEMENT | selector, search_mode, region, timeout_ms, output_var | 找元素 | 需无障碍 |
@@ -111,27 +143,59 @@ WorkflowAIGenerator.generate(context, "拨打10086并开启录音")  // → Gene
 
 ## MCP 移动端 Agent（AI 控制手机）
 
-引擎暴露 **MCP server**（JSON-RPC 2.0，82 个工具）：
+引擎暴露 **MCP server**（JSON-RPC 2.0）：
 
-```
-ws://<host>:8931/mcp?token=<token>   # token 鉴权（默认 habitat-dev-token，控制页可改同局域网）
+```bash
+adb forward tcp:8931 tcp:8931          # 服务默认只监听手机 127.0.0.1
+ws://127.0.0.1:8931/mcp                # Authorization: Bearer <令牌>（或 ?token=）
 ```
 
 - `initialize / tools/list / tools/call` 标准 MCP，任意 LLM 客户端可接入
+- **鉴权**：令牌每台设备首次启动随机生成，在 App「Agent」页查看/复制/重新生成；局域网访问默认关闭；Shell、文件、短信、拨号等高危节点远程默认拒绝，需在 Agent 页手动开启
 - 支持 `region`/`occurrence` 精准定位多实例文本（如"点下半屏的确定"）
-- App 内 **Agent 控制页**：服务开关/状态/局域网 IP/端口/token
-- 电脑侧 `scripts/agent_daemon.mjs`（常驻长连接，读屏 3.9s→277ms）/ `mcp_call.mjs`
+- 微信读屏：只在 `wechat` 渠道包里（`./gradlew :app:assembleWechatDebug`）。微信只对类名为 `SelectToSpeakService` 的服务返回节点，这等于冒用 Google 组件身份，**仅限自用，不能上架分发**。默认的 `standard` 包不含它，树为空时用 ML Kit 中文离线 OCR
+- 电脑侧 `scripts/agent_daemon.mjs`（常驻长连接）/ `mcp_call.mjs`（单次调用，`--full` 看完整字段）
+
+### 自主模式：规划（DeepSeek）+ 执行（Jev）+ 代码控制
+
+```
+目标 ─► DeepSeek 规划：拆成几步，每步带屏幕上可验证的完成条件；能用设备工具就直接用
+          ▼
+   每一步：工具步直接调设备功能 ／ 界面步由执行器（Jev / DeepSeek / 本地）逐屏选一个候选动作
+          │  卡住（兜圈 / 无变化 / 低置信）→ 从当前屏幕重规划剩下的部分（≤2 次）
+          ▼
+   DeepSeek 复核：按屏幕证据判断是否真的完成；提问类目标在这里读出答案
+```
+
+- **模型只做选择，控制在代码**：执行器只能从代码生成的候选里选；步骤推进、导航栈与页面图、判重、换招、安全闸都在代码里
+- **设备工具**：设置页直达（15 页）、开关 WLAN/蓝牙/手电/免打扰、调亮度音量、读电量/时间/设备/网络；会改设备状态的工具必须由用户目标原文点名
+- **页面状态**：包名 + Activity + 标题识别当前页；开关开/关、滑块百分比、输入框内容进入候选；导航栈告诉模型"在哪一层、返回到哪、哪些入口试过"
+- **安全**：规划器输出一律不可信——工具/参数白名单、输入文字必须是目标原文子串、支付/权限弹窗只看用户原文放行
+- **入口**：Agent 页（执行器可选 Jev / DeepSeek / 本地，「DeepSeek 规划与复核」开关）；MCP `agent_start`（`goal` / `provider` / `max_steps` / `planner`）、`agent_stop`、`agent_status`
+- **Jev 网络**：国内网络直连 Jev 返回 451。手机开代理/VPN，或在 Agent 页「Jev 代理」填 `127.0.0.1:<电脑代理端口>` 并 `adb reverse tcp:<端口> tcp:<端口>`
+
+**真机评测**（一台 vivo，Android 16；结果用 adb/读屏独立验证，不看 agent 自己说的 DONE）。方法、原始数据与局限见 [docs/EVAL.md](docs/EVAL.md)。
+
+| 执行器 | 有规划 | 无规划 | 日期 / 提交 |
+|---|:---:|:---:|---|
+| Jev | 28/28 | 13/28 | 2026-10-09 · `09b0632`，7 类任务 × 4 次 |
+| DeepSeek | 28/28 | 18/28 | 2026-10-09 · `09b0632`，7 类任务 × 4 次 |
+| DeepSeek | 10/10 | 7/10 | 2026-10-14 · `9069155`，10 类任务（新增发消息/打电话） |
+
+任务：进蓝牙页、设置内搜索、进入关于手机、时钟切到秒表、亮度调到最高、问电量、问安卓版本号；2026-10-14 起另有不带引号的搜索、给 QQ 联系人输入消息、按名字给运营商打电话。复现：`node scripts/agent_eval.mjs`（任务在 `scripts/agent_eval_tasks.json`）。详见 [docs/AGENT.md](docs/AGENT.md)。
 
 ## 测试
 
+- 单元测试（JVM，无需真机）：`./gradlew :lib:testDebugUnitTest :app:testDebugUnitTest`（126 条）
 - 引擎自测：`scripts/run_selftest.ps1`（**68 条回归 = 53 PASS / 0 FAIL / 15 SKIP**，需真机）
+- 自主模式真机评测：`node scripts/agent_eval.mjs`（`scripts/agent_eval_show.mjs` 看明细）
 - LLM 生成正确率：`scripts/verify_workflow_gen.ps1`（13 场景）
 
 ## 独立发布（AAR）
 
 `:lib` 已配置 maven-publish：
 ```bash
-./gradlew :lib:publishReleasePublicationToMavenLocal   # 出 habitat-engine:1.6.0 AAR
+./gradlew :lib:publishReleasePublicationToMavenLocal   # 出 habitat-engine:1.8.0 AAR
 ```
 三方接入见 `docs/ENGINE_USAGE.md`。
 
@@ -140,7 +204,7 @@ ws://<host>:8931/mcp?token=<token>   # token 鉴权（默认 habitat-dev-token�
 ### 交互 (6)
 | 类型 | 功能 |
 |------|------|
-| `ACTION_CLICK` | 点击坐标/无障碍元素 |
+| `ACTION_CLICK` | 点击坐标或无障碍元素（`offset_x`/`offset_y` 相对目标中心偏移） |
 | `ACTION_SWIPE` | 直线滑动 |
 | `ACTION_LONG_PRESS` | 长按 |
 | `ACTION_INPUT_TEXT` | 输入文字 (a11y / shell / clipboard) |

@@ -18,8 +18,9 @@ import com.ailun.habitat.api.IShellExecutor
  *
  * params:
  * - `key` (必需): 按键标识符，支持以下值:
- *   - back, home, recents, notifications, quick_settings  (Shell + A11y 双通道)
- *   - power_dialog, screenshot_toggle, enter, delete, space, tab  (仅 Shell)
+ *   - back, home, recents, notifications  (Shell + A11y 双通道)
+ *   - quick_settings, power_dialog  (仅 A11y performGlobalAction，没有等价的 keyevent)
+ *   - screenshot_toggle, enter, delete, space, tab  (仅 Shell)
  *
  * 输出变量:
  * - `key_success` (Boolean)
@@ -30,25 +31,24 @@ class NodeGlobalKeyHandler(
 ) : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val key = node.params?.get("key")?.toString()?.trim()?.lowercase().orEmpty()
+        context.putVariable("key_success", false)
+        val key = node.params?.get("key")?.toString()?.let { context.interpolate(it) }?.trim()?.lowercase().orEmpty()
         if (key.isEmpty()) {
             Log.w(TAG, "GlobalKey: 'key' parameter is empty")
-            context.variables["key_success"] = false
             return node.next
         }
 
         val keyCode = KEY_MAP[key]
-        if (keyCode == null) {
-            Log.w(TAG, "GlobalKey: unknown key '$key', valid keys: ${KEY_MAP.keys}")
-            context.variables["key_success"] = false
+        if (keyCode == null && key !in A11Y_ACTION_MAP) {
+            Log.w(TAG, "GlobalKey: unknown key '$key', valid keys: ${KEY_MAP.keys + A11Y_ACTION_MAP.keys}")
             return node.next
         }
 
         // Strategy 1: Shell
-        if (shellExecutor != null) {
+        if (shellExecutor != null && keyCode != null) {
             val shellSuccess = tryShell(key, keyCode, context)
             if (shellSuccess) {
-                context.variables["key_success"] = true
+                context.putVariable("key_success", true)
                 return node.next
             }
             Log.d(TAG, "GlobalKey: shell failed for '$key', falling back to A11y")
@@ -56,11 +56,11 @@ class NodeGlobalKeyHandler(
 
         // Strategy 2: A11y performGlobalAction
         if (tryA11y(key, context)) {
-            context.variables["key_success"] = true
+            context.putVariable("key_success", true)
             return node.next
         }
 
-        context.variables["key_success"] = false
+        context.putVariable("key_success", false)
         context.log("GlobalKey: key '$key' failed — shell and A11y both unavailable")
         return node.next
     }
@@ -74,6 +74,8 @@ class NodeGlobalKeyHandler(
                      !output.contains("exception", ignoreCase = true)
             if (ok) context.log("GlobalKey: key '$key' (code=$keyCode) via shell")
             ok
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "GlobalKey: shell error for '$key'", e)
             false
@@ -111,8 +113,6 @@ class NodeGlobalKeyHandler(
             "home"              to 3,
             "recents"           to 187,
             "notifications"     to 83,
-            "quick_settings"    to 84,
-            "power_dialog"      to 26,
             "screenshot_toggle" to 120,
             "enter"             to 66,
             "delete"            to 67,
@@ -126,6 +126,7 @@ class NodeGlobalKeyHandler(
             "recents"        to AccessibilityService.GLOBAL_ACTION_RECENTS,
             "notifications"  to AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS,
             "quick_settings" to AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS,
+            "power_dialog"   to AccessibilityService.GLOBAL_ACTION_POWER_DIALOG,
         )
     }
 }

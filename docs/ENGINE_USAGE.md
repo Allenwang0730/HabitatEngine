@@ -4,18 +4,29 @@ Habitat 是**LLM 友好的安卓自动化引擎**：把 84 个"节点"（操作�
 
 ## 一、依赖（独立 AAR）
 
-引擎位于 `:lib`，已配置 maven-publish，可发布到 mavenLocal 后作为依赖消费：
+引擎位于 `:lib`（AAR）。两种引入方式：
+
+**方式一：JitPack（推荐）**
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories { google(); mavenCentral(); maven("https://jitpack.io") }
+}
+// app/build.gradle.kts
+dependencies { implementation("com.github.Allenwang0730:HabitatEngine:v1.9.0") }
+```
+
+**方式二：本地构建发布到 mavenLocal**
 
 ```bash
 # 在引擎仓库根目录
 ./gradlew :lib:publishReleasePublicationToMavenLocal
 ```
 
-在你的安卓项目 `settings.gradle.kts` 加 mavenLocal，`build.gradle.kts` 加依赖：
 ```kotlin
 repositories { mavenLocal() }
-
-dependencies { implementation("com.ailun:habitat-engine:1.6.0") }
+dependencies { implementation("com.ailun:habitat-engine:1.8.0") }
 ```
 
 或直接用 `:lib` 的 AAR 产物（`lib/build/outputs/aar/lib-release.aar`）文件依赖。

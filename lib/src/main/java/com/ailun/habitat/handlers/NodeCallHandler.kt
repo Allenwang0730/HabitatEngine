@@ -6,24 +6,19 @@ import android.util.Log
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
-import com.ailun.habitat.api.IAccessibilityProvider
-import com.ailun.habitat.api.IShellExecutor
 
 /**
  * [ACTION_CALL_PHONE]：打开拨号界面（不直接拨出，无需 CALL_PHONE 权限）。
  *
  * params：`phone_number`（必填）
  */
-class NodeCallHandler(
-    private val provider: IAccessibilityProvider? = null,
-    private val shellExecutor: IShellExecutor? = null,
-) : INodeHandler {
+class NodeCallHandler : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         val rawNumber = node.params?.get("phone_number")?.toString()?.trim().orEmpty()
         if (rawNumber.isEmpty()) {
             Log.e(TAG, "Call failed: 'phone_number' parameter is empty")
-            context.variables["call_success"] = false
+            context.putVariable("call_success", false)
             return node.next
         }
 
@@ -37,10 +32,10 @@ class NodeCallHandler(
 
             context.appContext.startActivity(intent)
             Log.i(TAG, "Successfully opened dialer for: $phoneNumber")
-            context.variables["call_success"] = true
+            context.putVariable("call_success", true)
         } catch (e: Exception) {
             Log.e(TAG, "Call error for '$phoneNumber': ${e.message}", e)
-            context.variables["call_success"] = false
+            context.putVariable("call_success", false)
         }
 
         return node.next

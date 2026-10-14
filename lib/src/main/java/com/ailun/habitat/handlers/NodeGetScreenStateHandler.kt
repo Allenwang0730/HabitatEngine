@@ -21,13 +21,13 @@ class NodeGetScreenStateHandler : INodeHandler {
             val km = context.appContext.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
             val locked = km?.isKeyguardLocked ?: false
 
-            context.variables["screen_on"] = screenOn
-            context.variables["screen_locked"] = locked
-            context.variables["screen_state_success"] = true
+            context.putVariable("screen_on", screenOn)
+            context.putVariable("screen_locked", locked)
+            context.putVariable("screen_state_success", true)
             context.log("ScreenState on=$screenOn locked=$locked")
         } catch (e: Exception) {
-            context.variables["screen_state_success"] = false
-            context.variables["screen_state_error"] = e.message ?: "Unknown error"
+            context.putVariable("screen_state_success", false)
+            context.putVariable("screen_state_error", e.message ?: "Unknown error")
         }
         return node.next
     }

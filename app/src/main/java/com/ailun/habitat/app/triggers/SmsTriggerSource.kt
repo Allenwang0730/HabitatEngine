@@ -1,10 +1,12 @@
 package com.ailun.habitat.app.triggers
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.provider.Telephony
+import androidx.core.content.ContextCompat
 import com.ailun.habitat.TriggerConfig
 import com.ailun.habitat.api.ITriggerSource
 import com.ailun.habitat.api.TriggerEvent
@@ -44,9 +46,14 @@ class SmsTriggerSource : ITriggerSource {
         }
 
         receiver = r
-        context.registerReceiver(
+        // 系统广播需 EXPORTED（Android 14 要求显式标志）；限定发送方持有 BROADCAST_SMS，防其他 App 伪造短信事件
+        ContextCompat.registerReceiver(
+            context,
             r,
             IntentFilter(Telephony.Sms.Intents.SMS_RECEIVED_ACTION),
+            Manifest.permission.BROADCAST_SMS,
+            null,
+            ContextCompat.RECEIVER_EXPORTED,
         )
     }
 

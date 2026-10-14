@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  wechat 渠道专用：额外的读屏无障碍服务。
+  微信 8.0.52+ 只对类名为 SelectToSpeakService 的服务返回节点，所以这里沿用了 Google「随选朗读」的包名/类名。
+  这属于冒用系统组件身份，不能上架 Google Play，也只应自用。默认的 standard 渠道不包含它。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- 类名必须是 SelectToSpeakService，微信才会对这个服务返回节点。 -->
+        <service
+            android:name="com.google.android.accessibility.selecttospeak.SelectToSpeakService"
+            android:label="@string/wechat_reader_label"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_reader_config" />
+        </service>
+    </application>
+</manifest>

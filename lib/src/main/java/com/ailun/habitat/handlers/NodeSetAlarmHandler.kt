@@ -6,6 +6,8 @@ import android.provider.AlarmClock
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.paramIntOrNull
+import com.ailun.habitat.paramString
 
 /**
  * [ACTION_SET_ALARM]：调起系统闹钟设置（零权限）。
@@ -21,15 +23,13 @@ import com.ailun.habitat.WorkflowNode
 class NodeSetAlarmHandler : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val hour = (node.params?.get("hour") as? Number)?.toInt()
-            ?: node.params?.get("hour")?.toString()?.toIntOrNull()
-        val minute = (node.params?.get("minute") as? Number)?.toInt()
-            ?: node.params?.get("minute")?.toString()?.toIntOrNull()
-        val label = node.params?.get("label")?.toString()?.takeIf { it.isNotBlank() }
+        val hour = paramIntOrNull(node, context, "hour")
+        val minute = paramIntOrNull(node, context, "minute")
+        val label = paramString(node, context, "label")?.takeIf { it.isNotBlank() }
 
         if (hour == null || minute == null || hour !in 0..23 || minute !in 0..59) {
-            context.variables["alarm_success"] = false
-            context.variables["alarm_error"] = "hour/minute 缺失或越界 (hour=$hour, minute=$minute)"
+            context.putVariable("alarm_success", false)
+            context.putVariable("alarm_error", "hour/minute 缺失或越界 (hour=$hour, minute=$minute)")
             context.log("SetAlarm FAILED: bad hour/minute")
             return node.next
         }
@@ -45,18 +45,18 @@ class NodeSetAlarmHandler : INodeHandler {
 
             val pm = context.appContext.packageManager
             if (intent.resolveActivity(pm) == null) {
-                context.variables["alarm_success"] = false
-                context.variables["alarm_error"] = "没有可处理 ACTION_SET_ALARM 的应用"
+                context.putVariable("alarm_success", false)
+                context.putVariable("alarm_error", "没有可处理 ACTION_SET_ALARM 的应用")
                 context.log("SetAlarm FAILED: no alarm app")
                 return node.next
             }
 
             context.appContext.startActivity(intent)
-            context.variables["alarm_success"] = true
+            context.putVariable("alarm_success", true)
             context.log("SetAlarm $hour:$minute${label?.let { " ($it)" } ?: ""}")
         } catch (e: Exception) {
-            context.variables["alarm_success"] = false
-            context.variables["alarm_error"] = e.message ?: "Unknown error"
+            context.putVariable("alarm_success", false)
+            context.putVariable("alarm_error", e.message ?: "Unknown error")
             context.log("SetAlarm FAILED: ${e.message}")
         }
         return node.next

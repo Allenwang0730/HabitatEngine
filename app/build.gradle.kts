@@ -18,12 +18,17 @@ android {
     namespace = "com.ailun.habitat"
     compileSdk = 36
 
-    signingConfigs {
-        create("release") {
-            storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
+    // 仅在 keystore.properties 存在且字段齐全时配置 release 签名；否则 release 构建产出未签名 APK（配置阶段不失败）
+    val hasReleaseKeystore = keystorePropertiesFile.exists() &&
+        listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !keystoreProperties.getProperty(it).isNullOrBlank() }
+    if (hasReleaseKeystore) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
         }
     }
 
@@ -31,13 +36,13 @@ android {
         applicationId = "com.ailun.habitat"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 6
+        versionName = "1.9.0"
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKeystore) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -52,6 +57,17 @@ android {
     kotlin {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        }
+    }
+
+    // standard：默认渠道，可公开分发。
+    // wechat：额外带「微信读屏」服务（冒用 Google SelectToSpeakService 类名，只能自用，不能上架）。
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("standard") { dimension = "distribution" }
+        create("wechat") {
+            dimension = "distribution"
+            versionNameSuffix = "-wechat"
         }
     }
 
@@ -115,9 +131,13 @@ dependencies {
 
     // Ktor（Agent WebSocket server）
     implementation(libs.ktor.server.core)
-    implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.websockets)
+
+    // 微信读屏兜底：捆绑中文模型，不依赖 Google Play 下载
+    implementation(libs.mlkit.text.recognition.chinese)
+
+    testImplementation(libs.junit)
 
     // EncryptedSharedPreferences
     implementation(libs.security.crypto)
@@ -127,7 +147,4 @@ dependencies {
 
     // Local Broadcast Manager (deprecated but needed for NotificationService)
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
-
-    // DocumentFile
-    implementation("androidx.documentfile:documentfile:1.1.0")
 }

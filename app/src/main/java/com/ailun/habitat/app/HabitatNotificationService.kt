@@ -29,6 +29,10 @@ class HabitatNotificationService : NotificationListenerService() {
         const val EXTRA_TITLE = "title"
         /** 本地广播 Extra：通知正文 */
         const val EXTRA_TEXT = "text"
+        /** 本地广播 Extra：展开长文本（BigTextStyle） */
+        const val EXTRA_BIG_TEXT = "big_text"
+        /** 本地广播 Extra：是否常驻/前台服务通知 */
+        const val EXTRA_ONGOING = "ongoing"
         /** 本地广播 Extra：时间戳（毫秒） */
         const val EXTRA_TIMESTAMP = "timestamp"
         /** 本地广播 Extra：通知 ID */
@@ -52,8 +56,12 @@ class HabitatNotificationService : NotificationListenerService() {
             val extras = notification.extras
 
             val packageName = sbn.packageName
-            val title = extras.getString(Notification.EXTRA_TITLE)?.toString() ?: ""
+            // 标题/正文可能是 SpannableString，getString 会返回 null
+            val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
             val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+            val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
+            val ongoing = (notification.flags and Notification.FLAG_ONGOING_EVENT) != 0 ||
+                (notification.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0
             val timestamp = sbn.postTime
             val notificationId = sbn.id
             val channelId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -64,6 +72,8 @@ class HabitatNotificationService : NotificationListenerService() {
                 putExtra(EXTRA_PACKAGE_NAME, packageName)
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_TEXT, text)
+                putExtra(EXTRA_BIG_TEXT, bigText)
+                putExtra(EXTRA_ONGOING, ongoing)
                 putExtra(EXTRA_TIMESTAMP, timestamp)
                 putExtra(EXTRA_NOTIFICATION_ID, notificationId)
                 putExtra(EXTRA_CHANNEL_ID, channelId)
@@ -81,6 +91,11 @@ class HabitatNotificationService : NotificationListenerService() {
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         serviceInstance = null
+    }
+
+    override fun onDestroy() {
+        if (serviceInstance === this) serviceInstance = null
+        super.onDestroy()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {

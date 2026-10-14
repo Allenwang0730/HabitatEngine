@@ -5,6 +5,9 @@ import android.media.MediaPlayer
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
+import com.ailun.habitat.paramBool
+import com.ailun.habitat.paramLongOrNull
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -25,14 +28,14 @@ class NodePlayMediaHandler : INodeHandler {
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         val rawPath = node.params?.get("path")?.toString()?.trim().orEmpty()
         if (rawPath.isEmpty()) {
-            context.variables["play_success"] = false
-            context.variables["play_error"] = "No 'path' specified"
+            context.putVariable("play_success", false)
+            context.putVariable("play_error", "No 'path' specified")
             return node.next
         }
         val path = context.interpolate(rawPath)
         val outputVar = node.params?.get("output_var")?.toString()?.trim()?.ifEmpty { null }
-        val loop = node.params?.get("loop")?.toString()?.equals("true", true) == true
-        val explicitTimeout = (node.params?.get("timeout_ms") as? Number)?.toLong()
+        val loop = paramBool(node, context, "loop", false)
+        val explicitTimeout = paramLongOrNull(node, context, "timeout_ms")
 
         var player: MediaPlayer? = null
         try {
@@ -51,21 +54,24 @@ class NodePlayMediaHandler : INodeHandler {
             val timeout = explicitTimeout?.coerceAtLeast(1000L)
                 ?: (if (duration > 0) duration + 3000L else 60_000L)
 
-            player.start()
+            // 监听须在 start 前设置，否则极短音频可能在设置前就已播完/出错而丢事件
             val done = CompletableDeferred<Boolean>()
             player.setOnCompletionListener { done.complete(true) }
             player.setOnErrorListener { _, _, _ -> done.complete(false); true }
+            player.start()
 
             val completed = withTimeoutOrNull(timeout) { done.await() } ?: false
 
-            context.variables["play_completed"] = completed
-            context.variables["play_duration_ms"] = duration
-            if (outputVar != null) context.variables[outputVar] = true
-            context.variables["play_success"] = true
+            context.putVariable("play_completed", completed)
+            context.putVariable("play_duration_ms", duration)
+            if (outputVar != null) context.putVariable(outputVar, true)
+            context.putVariable("play_success", true)
             context.log("PlayMedia $path duration=${duration}ms completed=$completed")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            context.variables["play_success"] = false
-            context.variables["play_error"] = e.message ?: "Unknown error"
+            context.putVariable("play_success", false)
+            context.putVariable("play_error", e.message ?: "Unknown error")
             context.log("PlayMedia FAILED: ${e.message}")
         } finally {
             runCatching { player?.release() }

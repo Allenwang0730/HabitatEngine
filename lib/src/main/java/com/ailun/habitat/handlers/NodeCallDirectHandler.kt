@@ -27,7 +27,7 @@ class NodeCallDirectHandler : INodeHandler {
         val rawNumber = node.params?.get("phone_number")?.toString()?.trim().orEmpty()
         if (rawNumber.isEmpty()) {
             Log.e(TAG, "CallDirect failed: 'phone_number' parameter is empty")
-            context.variables["call_success"] = false
+            context.putVariable("call_success", false)
             return node.next
         }
 
@@ -35,28 +35,36 @@ class NodeCallDirectHandler : INodeHandler {
             != PackageManager.PERMISSION_GRANTED
         ) {
             Log.e(TAG, "CallDirect failed: CALL_PHONE permission not granted")
-            context.variables["call_success"] = false
+            context.putVariable("call_success", false)
             return node.next
         }
 
-        val phoneNumber = context.interpolate(rawNumber)
+        val phoneNumber = context.interpolate(rawNumber).trim()
+        // 只允许拨号字符，防止变量注入 USSD/MMI 等特殊串以外的内容
+        if (!PHONE_REGEX.matches(phoneNumber)) {
+            Log.e(TAG, "CallDirect failed: invalid phone number")
+            context.putVariable("call_success", false)
+            context.putVariable("call_error", "号码格式非法")
+            return node.next
+        }
         val simPref = node.params?.get("sim")?.toString()?.trim()?.ifEmpty { "auto" } ?: "auto"
 
-        val uri = Uri.parse("tel:$phoneNumber")
-        val intent = Intent(Intent.ACTION_CALL, uri).apply {
-            // 从 application context 启动 Activity 必须带 NEW_TASK
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        resolvePhoneAccountHandle(context.appContext, simPref)?.let {
-            intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
-        }
+        // 用 TelecomManager.placeCall（系统底层拨号 API）：后台运行也能拨，不依赖前台 Activity，
+        // 避免 startActivity(ACTION_CALL) 在后台启动受限/被当 USSD 报"MMI 码无效"的问题。
+        val success = runCatching {
+            val tm = context.appContext.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+            val extras = android.os.Bundle()
+            resolvePhoneAccountHandle(context.appContext, simPref)?.let {
+                extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
+            }
+            // placeCall 无返回值；未抛异常即视为已提交拨号
+            tm.placeCall(Uri.fromParts("tel", phoneNumber, null), extras)
+            true
+        }.onSuccess { Log.i(TAG, "CallDirect placed via placeCall: $phoneNumber (sim=$simPref)") }
+            .onFailure { Log.e(TAG, "CallDirect placeCall failed: ${it.message}", it) }
+            .getOrElse { false }
 
-        val success = runCatching { context.appContext.startActivity(intent) }
-            .onSuccess { Log.i(TAG, "CallDirect placed: $phoneNumber (sim=$simPref)") }
-            .onFailure { Log.e(TAG, "CallDirect failed: ${it.message}", it) }
-            .isSuccess
-
-        context.variables["call_success"] = success
+        context.putVariable("call_success", success)
         return node.next
     }
 
@@ -72,5 +80,6 @@ class NodeCallDirectHandler : INodeHandler {
 
     companion object {
         private const val TAG = "HabitatCallDirect"
+        private val PHONE_REGEX = Regex("^[0-9+*#,; ()\\-]{1,40}$")
     }
 }

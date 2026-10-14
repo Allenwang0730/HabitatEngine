@@ -71,10 +71,10 @@ object InteractionNodes {
     val entries: List<Pair<String, NodeFactory>> = listOf(
         NodeHandlerFactory.ACTION_CLICK to { a, _ -> NodeClickHandler(a) },
         NodeHandlerFactory.ACTION_SWIPE to { a, _ -> NodeSwipeHandler(a) },
-        NodeHandlerFactory.ACTION_LONG_PRESS to { a, s -> NodeLongPressHandler(a, s) },
+        NodeHandlerFactory.ACTION_LONG_PRESS to { a, _ -> NodeLongPressHandler(a) },
         NodeHandlerFactory.ACTION_INPUT_TEXT to { a, s -> NodeInputTextHandler(a, s) },
         NodeHandlerFactory.ACTION_GLOBAL_KEY to { a, s -> NodeGlobalKeyHandler(a, s) },
-        NodeHandlerFactory.ACTION_FIND_ELEMENT to { a, s -> NodeFindElementHandler(a, s) },
+        NodeHandlerFactory.ACTION_FIND_ELEMENT to { a, _ -> NodeFindElementHandler(a) },
         NodeHandlerFactory.ACTION_GLOBAL_NAV to { a, _ -> NodeGlobalNavHandler(a) },
         NodeHandlerFactory.ACTION_WAIT_FOR_ELEMENT to { a, _ -> NodeWaitForElementHandler(a) },
     )
@@ -85,10 +85,10 @@ object SystemNodes {
     val entries: List<Pair<String, NodeFactory>> = listOf(
         NodeHandlerFactory.ACTION_SHELL to { _, s -> NodeShellHandler(s) },
         NodeHandlerFactory.ACTION_LAUNCH_APP to { _, _ -> NodeLaunchAppHandler() },
-        NodeHandlerFactory.ACTION_FORCE_STOP_APP to { _, s -> NodeForceStopAppHandler(shellExecutor = s) },
-        NodeHandlerFactory.ACTION_SCREEN_WAKE to { _, s -> NodeScreenWakeHandler(shellExecutor = s) },
-        NodeHandlerFactory.ACTION_WIFI to { _, _ -> NodeWifiHandler() },
-        NodeHandlerFactory.ACTION_BLUETOOTH to { _, _ -> NodeBluetoothHandler() },
+        NodeHandlerFactory.ACTION_FORCE_STOP_APP to { _, s -> NodeForceStopAppHandler(s) },
+        NodeHandlerFactory.ACTION_SCREEN_WAKE to { _, s -> NodeScreenWakeHandler(s) },
+        NodeHandlerFactory.ACTION_WIFI to { _, s -> NodeWifiHandler(s) },
+        NodeHandlerFactory.ACTION_BLUETOOTH to { _, s -> NodeBluetoothHandler(s) },
         NodeHandlerFactory.ACTION_VOLUME to { _, _ -> NodeVolumeHandler() },
         NodeHandlerFactory.ACTION_BRIGHTNESS to { _, _ -> NodeBrightnessHandler() },
         NodeHandlerFactory.ACTION_FLASHLIGHT to { _, _ -> NodeFlashlightHandler() },

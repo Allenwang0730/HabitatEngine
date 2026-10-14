@@ -8,7 +8,7 @@ import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.api.IAccessibilityProvider
-import com.ailun.habitat.api.IShellExecutor
+import com.ailun.habitat.paramLong
 import kotlinx.coroutines.delay
 
 /**
@@ -36,14 +36,13 @@ import kotlinx.coroutines.delay
  */
 class NodeFindElementHandler(
     private val provider: IAccessibilityProvider?,
-    private val shellExecutor: IShellExecutor?,
 ) : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         val rawSelector = node.params?.get("selector")?.toString()?.trim().orEmpty()
         if (rawSelector.isEmpty()) {
             Log.w(TAG, "FindElement: 'selector' parameter is empty")
-            context.variables["element_found"] = false
+            context.putVariable("element_found", false)
             return node.next
         }
 
@@ -52,11 +51,11 @@ class NodeFindElementHandler(
             ?: SEARCH_MODE_TEXT
         val regionSpec = context.interpolate(node.params?.get("region")?.toString()?.trim() ?: "")
         val outputVar = node.params?.get("output_var")?.toString()?.trim()?.ifEmpty { null }
-        val timeoutMs = (node.params?.get("timeout_ms") as? Number)?.toLong() ?: DEFAULT_TIMEOUT_MS
+        val timeoutMs = paramLong(node, context, "timeout_ms", DEFAULT_TIMEOUT_MS).coerceAtLeast(0L)
 
         val service = provider?.getService() ?: run {
             Log.e(TAG, "FindElement: Accessibility service not available")
-            context.variables["element_found"] = false
+            context.putVariable("element_found", false)
             return node.next
         }
 
@@ -65,8 +64,8 @@ class NodeFindElementHandler(
         val screenRect = getScreenRect(service)
         val region = resolveRegion(regionSpec, screenRect)
         if (regionSpec.isNotBlank() && region == null) {
-            context.variables["element_found"] = false
-            context.variables["element_error"] = "无法解析 region '$regionSpec'"
+            context.putVariable("element_found", false)
+            context.putVariable("element_error", "无法解析 region '$regionSpec'")
             context.log("FindElement: bad region '$regionSpec'")
             return node.next
         }
@@ -84,10 +83,10 @@ class NodeFindElementHandler(
                 val className = foundNode.className?.toString() ?: ""
                 val packageName = foundNode.packageName?.toString() ?: ""
 
-                context.variables["element_found"] = true
-                context.variables["element_bounds"] = bounds
-                context.variables["element_text"] = text
-                context.variables["element_clickable"] = clickable
+                context.putVariable("element_found", true)
+                context.putVariable("element_bounds", bounds)
+                context.putVariable("element_text", text)
+                context.putVariable("element_clickable", clickable)
 
                 if (outputVar != null) {
                     context.putVariable(
@@ -109,10 +108,10 @@ class NodeFindElementHandler(
                 foundNode.recycle()
             }
         } else {
-            context.variables["element_found"] = false
-            context.variables["element_bounds"] = ""
-            context.variables["element_text"] = ""
-            context.variables["element_clickable"] = false
+            context.putVariable("element_found", false)
+            context.putVariable("element_bounds", "")
+            context.putVariable("element_text", "")
+            context.putVariable("element_clickable", false)
 
             if (outputVar != null) {
                 context.putVariable(outputVar, mapOf("found" to false))
@@ -126,12 +125,16 @@ class NodeFindElementHandler(
 
     /** 当前屏幕矩形（用于解析 region）。取活动窗口 bounds，失败则默认全屏。 */
     private fun getScreenRect(service: AccessibilityService): Rect {
+        var root: AccessibilityNodeInfo? = null
         return try {
             val r = Rect()
-            service.rootInActiveWindow?.getBoundsInScreen(r)
+            root = service.rootInActiveWindow
+            root?.getBoundsInScreen(r)
             if (r.isEmpty) Rect(0, 0, 1080, 2400) else r
         } catch (_: Exception) {
             Rect(0, 0, 1080, 2400)
+        } finally {
+            safeRecycle(root)
         }
     }
 
@@ -209,18 +212,17 @@ class NodeFindElementHandler(
             }
 
             for (root in roots) {
-                val found = findNodeByMode(root, selector, searchMode, region)
-                if (found != null) return found
+                val found = findNodeByMode(root, selector, searchMode, region) ?: continue
+                // 结果可能就是某个 root（或其它 root 的同一节点）：返回独立副本，原节点统一在 finally 回收
+                @Suppress("DEPRECATION")
+                val copy = AccessibilityNodeInfo.obtain(found)
+                if (roots.none { it === found }) safeRecycle(found)
+                return copy
             }
 
             return null
         } finally {
-            roots.forEach { root ->
-                try {
-                    root.recycle()
-                } catch (_: Exception) {
-                }
-            }
+            roots.forEach { safeRecycle(it) }
         }
     }
 
@@ -266,7 +268,7 @@ class NodeFindElementHandler(
             SEARCH_MODE_CLASS -> {
                 val results = mutableListOf<AccessibilityNodeInfo>()
                 collectNodesByClassName(root, selector.lowercase(), results)
-                return if (results.isNotEmpty()) pickBestNode(results, region) else null
+                return if (results.isNotEmpty()) pickBestNode(results, region, keep = root) else null
             }
             SEARCH_MODE_CONTENT_DESC -> {
                 return findNodeByContentDescription(root, selector.lowercase(), region)
@@ -282,15 +284,23 @@ class NodeFindElementHandler(
      * 从 SDK 返回的节点列表中选出最佳节点：**优先"在区域内 + 可见"**，其次"在区域内"。
      * 未指定 region 时退回到旧逻辑（优先可见）。回收其余节点。
      */
-    private fun pickBestNode(results: List<AccessibilityNodeInfo>?, region: Rect?): AccessibilityNodeInfo? {
+    /** [keep]：不得回收的节点（root 本身可能出现在 results 中）。 */
+    private fun pickBestNode(
+        results: List<AccessibilityNodeInfo>?,
+        region: Rect?,
+        keep: AccessibilityNodeInfo? = null,
+    ): AccessibilityNodeInfo? {
         if (results == null || results.isEmpty()) return null
         val inRegion = results.filter { inRegion(it, region) }
-        if (inRegion.isEmpty()) return null
-        val best = inRegion.find { it.isVisibleToUser } ?: inRegion.first()
-        results.forEach { if (it !== best) it.recycle() }
+        val best = inRegion.find { it.isVisibleToUser } ?: inRegion.firstOrNull()
+        results.forEach { if (it !== best && it !== keep) safeRecycle(it) }
         return best
     }
 
+    /**
+     * 递归收集类名匹配的节点。[node] 本身归调用方所有（不在此回收）；
+     * 遍历中取到的子节点：匹配的放入 results（由调用方回收），不匹配的遍历完即回收。
+     */
     private fun collectNodesByClassName(
         node: AccessibilityNodeInfo,
         classNameLower: String,
@@ -304,17 +314,17 @@ class NodeFindElementHandler(
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
+            val before = results.size
             try {
                 collectNodesByClassName(child, classNameLower, results)
             } catch (_: Exception) {
-                try {
-                    child.recycle()
-                } catch (_: Exception) {
-                }
             }
+            // child 若匹配，会恰好被加在 before 位置并立即返回；否则回收
+            if (results.getOrNull(before) !== child) safeRecycle(child)
         }
     }
 
+    /** 深度优先查找内容描述匹配的节点。[node] 归调用方所有；返回的节点若不是 [node]，归调用方回收。 */
     private fun findNodeByContentDescription(
         node: AccessibilityNodeInfo,
         descriptionLower: String,
@@ -327,17 +337,23 @@ class NodeFindElementHandler(
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            try {
-                val found = findNodeByContentDescription(child, descriptionLower, region)
-                if (found != null) return found
+            val found = try {
+                findNodeByContentDescription(child, descriptionLower, region)
             } catch (_: Exception) {
-                try {
-                    child.recycle()
-                } catch (_: Exception) {
-                }
+                null
             }
+            if (found !== child) safeRecycle(child)
+            if (found != null) return found
         }
         return null
+    }
+
+    @Suppress("DEPRECATION")
+    private fun safeRecycle(node: AccessibilityNodeInfo?) {
+        try {
+            node?.recycle()
+        } catch (_: Exception) {
+        }
     }
 
     companion object {

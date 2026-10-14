@@ -1,0 +1,59 @@
+[
+  {
+    "id": "bluetooth_page",
+    "goal": "打开设置，进入蓝牙页面",
+    "verify": { "focus": "(Bluetooth|bluetooth)" }
+  },
+  {
+    "id": "settings_search",
+    "goal": "打开设置，在搜索框输入「电池」并搜索",
+    "verify": { "screen": "电池(最大容量|健康|用量)" }
+  },
+  {
+    "id": "about_phone",
+    "goal": "打开设置，找到「关于手机」并进入",
+    "verify": { "focus": "(DeviceInfo|deviceinfo|MyDevice|DeviceSettings)" }
+  },
+  {
+    "id": "clock_stopwatch",
+    "goal": "打开时钟，切换到秒表页面",
+    "setup": ["am force-stop com.android.BBKClock"],
+    "verify": { "focus": "BBKClock", "screen": "(计次|秒表)" }
+  },
+  {
+    "id": "brightness_max",
+    "goal": "把屏幕亮度调到最高",
+    "save": { "brightness": "settings get system screen_brightness", "mode": "settings get system screen_brightness_mode" },
+    "setup": ["settings put system screen_brightness_mode 0", "settings put system screen_brightness 60"],
+    "verify": { "shell": "settings get system screen_brightness", "atLeast": 230 },
+    "restore": ["settings put system screen_brightness {brightness}", "settings put system screen_brightness_mode {mode}"]
+  },
+  {
+    "id": "battery_question",
+    "goal": "现在电量是多少？",
+    "verify": { "detailMatchesShell": "dumpsys battery | grep level", "detailRegex": "(\\d{1,3})\\s*%?" }
+  },
+  {
+    "id": "android_version",
+    "goal": "进入关于手机，告诉我安卓版本号",
+    "verify": { "detailContainsShell": "getprop ro.build.version.release" }
+  },
+  {
+    "id": "settings_search_nospace",
+    "goal": "打开设置，在搜索框输入电池并搜索",
+    "verify": { "screen": "电池(最大容量|健康|用量)" }
+  },
+  {
+    "id": "qq_my_computer",
+    "goal": "打开QQ给我的电脑发消息说测试123",
+    "setup": ["am force-stop com.tencent.mobileqq"],
+    "verify": { "focus": "mobileqq", "screen": "测试123", "detailContains": "不自动发送" },
+    "restore": ["input keyevent 123 67 67 67 67 67 67 67 67 67 67 67 67", "input keyevent BACK", "input keyevent BACK", "input keyevent HOME"]
+  },
+  {
+    "id": "call_10086",
+    "goal": "打电话给中国移动",
+    "verify": { "focus": "(dialer|Dialer|contacts)", "screen": "1\\s?0\\s?0\\s?8\\s?6", "detailContains": "手动拨出" },
+    "restore": ["input keyevent HOME"]
+  }
+]

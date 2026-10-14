@@ -14,9 +14,10 @@ class VibrateNodeHandler : INodeHandler {
         val durationMs = parseLong(node.params?.get("duration"))
             ?: parseLong(node.params?.get("ms"))
             ?: 200L
-        val amplitude = (node.params?.get("amplitude") as? Number)?.toInt()
+        val amplitude = ((node.params?.get("amplitude") as? Number)?.toInt()
             ?: node.params?.get("amplitude")?.toString()?.toIntOrNull()
-            ?: 128
+            ?: 128).coerceIn(1, 255)
+        val duration = durationMs.coerceIn(1L, 10_000L)
 
         try {
             val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -29,12 +30,12 @@ class VibrateNodeHandler : INodeHandler {
 
             if (vibrator != null && vibrator.hasVibrator()) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(durationMs, amplitude))
+                    vibrator.vibrate(VibrationEffect.createOneShot(duration, amplitude))
                 } else {
                     @Suppress("DEPRECATION")
-                    vibrator.vibrate(durationMs)
+                    vibrator.vibrate(duration)
                 }
-                context.log("Vibrate dur=${durationMs}ms amp=$amplitude")
+                context.log("Vibrate dur=${duration}ms amp=$amplitude")
             } else {
                 context.log("Vibrate SKIP: no vibrator available")
             }

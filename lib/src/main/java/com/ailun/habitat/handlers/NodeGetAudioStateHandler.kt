@@ -27,13 +27,13 @@ class NodeGetAudioStateHandler : INodeHandler {
                     d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
             } ?: false
 
-            context.variables["music_active"] = musicActive
-            context.variables["headset_connected"] = headset
-            context.variables["audio_state_success"] = true
+            context.putVariable("music_active", musicActive)
+            context.putVariable("headset_connected", headset)
+            context.putVariable("audio_state_success", true)
             context.log("AudioState music=$musicActive headset=$headset")
         } catch (e: Exception) {
-            context.variables["audio_state_success"] = false
-            context.variables["audio_state_error"] = e.message ?: "Unknown error"
+            context.putVariable("audio_state_success", false)
+            context.putVariable("audio_state_error", e.message ?: "Unknown error")
         }
         return node.next
     }

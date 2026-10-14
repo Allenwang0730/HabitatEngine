@@ -4,31 +4,36 @@ import android.content.Context
 import android.os.PowerManager
 import android.util.Log
 import com.ailun.habitat.INodeHandler
+import com.ailun.habitat.ShellQuote
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
-import com.ailun.habitat.api.IAccessibilityProvider
 import com.ailun.habitat.api.IShellExecutor
 
 /**
  * [ACTION_SCREEN_WAKE]：控制屏幕唤醒/睡眠/解锁。
  *
- * params：`action`（必填："wake"/"sleep"/"wake_and_unlock"），`password`（可选，用于解锁）
+ * params：`action`（必填："wake"/"sleep"/"wake_and_unlock"），`password`（可选，用于解锁，仅允许字母和数字）
  */
 class NodeScreenWakeHandler(
-    private val provider: IAccessibilityProvider? = null,
     private val shellExecutor: IShellExecutor? = null,
 ) : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val action = node.params?.get("action")?.toString()?.trim()?.lowercase().orEmpty()
+        context.putVariable("screen_wake_success", false)
+        val action = node.params?.get("action")?.toString()?.let { context.interpolate(it) }
+            ?.trim()?.lowercase().orEmpty()
         if (action.isEmpty()) {
             Log.e(TAG, "Screen wake failed: 'action' parameter is empty")
-            context.variables["screen_wake_success"] = false
+            context.putVariable("screen_wake_success", false)
             return node.next
         }
 
-        val password = node.params?.get("password")?.toString()?.trim()
+        val password = node.params?.get("password")?.toString()?.let { context.interpolate(it) }?.trim()
             ?.takeIf { it.isNotEmpty() }
+        if (password != null && !PASSWORD_REGEX.matches(password)) {
+            context.log("ScreenWake FAILED: 解锁密码仅允许字母和数字")
+            return node.next
+        }
 
         var success = false
 
@@ -44,12 +49,12 @@ class NodeScreenWakeHandler(
             }
             else -> {
                 Log.e(TAG, "Screen wake failed: unknown action '$action'")
-                context.variables["screen_wake_success"] = false
+                context.putVariable("screen_wake_success", false)
                 return node.next
             }
         }
 
-        context.variables["screen_wake_success"] = success
+        context.putVariable("screen_wake_success", success)
         if (success) {
             Log.i(TAG, "Screen action '$action' succeeded")
         } else {
@@ -75,6 +80,8 @@ class NodeScreenWakeHandler(
                     Log.i(TAG, "Screen woken via KEYCODE_POWER (26)")
                     return true
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Shell wake keyevent failed: ${e.message}")
             }
@@ -106,11 +113,14 @@ class NodeScreenWakeHandler(
     private suspend fun sleepScreen(context: WorkflowContext): Boolean {
         if (shellExecutor != null) {
             try {
-                val output = shellExecutor.exec("input keyevent 26", asRoot = false)
+                // KEYCODE_SLEEP(223)：仅息屏；POWER(26) 是切换键，屏幕已灭时会误亮屏
+                val output = shellExecutor.exec("input keyevent 223", asRoot = false)
                 if (!output.contains("Error", ignoreCase = true)) {
-                    Log.i(TAG, "Screen put to sleep via KEYCODE_POWER (26)")
+                    Log.i(TAG, "Screen put to sleep via KEYCODE_SLEEP (223)")
                     return true
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Shell sleep keyevent failed: ${e.message}")
             }
@@ -138,7 +148,7 @@ class NodeScreenWakeHandler(
             if (password != null) {
                 // Wait briefly for the unlock screen to appear
                 kotlinx.coroutines.delay(500)
-                shellExecutor.exec("input text \"$password\"", asRoot = false)
+                shellExecutor.exec("input text ${ShellQuote.quote(password)}", asRoot = false)
                 kotlinx.coroutines.delay(200)
                 // Press Enter to confirm
                 shellExecutor.exec("input keyevent 66", asRoot = false)
@@ -146,6 +156,8 @@ class NodeScreenWakeHandler(
 
             Log.i(TAG, "Screen woken and unlocked successfully")
             return true
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "Shell unlock sequence failed: ${e.message}")
             return false
@@ -154,5 +166,6 @@ class NodeScreenWakeHandler(
 
     companion object {
         private const val TAG = "HabitatScreenWake"
+        private val PASSWORD_REGEX = Regex("^[A-Za-z0-9]{1,64}$")
     }
 }

@@ -19,21 +19,14 @@ class NodeAppInfoHandler(
             ?.ifEmpty { null } ?: "current_activity"
 
         val provider = a11yProvider
-        val packageName: String
-        val className: String
-
-        if (provider != null) {
-            packageName = provider.foregroundPackage ?: "unknown"
-            className = provider.foregroundActivity ?: "unknown"
-        } else {
-            // Fallback: use accessibility service directly
-            val service = provider?.getService()
-            packageName = service?.rootInActiveWindow?.let { root ->
-                try { root.packageName?.toString() ?: "unknown" }
-                finally { root.recycle() }
-            } ?: "unknown"
-            className = "unknown"
-        }
+        // foregroundPackage 为空（无障碍刚连接未收到窗口事件）时退回活动窗口 root 的包名
+        val packageName = provider?.foregroundPackage
+            ?: provider?.getService()?.rootInActiveWindow?.let { root ->
+                try { root.packageName?.toString() }
+                finally { @Suppress("DEPRECATION") root.recycle() }
+            }
+            ?: "unknown"
+        val className = provider?.foregroundActivity ?: "unknown"
 
         context.putVariable(outputVar, packageName)
         context.putVariable(activityVar, className)

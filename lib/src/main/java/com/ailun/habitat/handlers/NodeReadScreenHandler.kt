@@ -23,7 +23,7 @@ class NodeReadScreenHandler(
         val service = a11yProvider?.getService()
             ?: run {
                 context.log("ReadScreen Error: Accessibility not running")
-                context.variables["screen_data"] = false
+                context.putVariable("screen_data", false)
                 return node.next
             }
 
@@ -53,7 +53,7 @@ class NodeReadScreenHandler(
         }
 
         if (roots.isEmpty()) {
-            context.variables["screen_data"] = false
+            context.putVariable("screen_data", false)
             if (outputVar.isNotEmpty()) context.putVariable(outputVar, "")
             return node.next
         }
@@ -61,14 +61,13 @@ class NodeReadScreenHandler(
         var found = false
         val allTexts = mutableListOf<String>()
         try {
+            val collect = outputVar.isNotEmpty()
             for (root in roots) {
-                if (outputVar.isNotEmpty()) collectAllTextRecursive(root, allTexts)
-                if (containsKeywordRecursive(root, keyword)) {
-                    found = true
-                    break
-                }
+                // 单次遍历同时收集文本与匹配关键字；需要输出全文时不能提前结束
+                if (scan(root, keyword, if (collect) allTexts else null)) found = true
+                if (found && !collect) break
             }
-            context.variables["screen_data"] = found
+            context.putVariable("screen_data", found)
             if (found) context.log("ReadScreen: Target found in external app.")
 
             if (outputVar.isNotEmpty()) {
@@ -80,34 +79,35 @@ class NodeReadScreenHandler(
         return node.next
     }
 
-    private fun containsKeywordRecursive(node: AccessibilityNodeInfo, keyword: String): Boolean {
-        if (keyword.isEmpty()) return false
+    /**
+     * 深度优先遍历可见节点：[texts] 非空时收集全部文本；返回是否包含 [keyword]（keyword 为空恒 false）。
+     * 仅匹配关键字（texts == null）时命中即停止。
+     */
+    private fun scan(node: AccessibilityNodeInfo, keyword: String, texts: MutableList<String>?): Boolean {
         if (!node.isVisibleToUser) return false
         val pkg = node.packageName?.toString() ?: ""
         if (pkg.isEmpty()) return false
-        val text = node.text?.toString() ?: ""
-        val desc = node.contentDescription?.toString() ?: ""
-        if (text.contains(keyword, ignoreCase = true) || desc.contains(keyword, ignoreCase = true)) return true
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            try { if (containsKeywordRecursive(child, keyword)) return true }
-            finally { child.recycle() }
-        }
-        return false
-    }
-
-    private fun collectAllTextRecursive(node: AccessibilityNodeInfo, texts: MutableList<String>) {
-        if (!node.isVisibleToUser) return
-        val pkg = node.packageName?.toString() ?: ""
-        if (pkg.isEmpty()) return
         val text = node.text?.toString()?.trim()
         val desc = node.contentDescription?.toString()?.trim()
-        if (!text.isNullOrEmpty()) texts.add(text)
-        if (!desc.isNullOrEmpty() && desc != text) texts.add(desc)
+        if (texts != null) {
+            if (!text.isNullOrEmpty()) texts.add(text)
+            if (!desc.isNullOrEmpty() && desc != text) texts.add(desc)
+        }
+        var found = keyword.isNotEmpty() &&
+            (text?.contains(keyword, ignoreCase = true) == true || desc?.contains(keyword, ignoreCase = true) == true)
+        if (found && texts == null) return true
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            try { collectAllTextRecursive(child, texts) }
-            finally { child.recycle() }
+            try {
+                if (scan(child, keyword, texts)) {
+                    found = true
+                    if (texts == null) return true
+                }
+            } finally {
+                @Suppress("DEPRECATION")
+                child.recycle()
+            }
         }
+        return found
     }
 }

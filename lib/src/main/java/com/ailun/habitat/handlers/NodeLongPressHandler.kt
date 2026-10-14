@@ -1,17 +1,15 @@
 package com.ailun.habitat.handlers
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.GestureDescription
-import android.graphics.Path
 import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import com.ailun.habitat.HabitatAccessibility
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.api.IAccessibilityProvider
-import com.ailun.habitat.api.IShellExecutor
-import kotlinx.coroutines.CompletableDeferred
+import com.ailun.habitat.paramLong
 
 /**
  * [ACTION_LONG_PRESS] : 在指定目标上执行长按操作。
@@ -20,30 +18,30 @@ import kotlinx.coroutines.CompletableDeferred
  * - `target` (必需): 目标描述，支持两种格式:
  *   - 坐标格式 "x,y": 例如 "500,1200"，使用无障碍手势在指定坐标长按
  *   - 选择器格式: 通过文本或 viewId 查找无障碍节点并执行 ACTION_LONG_CLICK
- * - `duration` (可选, 默认 800 毫秒): 对于坐标模式的长按持续时间
+ * - `duration` (可选, 默认 800 毫秒，限制在 1..60000): 对于坐标模式的长按持续时间
  *
  * 输出变量:
  * - `long_press_success` (Boolean): 长按操作是否成功执行
  */
 class NodeLongPressHandler(
     private val provider: IAccessibilityProvider?,
-    private val shellExecutor: IShellExecutor?,
 ) : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
+        context.putVariable("long_press_success", false)
         val rawTarget = node.params?.get("target")?.toString()?.trim().orEmpty()
         if (rawTarget.isEmpty()) {
             Log.w(TAG, "LongPress: 'target' parameter is empty")
-            context.variables["long_press_success"] = false
+            context.putVariable("long_press_success", false)
             return node.next
         }
 
         val target = context.interpolate(rawTarget)
-        val durationMs = (node.params?.get("duration") as? Number)?.toLong() ?: DEFAULT_DURATION_MS
+        val durationMs = paramLong(node, context, "duration", DEFAULT_DURATION_MS).coerceIn(1L, MAX_DURATION_MS)
 
         val service = provider?.getService() ?: run {
             Log.e(TAG, "LongPress: Accessibility service not available")
-            context.variables["long_press_success"] = false
+            context.putVariable("long_press_success", false)
             return node.next
         }
 
@@ -66,7 +64,7 @@ class NodeLongPressHandler(
             )
         }
 
-        context.variables["long_press_success"] = success
+        context.putVariable("long_press_success", success)
         if (success) {
             context.log("LongPress: operation successful on '$target'")
         } else {
@@ -90,16 +88,7 @@ class NodeLongPressHandler(
             Log.w(TAG, "LongPress: negative coordinates ($x, $y)")
             return false
         }
-
-        val path = Path().apply {
-            moveTo(x.toFloat(), y.toFloat())
-        }
-        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
-        val gesture = GestureDescription.Builder()
-            .addStroke(stroke)
-            .build()
-
-        return dispatchGestureAwait(service, gesture)
+        return HabitatAccessibility.dispatchLongPress(service, x, y, durationMs)
     }
 
     /**
@@ -216,7 +205,9 @@ class NodeLongPressHandler(
         // 策略 2: 如果节点不可长按，向上查找可长按的祖先
         if (!targetNode.isLongClickable) {
             var parent: AccessibilityNodeInfo? = targetNode.parent
-            while (parent != null) {
+            var depth = 0
+            while (parent != null && depth < MAX_ANCESTOR_DEPTH) {
+                depth++
                 if (parent.isLongClickable) {
                     Log.d(TAG, "LongPress: found long-clickable ancestor: ${parent.className}")
                     result = try {
@@ -225,14 +216,18 @@ class NodeLongPressHandler(
                         Log.e(TAG, "LongPress: ancestor ACTION_LONG_CLICK failed", e)
                         false
                     }
-                    parent.recycle()
-                    if (result) break
-                } else {
-                    val grandparent = parent.parent
-                    parent.recycle()
-                    parent = grandparent
                 }
+                if (result) {
+                    parent.recycle()
+                    parent = null
+                    break
+                }
+                // 先取上一级再回收当前节点，避免使用已回收节点
+                val grandparent = parent.parent
+                parent.recycle()
+                parent = grandparent
             }
+            parent?.recycle()
         }
 
         targetNode.recycle()
@@ -251,37 +246,10 @@ class NodeLongPressHandler(
         return result
     }
 
-    /**
-     * 通过 CompletableDeferred 将异步的 dispatchGesture 回调转为挂起函数。
-     */
-    private suspend fun dispatchGestureAwait(
-        service: AccessibilityService,
-        gesture: GestureDescription,
-    ): Boolean {
-        val deferred = CompletableDeferred<Boolean>()
-        try {
-            service.dispatchGesture(
-                gesture,
-                object : AccessibilityService.GestureResultCallback() {
-                    override fun onCompleted(gesture: GestureDescription?) {
-                        deferred.complete(true)
-                    }
-
-                    override fun onCancelled(gesture: GestureDescription?) {
-                        deferred.complete(false)
-                    }
-                },
-                null,
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "LongPress: dispatchGesture failed", e)
-            return false
-        }
-        return deferred.await()
-    }
-
     companion object {
         private const val TAG = "HabitatLongPress"
         private const val DEFAULT_DURATION_MS = 800L
+        private const val MAX_DURATION_MS = 60_000L
+        private const val MAX_ANCESTOR_DEPTH = 50
     }
 }

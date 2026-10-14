@@ -34,20 +34,20 @@ class NodeNetworkStatusHandler : INodeHandler {
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
                 else -> "other"
             }
-            context.variables["network_connected"] = connected
-            context.variables["network_type"] = type
+            context.putVariable("network_connected", connected)
+            context.putVariable("network_type", type)
 
             // IP addresses
             if (action == "ip" || action == "all") {
-                context.variables["wifi_ip"] = getWifiIp(context)
-                context.variables["mobile_ip"] = getMobileIp()
+                context.putVariable("wifi_ip", getWifiIp(context))
+                context.putVariable("mobile_ip", getMobileIp())
             }
 
-            context.variables["network_success"] = true
+            context.putVariable("network_success", true)
         } catch (e: Exception) {
-            context.variables["network_connected"] = false
-            context.variables["network_error"] = e.message
-            context.variables["network_success"] = false
+            context.putVariable("network_connected", false)
+            context.putVariable("network_error", e.message ?: e.javaClass.simpleName)
+            context.putVariable("network_success", false)
         }
         context.log("NetworkStatus connected=${context.variables["network_connected"]} type=${context.variables["network_type"]}")
         return node.next

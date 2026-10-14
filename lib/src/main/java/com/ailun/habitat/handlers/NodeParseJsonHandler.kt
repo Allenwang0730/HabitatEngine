@@ -28,7 +28,7 @@ class NodeParseJsonHandler : INodeHandler {
 
         val rawJson = params["json"]?.toString()?.trim() ?: run {
             Log.w(TAG, "No JSON string provided")
-            context.variables["parse_success"] = false
+            context.putVariable("parse_success", false)
             return node.next
         }
 
@@ -63,17 +63,17 @@ class NodeParseJsonHandler : INodeHandler {
             }
 
             val resultKey = outputVar ?: "parsed_json"
-            context.variables[resultKey] = resultStr
-            context.variables["parsed_value"] = resultStr
-            context.variables["parse_success"] = true
+            context.putVariable(resultKey, resultStr)
+            context.putVariable("parsed_value", resultStr)
+            context.putVariable("parse_success", true)
 
             Log.i(TAG, "JSON parsed successfully${if (path != null) " at path: $path" else ""}")
         } catch (e: Exception) {
             Log.e(TAG, "JSON parse failed: ${e.message}", e)
-            context.variables["parse_success"] = false
-            context.variables["parse_error"] = e.message ?: "Unknown error"
+            context.putVariable("parse_success", false)
+            context.putVariable("parse_error", e.message ?: "Unknown error")
             if (outputVar != null) {
-                context.variables[outputVar] = "null"
+                context.putVariable(outputVar, "null")
             }
         }
 

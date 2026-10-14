@@ -36,6 +36,9 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 
 在 JSON 参数中可使用 `${var_name}` 引用工作流上下文中的变量，引擎会自动插值替换。
 
+- 只替换一轮，变量值里的 `${...}` 不会再被展开；未定义变量替换为 `"null"`。
+- `ACTION_SHELL` 的 `command` 中，每个变量值会被单引号转义为一个独立参数（防注入），不要自己再加引号；`raw_interpolation: true` 可恢复原样拼接。
+
 ---
 
 ## 节点类型索引
@@ -154,9 +157,25 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 }
 ```
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `target` | String | 坐标 "x,y" 或无障碍文本/ID 选择器 |
+```json
+{
+  "type": "ACTION_CLICK",
+  "params": {
+    "target": "录音",
+    "region": "0,0.5,1,1",
+    "occurrence": 0,
+    "offset_y": -50
+  }
+}
+```
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `target` | String | — | 坐标 `"x,y"`；无障碍文本（精确匹配不到时退回子串匹配，含列表行的子文字）；或 `"id:com.android.settings:id/title"` 按 resource-id 匹配（同名行配合 `occurrence`） |
+| `region` | String | 无 | 仅文本匹配：限定匹配节点所在屏幕区域，`"top"/"bottom"/"left"/"right"/"center"` 或归一化 `"x1,y1,x2,y2"`（0-1 相对屏幕，如 `0,0.5,1,1` = 下半屏） |
+| `occurrence` | Int | 0 | 仅文本匹配：region 过滤后取第几个匹配（按屏幕从上到下排序，0 起） |
+| `offset_x` | Int | 0 | 点击坐标相对目标中心的 X 偏移（px） |
+| `offset_y` | Int | 0 | 点击坐标相对目标中心的 Y 偏移（px，屏幕 Y 向下为正，负值=向上偏移） |
 
 输出: `click_success` (Boolean)
 
@@ -210,10 +229,13 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `text` | String | — | 文字内容，支持 `${var}` |
-| `mode` | String | "a11y" | 输入模式: a11y / shell / clipboard |
+| `text` | String | — | 文字内容，支持 `${var}`；`submit=true` 时可为空（只提交不改内容） |
+| `mode` | String | "a11y" | 输入模式: a11y / shell / ime。a11y 写入后读回核对，没生效时退回剪贴板粘贴（中文可用） |
+| `target` | String | — | 可选，`"x,y"`：写入包含该点的输入框（先让它获得焦点）。不传时写入当前焦点输入框 |
+| `submit` | Boolean | false | 输入后在输入框按 IME 回车（搜索/发送/确认）。走无障碍 `ACTION_IME_ENTER`，不需要 Shizuku；不可用时退回 `input keyevent 66` |
+| `allow_empty` | Boolean | false | 允许把输入框整框设为空（清空） |
 
-输出: `input_success` (Boolean)
+输出: `input_success` (Boolean；a11y 模式下框里确实是这段文字才为 true)
 
 ### ACTION_GLOBAL_KEY
 
@@ -271,8 +293,12 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 |------|------|------|------|
 | `command` | String | — | Shell 命令 |
 | `mode` | String | "auto" | auto / shizuku / root |
+| `raw_interpolation` | Boolean | false | true 时变量原样拼进命令（有注入风险） |
+| `timeout_ms` | Number | 60000 | 无 Shizuku 时本地执行的超时 |
 
 输出: `shell_output`, `shell_success`
+
+`${var}` 会被自动转义成一个参数：`"command": "am force-stop ${pkg}"` 是对的，`"echo '${x}'"` 会得到带引号的输出。
 
 ### ACTION_LAUNCH_APP
 

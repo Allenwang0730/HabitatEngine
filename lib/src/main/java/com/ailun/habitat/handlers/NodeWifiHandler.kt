@@ -7,19 +7,23 @@ import android.util.Log
 import com.ailun.habitat.INodeHandler
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
-import com.ailun.habitat.api.IAccessibilityProvider
 import com.ailun.habitat.api.IShellExecutor
+import kotlinx.coroutines.CancellationException
 
+/**
+ * [ACTION_WIFI]：WiFi 开关/状态。params：`action`（"on"/"off"/"toggle"/"status"）。
+ * 开关优先 `svc wifi enable|disable`（Shizuku）；无 shell 时回退 WifiManager.setWifiEnabled（Android 10+ 对普通应用无效）。
+ */
 class NodeWifiHandler(
-    private val provider: IAccessibilityProvider? = null,
     private val shellExecutor: IShellExecutor? = null,
 ) : INodeHandler {
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
-        val action = node.params?.get("action")?.toString()?.trim()?.lowercase().orEmpty()
+        context.putVariable("wifi_success", false)
+        val action = node.params?.get("action")?.toString()?.let { context.interpolate(it) }?.trim()?.lowercase().orEmpty()
         if (action.isEmpty()) {
             Log.e(TAG, "WiFi failed: 'action' parameter is empty")
-            context.variables["wifi_success"] = false
+            context.putVariable("wifi_success", false)
             return node.next
         }
 
@@ -27,7 +31,7 @@ class NodeWifiHandler(
         val wifiManager = context.appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         if (wifiManager == null) {
             Log.e(TAG, "WiFi failed: unable to get WifiManager service")
-            context.variables["wifi_success"] = false
+            context.putVariable("wifi_success", false)
             return node.next
         }
 
@@ -56,23 +60,25 @@ class NodeWifiHandler(
                     val state = wifiManager.wifiState
                     val enabled = state == WifiManager.WIFI_STATE_ENABLED ||
                             state == WifiManager.WIFI_STATE_ENABLING
-                    context.variables["wifi_enabled"] = enabled
-                    context.variables["wifi_state"] = state
+                    context.putVariable("wifi_enabled", enabled)
+                    context.putVariable("wifi_state", state)
                     success = true
                     Log.i(TAG, "WiFi status: enabled=$enabled, state=$state")
                 }
                 else -> {
                     Log.e(TAG, "WiFi failed: unknown action '$action'")
-                    context.variables["wifi_success"] = false
+                    context.putVariable("wifi_success", false)
                     return node.next
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "WiFi error for action '$action': ${e.message}", e)
             success = false
         }
 
-        context.variables["wifi_success"] = success
+        context.putVariable("wifi_success", success)
         return node.next
     }
 
@@ -83,10 +89,13 @@ class NodeWifiHandler(
             try {
                 val cmd = if (enable) "svc wifi enable" else "svc wifi disable"
                 val result = shell.exec(cmd, asRoot = false)
-                Log.i(TAG, "Shell $cmd → $result")
-                if (result.isNotBlank() && !result.contains("Error", ignoreCase = true)) {
+                Log.i(TAG, "Shell $cmd → ${result.take(200)}")
+                // svc 成功时通常无输出
+                if (!result.startsWith("Error") && !result.contains("Exception", ignoreCase = true)) {
                     return true
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Shell WiFi command failed, falling back to WifiManager: ${e.message}")
             }
