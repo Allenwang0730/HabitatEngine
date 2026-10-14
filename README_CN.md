@@ -15,7 +15,7 @@
 
 **能做什么**
 
-- **一句话让手机自己做**——"打开设置进入蓝牙""亮度调到最高""现在电量多少"。Agent 先规划，能用设备工具就直接用，不能就在界面上点，最后按屏幕证据复核。真机评测：有规划时 Jev、DeepSeek 两种执行器都是 **14/14**（无规划 6–10/14）。
+- **一句话让手机自己做**——"打开设置进入蓝牙""亮度调到最高""现在电量多少"。Agent 先规划，能用设备工具就直接用，不能就在界面上点，最后按屏幕证据复核。真机评测：有规划时 Jev、DeepSeek 两种执行器都是 **28/28**（2026-10-09，无规划 13–18/28）——[方法与原始数据](docs/EVAL.md)。
 - **手机上的 MCP 服务**——任意 MCP 客户端（Claude、Cursor、自己的 Agent）经 `ws://127.0.0.1:8931/mcp` 读屏、调用约 80 个自动化节点；令牌鉴权，高危节点默认关闭。
 - **可嵌入的引擎**——把 `:lib` 引入你自己的 App（JitPack），运行 LLM 生成的 JSON 工作流：触发器、分支、循环、变量、Shell、HTTP、传感器、通知。
 
@@ -174,18 +174,19 @@ ws://127.0.0.1:8931/mcp                # Authorization: Bearer <令牌>（或 ?t
 - **入口**：Agent 页（执行器可选 Jev / DeepSeek / 本地，「DeepSeek 规划与复核」开关）；MCP `agent_start`（`goal` / `provider` / `max_steps` / `planner`）、`agent_stop`、`agent_status`
 - **Jev 网络**：国内网络直连 Jev 返回 451。手机开代理/VPN，或在 Agent 页「Jev 代理」填 `127.0.0.1:<电脑代理端口>` 并 `adb reverse tcp:<端口> tcp:<端口>`
 
-**真机评测**（vivo / Android 16，7 类任务各 2 次，adb/读屏独立验证）：
+**真机评测**（一台 vivo，Android 16；结果用 adb/读屏独立验证，不看 agent 自己说的 DONE）。方法、原始数据与局限见 [docs/EVAL.md](docs/EVAL.md)。
 
-| 执行器 | 有规划 | 无规划 |
-|---|:---:|:---:|
-| Jev | 14/14 | 6–7/14 |
-| DeepSeek | 14/14 | 8–10/14 |
+| 执行器 | 有规划 | 无规划 | 日期 / 提交 |
+|---|:---:|:---:|---|
+| Jev | 28/28 | 13/28 | 2026-10-09 · `09b0632`，7 类任务 × 4 次 |
+| DeepSeek | 28/28 | 18/28 | 2026-10-09 · `09b0632`，7 类任务 × 4 次 |
+| DeepSeek | 10/10 | 7/10 | 2026-10-14 · `9069155`，10 类任务（新增发消息/打电话） |
 
-任务：进蓝牙页、设置内搜索、进入关于手机、时钟切到秒表、亮度调到最高、问电量、问安卓版本号。复现：`node scripts/agent_eval.mjs`（任务在 `scripts/agent_eval_tasks.json`）。详见 [docs/AGENT.md](docs/AGENT.md)。
+任务：进蓝牙页、设置内搜索、进入关于手机、时钟切到秒表、亮度调到最高、问电量、问安卓版本号；2026-10-14 起另有不带引号的搜索、给 QQ 联系人输入消息、按名字给运营商打电话。复现：`node scripts/agent_eval.mjs`（任务在 `scripts/agent_eval_tasks.json`）。详见 [docs/AGENT.md](docs/AGENT.md)。
 
 ## 测试
 
-- 单元测试（JVM，无需真机）：`./gradlew :lib:testDebugUnitTest :app:testDebugUnitTest`（104 条）
+- 单元测试（JVM，无需真机）：`./gradlew :lib:testDebugUnitTest :app:testDebugUnitTest`（126 条）
 - 引擎自测：`scripts/run_selftest.ps1`（**68 条回归 = 53 PASS / 0 FAIL / 15 SKIP**，需真机）
 - 自主模式真机评测：`node scripts/agent_eval.mjs`（`scripts/agent_eval_show.mjs` 看明细）
 - LLM 生成正确率：`scripts/verify_workflow_gen.ps1`（13 场景）

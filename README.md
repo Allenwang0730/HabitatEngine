@@ -16,7 +16,7 @@
 
 **What you get**
 
-- **Tell the phone what to do** — "open Settings and go to Bluetooth", "turn brightness to max", "what's my battery?" The agent plans, uses device tools directly when it can, taps through the UI when it must, and verifies the result on screen. On-device eval: **14/14** with planning for both Jev and DeepSeek executors (vs 6–10/14 without).
+- **Tell the phone what to do** — "open Settings and go to Bluetooth", "turn brightness to max", "what's my battery?" The agent plans, uses device tools directly when it can, taps through the UI when it must, and verifies the result on screen. On-device eval: with planning, **28/28** for both Jev and DeepSeek executors (2026-10-09, 13–18/28 without) — [method and raw data](docs/EVAL.md).
 - **An MCP server on the phone** — any MCP client (Claude, Cursor, your own agent) can read the screen and call ~80 automation nodes over `ws://127.0.0.1:8931/mcp`, token-authenticated, dangerous tools off by default.
 - **An embeddable engine** — drop `:lib` into your own app (JitPack) and run LLM-generated JSON workflows: triggers, branches, loops, variables, shell, HTTP, sensors, notifications.
 
@@ -362,18 +362,19 @@ goal ─► DeepSeek plans: a few steps, each with a completion condition visibl
 - **Entry points**: the Agent page (executor Jev / DeepSeek / local, "DeepSeek planning & review" switch); MCP `agent_start` (`goal` / `provider` / `max_steps` / `planner`), `agent_stop`, `agent_status`
 - **Jev from mainland China** returns HTTP 451: use a proxy/VPN on the phone, or set "Jev proxy" to `127.0.0.1:<PC proxy port>` and run `adb reverse tcp:<port> tcp:<port>`
 
-**On-device evaluation** (vivo / Android 16, 7 task types × 2 runs, verified independently via adb / screen reads):
+**On-device evaluation** (one vivo phone, Android 16; results verified independently via adb / screen reads, not the agent's own DONE). Method, raw data and limitations: [docs/EVAL.md](docs/EVAL.md).
 
-| Executor | with planner | without |
-|---|:---:|:---:|
-| Jev | 14/14 | 6–7/14 |
-| DeepSeek | 14/14 | 8–10/14 |
+| Executor | with planner | without | date / commit |
+|---|:---:|:---:|---|
+| Jev | 28/28 | 13/28 | 2026-10-09 · `09b0632`, 7 tasks × 4 runs |
+| DeepSeek | 28/28 | 18/28 | 2026-10-09 · `09b0632`, 7 tasks × 4 runs |
+| DeepSeek | 10/10 | 7/10 | 2026-10-14 · `9069155`, 10 tasks (adds messaging / calling) |
 
-Tasks: open Bluetooth page, search inside Settings, open About phone, switch Clock to stopwatch, max brightness, ask battery level, ask Android version. Reproduce with `node scripts/agent_eval.mjs` (tasks in `scripts/agent_eval_tasks.json`). See [docs/AGENT.md](docs/AGENT.md).
+Tasks: open Bluetooth page, search inside Settings, open About phone, switch Clock to stopwatch, max brightness, ask battery level, ask Android version; since 2026-10-14 also search without quotes, type a QQ message, call a carrier by name. Reproduce with `node scripts/agent_eval.mjs` (tasks in `scripts/agent_eval_tasks.json`). See [docs/AGENT.md](docs/AGENT.md).
 
 ## Testing
 
-- Unit tests (JVM, no device): `./gradlew :lib:testDebugUnitTest :app:testDebugUnitTest` (104 tests)
+- Unit tests (JVM, no device): `./gradlew :lib:testDebugUnitTest :app:testDebugUnitTest` (126 tests)
 - Engine self-test: `scripts/run_selftest.ps1` (**68 regressions = 53 PASS / 0 FAIL / 15 SKIP**, needs a device)
 - Autonomous-mode device eval: `node scripts/agent_eval.mjs` (`scripts/agent_eval_show.mjs` for details)
 - LLM generation accuracy: `scripts/verify_workflow_gen.ps1` (13 scenarios)
