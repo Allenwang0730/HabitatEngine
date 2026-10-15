@@ -130,6 +130,10 @@ class NodeHandlerFactory(
         const val ACTION_VIBRATE = "ACTION_VIBRATE"
         const val ACTION_SEND_NOTIFICATION = "ACTION_SEND_NOTIFICATION"
         const val ACTION_DYNAMIC_ISLAND = "ACTION_DYNAMIC_ISLAND"
+        /** 悬浮小屏（宿主 :app 注册）：文字/图片/进度，内容来源由调用方标注。 */
+        const val ACTION_MINI_SCREEN = "ACTION_MINI_SCREEN"
+        /** 本地工作区：结果/笔记/图片的读写（CORE）。 */
+        const val ACTION_WORKSPACE = "ACTION_WORKSPACE"
         const val ACTION_AI_CHAT = "ACTION_AI_CHAT"
         // 异常处理（v1.4.2）
         const val ACTION_RETRY = "ACTION_RETRY"

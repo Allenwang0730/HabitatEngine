@@ -32,7 +32,7 @@ afterEvaluate {
                 val onJitPack = System.getenv("JITPACK") == "true"
                 groupId = if (onJitPack) System.getenv("GROUP") ?: "com.github.Allenwang0730" else "com.ailun"
                 artifactId = if (onJitPack) System.getenv("ARTIFACT") ?: "HabitatEngine" else "habitat-engine"
-                version = if (onJitPack) System.getenv("VERSION") ?: "1.8.0" else "1.8.0"
+                version = if (onJitPack) System.getenv("VERSION") ?: "1.9.0" else "1.9.0"
             }
         }
     }

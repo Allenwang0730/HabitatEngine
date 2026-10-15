@@ -3,6 +3,7 @@ package com.ailun.habitat
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.graphics.RectF
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -45,11 +46,41 @@ object HabitatAccessibility {
         return dispatchGestureAwait(service, gesture, timeoutMs = duration + 5000)
     }
 
-    /** 派发任意手势并挂起等待结果；dispatchGesture 返回 false / 抛异常 / 超时均返回 false。 */
+    /**
+     * 派发任意手势并挂起等待结果；dispatchGesture 返回 false / 抛异常 / 超时均返回 false。
+     * 派发前让宿主的悬浮窗（[OverlayGuard]）从手势经过的范围让开。
+     */
     suspend fun dispatchGestureAwait(
         service: AccessibilityService,
         gesture: GestureDescription,
         timeoutMs: Long = 5000,
+    ): Boolean = OverlayGuard.aroundGesture(gestureArea(gesture)) { dispatchRaw(service, gesture, timeoutMs) }
+
+    /** 手势所有笔画的外接矩形；算不出来返回 null（按整屏处理）。 */
+    private fun gestureArea(gesture: GestureDescription): OverlayGuard.Box? = try {
+        var box: OverlayGuard.Box? = null
+        val bounds = RectF()
+        for (i in 0 until gesture.strokeCount) {
+            gesture.getStroke(i).path.computeBounds(bounds, true)
+            val stroke = OverlayGuard.Box(
+                bounds.left.toInt(), bounds.top.toInt(), bounds.right.toInt() + 1, bounds.bottom.toInt() + 1,
+            )
+            box = box?.let {
+                OverlayGuard.Box(
+                    minOf(it.left, stroke.left), minOf(it.top, stroke.top),
+                    maxOf(it.right, stroke.right), maxOf(it.bottom, stroke.bottom),
+                )
+            } ?: stroke
+        }
+        box
+    } catch (_: Exception) {
+        null
+    }
+
+    private suspend fun dispatchRaw(
+        service: AccessibilityService,
+        gesture: GestureDescription,
+        timeoutMs: Long,
     ): Boolean {
         val deferred = CompletableDeferred<Boolean>()
         val dispatched = try {

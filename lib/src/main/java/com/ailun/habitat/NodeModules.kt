@@ -41,6 +41,7 @@ object CoreNodes {
         NodeHandlerFactory.ACTION_PARSE_XML to { _, _ -> NodeParseXmlHandler() },
         NodeHandlerFactory.ACTION_BASE64 to { _, _ -> NodeBase64Handler() },
         NodeHandlerFactory.ACTION_FILE_OPERATION to { _, _ -> NodeFileOperationHandler() },
+        NodeHandlerFactory.ACTION_WORKSPACE to { _, _ -> NodeWorkspaceHandler() },
         NodeHandlerFactory.ACTION_SQLITE_QUERY to { _, _ -> NodeSqliteQueryHandler() },
         NodeHandlerFactory.ACTION_ZIP to { _, _ -> NodeZipHandler() },
         NodeHandlerFactory.ACTION_CRYPTO to { _, _ -> NodeCryptoHandler() },
