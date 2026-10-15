@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 只共享工作区条目（分享按钮用），不暴露 filesDir 其它内容 -->
+<paths>
+    <files-path name="workspace" path="workspace/entries/" />
+</paths>

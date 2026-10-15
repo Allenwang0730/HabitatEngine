@@ -45,6 +45,17 @@ object NodeKnowledge {
         NodeDoc("ACTION_CALL_DIRECT", "phone_number, sim", "直接拨号（最优先，不用 UI 模拟）", "需 CALL_PHONE"),
         NodeDoc("ACTION_CALL_PHONE", "phone_number", "拨打（走 Intent）", "需 CALL_PHONE"),
         NodeDoc("ACTION_SEND_NOTIFICATION", "title, message, channel_id", "发通知"),
+        NodeDoc(
+            "ACTION_MINI_SCREEN",
+            "action=show/append/progress/hide/clear, title, text（支持 \${var}）, image（图片路径或 base64，可选）, progress（0-100）, position=top/center/bottom, duration_ms（0=一直显示）",
+            "悬浮小屏：任务进行中给用户看实时内容（AI 回复、进度、截图）。show 替换内容，append 追加一段",
+            "需无障碍或悬浮窗权限",
+        ),
+        NodeDoc(
+            "ACTION_WORKSPACE",
+            "action=write/append/read/list/delete, name, content（支持 \${var}）, kind=text/json/image, image_path（图片）, tags（逗号分隔）, output_var",
+            "本机工作区：把结果/笔记/图片存下来，用户在「工作区」页查看；read 读回内容，list 列出条目（JSON）",
+        ),
         NodeDoc("ACTION_SWIPE", "x1,y1,x2,y2,duration_ms", "滑动", "需无障碍"),
         NodeDoc("ACTION_MEDIA_CONTROL", "cmd=play/pause/next", "媒体控制"),
     )
@@ -71,6 +82,7 @@ object NodeKnowledge {
 
     /** few-shot 示例（JSON 字符串）。 */
     val examples: List<String> = listOf(
+        """需求"让 AI 总结剪贴板内容并显示在小屏上，同时存到工作区"→{"name":"剪贴板摘要","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CLIPBOARD","params":{"action":"get","output_var":"clip"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_AI_CHAT","params":{"prompt":"用三句话总结：${'$'}{clip}","output_var":"summary"},"next":"s3"},"s3":{"id":"s3","type":"ACTION_MINI_SCREEN","params":{"title":"剪贴板摘要","text":"${'$'}{summary}"},"next":"s4"},"s4":{"id":"s4","type":"ACTION_WORKSPACE","params":{"action":"write","name":"剪贴板摘要","content":"${'$'}{summary}","tags":"摘要"}}}}}""",
         """需求"启动应用并显示提示"→{"name":"启动设置","description":"打开系统设置后弹提示","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_LAUNCH_APP","params":{"package_name":"com.android.settings"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":1500},"next":"s3"},"s3":{"id":"s3","type":"ACTION_TOAST","params":{"message":"已打开设置"}}}}}""",
         """需求"读取网络状态，wifi则提示当前WiFi否则提示没有网络"→{"name":"网络检查","workflow":{"start_node_id":"n1","nodes":{"n1":{"id":"n1","type":"ACTION_NETWORK_STATUS","params":{"action":"all"},"next":"n2"},"n2":{"id":"n2","type":"CONDITION_SWITCH","params":{"expression":"network_type == wifi"},"branches":{"true":"n3","false":"n4"}},"n3":{"id":"n3","type":"ACTION_TOAST","params":{"message":"当前WiFi"}},"n4":{"id":"n4","type":"ACTION_TOAST","params":{"message":"没有网络"}}}}}""",
         """需求"拨打10086并开启录音"→{"name":"拨号录音","description":"直拨10086并点录音","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CALL_DIRECT","params":{"phone_number":"10086"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":3000},"next":"s3"},"s3":{"id":"s3","type":"ACTION_CLICK","params":{"target":"录音"}}}}}}""",

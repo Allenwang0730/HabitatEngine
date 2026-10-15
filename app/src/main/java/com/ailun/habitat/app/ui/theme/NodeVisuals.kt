@@ -60,6 +60,7 @@ object NodeCategories {
     private val feedbackTypes = setOf(
         NodeHandlerFactory.ACTION_TOAST, NodeHandlerFactory.ACTION_VIBRATE, NodeHandlerFactory.ACTION_SEND_NOTIFICATION,
         NodeHandlerFactory.ACTION_DYNAMIC_ISLAND, NodeHandlerFactory.ACTION_LOG, NodeHandlerFactory.ACTION_TEXT_TO_SPEECH,
+        NodeHandlerFactory.ACTION_MINI_SCREEN,
     )
 
     fun of(type: String?): NodeCategory {

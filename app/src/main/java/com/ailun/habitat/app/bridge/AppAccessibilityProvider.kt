@@ -31,7 +31,9 @@ object AppAccessibilityProvider : IAccessibilityProvider {
 
     /** 由宿主无障碍服务在 onDestroy 中调用。 */
     fun onServiceDestroyed() {
+        val gone = serviceRef?.get()
         serviceRef = null
+        com.ailun.habitat.app.miniscreen.MiniScreen.onAccessibilityGone(gone)
     }
 
     /** 微信读屏服务连上。主服务还在时不抢走手势宿主。 */
@@ -43,6 +45,7 @@ object AppAccessibilityProvider : IAccessibilityProvider {
     fun onReaderDestroyed(service: AccessibilityService) {
         if (readerRef?.get() === service) readerRef = null
         if (serviceRef?.get() === service) serviceRef = null
+        com.ailun.habitat.app.miniscreen.MiniScreen.onAccessibilityGone(service)
     }
 
     fun getScreenReader(): AccessibilityService? = readerRef?.get()

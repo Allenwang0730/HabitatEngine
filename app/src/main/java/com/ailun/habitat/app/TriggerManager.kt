@@ -13,6 +13,7 @@ import com.ailun.habitat.app.bridge.AppAccessibilityProvider
 import com.ailun.habitat.app.bridge.ShizukuShellExecutor
 import com.ailun.habitat.app.bridge.applyAppHandlers
 import com.ailun.habitat.app.triggers.*
+import com.ailun.habitat.app.workspace.WorkflowRunRecorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -96,17 +97,22 @@ object TriggerManager {
                 register(workflowId, config, jsonContent, app)
             } else if (jsonContent != null) {
                 // Non-triggered: start execution. Auto-disable when it finishes.
+                val recorder = WorkflowRunRecorder.create(app, workflowId, WorkflowRepository.nameOf(app, workflowId))
                 HabitatExecutionService.start(
                     workflowId = workflowId,
                     jsonContent = jsonContent,
                     androidContext = app,
                     factory = factory(app),
+                    onLog = recorder?.let { r -> r::onLog },
+                    onResult = recorder?.let { r -> r::onResult },
                     onComplete = {
+                        recorder?.onComplete()
                         prefs(app).edit().remove(workflowId).apply()
                         refreshEnabledFlow(app)
                         notifyStateChange()
                         HabitatLogger.habitat("Workflow '$workflowId' finished, auto-disabled")
                     },
+                    origin = originOf(app, workflowId),
                 )
             }
         } else {
@@ -336,6 +342,9 @@ object TriggerManager {
         }
     }
 
+    private fun originOf(context: Context, workflowId: String): String =
+        com.ailun.habitat.WorkflowContext.workflowOrigin(WorkflowRepository.nameOf(context, workflowId) ?: "工作流")
+
     private fun startEntry(
         entry: TriggerEntry,
         runId: String,
@@ -345,13 +354,20 @@ object TriggerManager {
         val token = tokenSeq.incrementAndGet()
         runTokens[runId] = token
         activeRuns.getOrPut(entry.workflowId) { ConcurrentHashMap.newKeySet() }.add(runId)
+        val recorder = WorkflowRunRecorder.create(context, entry.workflowId, WorkflowRepository.nameOf(context, entry.workflowId))
         val ok = HabitatExecutionService.start(
             workflowId = runId,
             jsonContent = entry.jsonContent,
             androidContext = context,
             factory = factory(context),
             initialVars = vars,
-            onComplete = { onRunFinished(entry.workflowId, runId, token, context) },
+            onLog = recorder?.let { r -> r::onLog },
+            onResult = recorder?.let { r -> r::onResult },
+            onComplete = {
+                recorder?.onComplete()
+                onRunFinished(entry.workflowId, runId, token, context)
+            },
+            origin = originOf(context, entry.workflowId),
         )
         if (!ok) {
             runTokens.remove(runId, token)

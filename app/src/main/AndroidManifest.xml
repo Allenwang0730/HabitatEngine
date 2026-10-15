@@ -152,5 +152,16 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Local automation server that lets a user-authorized AI client control the device" />
         </service>
+
+        <!-- 工作区分享：只开放 filesDir/workspace/entries，按条目临时授权读取 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/workspace_paths" />
+        </provider>
     </application>
 </manifest>

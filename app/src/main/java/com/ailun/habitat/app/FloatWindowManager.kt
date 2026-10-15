@@ -377,13 +377,20 @@ class FloatWindowManager private constructor(private val application: Applicatio
         }
         val scope = ensureScope()
         floatRunIds.add(wf.id) // 先登记，避免极快结束时 onComplete 早于登记
+        val recorder = com.ailun.habitat.app.workspace.WorkflowRunRecorder.create(application, wf.id, wf.name)
         val ok = HabitatExecutionService.start(
             wf.id, wf.jsonContent, application, factory,
-            onComplete = { floatRunIds.remove(wf.id) },
+            onComplete = {
+                recorder?.onComplete()
+                floatRunIds.remove(wf.id)
+            },
             onLog = { line ->
+                recorder?.onLog(line)
                 HabitatLogger.habitat(line)
                 scope.launch { addFloatLog(line) }
             },
+            onResult = recorder?.let { r -> r::onResult },
+            origin = com.ailun.habitat.WorkflowContext.workflowOrigin(wf.name),
         )
         if (!ok) floatRunIds.remove(wf.id)
     }

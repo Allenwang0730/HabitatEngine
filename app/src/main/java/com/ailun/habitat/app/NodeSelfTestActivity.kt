@@ -9,6 +9,7 @@ import android.widget.Toast
 import com.ailun.habitat.NodeHandlerFactory
 import com.ailun.habitat.NodeModule
 import com.ailun.habitat.app.bridge.AppAccessibilityProvider
+import com.ailun.habitat.app.bridge.applyAppHandlers
 import com.ailun.habitat.selftest.NodeSelfTestRunner
 import com.ailun.habitat.selftest.NodeSelfTests
 import com.ailun.habitat.selftest.SelfTestResult
@@ -71,7 +72,8 @@ class NodeSelfTestActivity : Activity() {
 
         testScope.launch {
             // shell=null → ACTION_SHELL 走 Runtime.exec 兜底（与 SmartCS 调试页一致，结果可复现）
-            val factory = NodeHandlerFactory(AppAccessibilityProvider, shell = null)
+            // 带上 :app 注册的节点（小屏等），自测覆盖到宿主节点
+            val factory = NodeHandlerFactory(AppAccessibilityProvider, shell = null).apply { applyAppHandlers(applicationContext) }
             val cases = NodeSelfTests.all().filter { only == null || it.name == only }
             val a11yConnected = AppAccessibilityProvider.getService() != null
             Log.i(TAG, "=== NodeSelfTest start: ${cases.size} cases, a11yConnected=$a11yConnected ===")

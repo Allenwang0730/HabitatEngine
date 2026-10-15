@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -62,12 +64,15 @@ import com.ailun.habitat.app.ui.screens.LlmConsoleScreen
 import com.ailun.habitat.app.ui.screens.WorkflowEditorScreen
 import com.ailun.habitat.app.ui.screens.WorkflowListScreen
 import com.ailun.habitat.app.ui.viewmodel.DashboardViewModel
+import com.ailun.habitat.app.ui.workspace.WorkspaceEntryScreen
+import com.ailun.habitat.app.ui.workspace.WorkspaceScreen
 
 // ── 底部导航 ──
 private enum class Tab(val label: String, val selectedIcon: ImageVector, val icon: ImageVector) {
     Workflows("工作流", Icons.Filled.AccountTree, Icons.Outlined.AccountTree),
     AIGen("AI 生成", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome),
     Agent("Agent", Icons.Filled.SmartToy, Icons.Outlined.SmartToy),
+    Workspace("工作区", Icons.Filled.Folder, Icons.Outlined.Folder),
     Profile("我的", Icons.Filled.Person, Icons.Outlined.Person),
 }
 
@@ -76,6 +81,7 @@ private sealed interface Destination {
     data class Home(val tab: Tab) : Destination
     data object Editor : Destination
     data object Llm : Destination
+    data class WorkspaceEntry(val id: String) : Destination
 }
 
 /**
@@ -88,6 +94,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
     val vm = remember { ViewModelProvider(activity)[DashboardViewModel::class.java] }
     var selectedTab by rememberSaveable { mutableStateOf(Tab.Workflows) }
     var showLlm by rememberSaveable { mutableStateOf(false) }
+    var workspaceEntry by rememberSaveable { mutableStateOf<String?>(null) }
     val stateHolder = rememberSaveableStateHolder()
 
     // ── 悬浮窗开关 ──
@@ -148,6 +155,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
     val destination: Destination = when {
         vm.session != null && selectedTab == Tab.Workflows -> Destination.Editor
         showLlm && selectedTab == Tab.Profile -> Destination.Llm
+        workspaceEntry != null && selectedTab == Tab.Workspace -> Destination.WorkspaceEntry(workspaceEntry!!)
         else -> Destination.Home(selectedTab)
     }
     val fullScreen = destination !is Destination.Home
@@ -164,6 +172,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
             ) {
                 HabitatBottomBar(selectedTab) { tab ->
                     if (tab == selectedTab && tab == Tab.Profile) showLlm = false
+                    if (tab == selectedTab && tab == Tab.Workspace) workspaceEntry = null
                     selectedTab = tab
                 }
             }
@@ -200,6 +209,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
                         onTestRun = { json -> if (callPermissionOk(json)) vm.testRun(json) },
                     )
                     Destination.Llm -> LlmConsoleScreen(onBack = { showLlm = false })
+                    is Destination.WorkspaceEntry -> WorkspaceEntryScreen(dest.id, onBack = { workspaceEntry = null })
                     is Destination.Home -> stateHolder.SaveableStateProvider(dest.tab.name) {
                         when (dest.tab) {
                             Tab.Workflows -> WorkflowListScreen(
@@ -213,6 +223,7 @@ fun HabitatDashboard(activity: ComponentActivity) {
                             )
                             Tab.AIGen -> AIWorkflowScreen(onBack = { selectedTab = Tab.Workflows })
                             Tab.Agent -> AgentScreen()
+                            Tab.Workspace -> WorkspaceScreen(onOpen = { workspaceEntry = it })
                             Tab.Profile -> ProfileTab(
                                 isFloatServiceRunning = floatServiceRunning,
                                 onFloatServiceToggle = onFloatToggle,

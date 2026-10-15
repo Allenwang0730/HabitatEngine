@@ -33,7 +33,8 @@ object WeChatOcr {
         val now = System.currentTimeMillis()
         if (now < nextAllowedAt) return null
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
-        val bitmap = capture(service) ?: run {
+        // 小屏截图前先藏起来：别把它认成屏幕上的文字
+        val bitmap = com.ailun.habitat.OverlayGuard.aroundCapture { capture(service) } ?: run {
             backoff()
             return null
         }

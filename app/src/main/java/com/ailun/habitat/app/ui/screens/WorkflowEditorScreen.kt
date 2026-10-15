@@ -3,6 +3,7 @@ package com.ailun.habitat.app.ui.screens
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
+import androidx.compose.material3.Switch
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
@@ -103,6 +104,7 @@ import com.ailun.habitat.HabitatStateStore
 import com.ailun.habitat.app.HabitatTextStyles
 import com.ailun.habitat.app.HabitatTheme
 import com.ailun.habitat.app.Spacing
+import com.ailun.habitat.app.workspace.RunRecords
 import com.ailun.habitat.app.dag.DagFocusRequester
 import com.ailun.habitat.app.dag.WorkflowDagPanel
 import com.ailun.habitat.app.tabular
@@ -271,6 +273,7 @@ fun WorkflowEditorScreen(
                 onExpandedChange = { headerExpanded = it },
                 onNameChange = { vm.editName = it },
                 onDescriptionChange = { vm.editDescription = it },
+                workflowId = vm.session?.base?.id,
             )
 
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -393,7 +396,12 @@ private fun EditorHeader(
     onExpandedChange: (Boolean) -> Unit,
     onNameChange: (String) -> Unit,
     onDescriptionChange: (String) -> Unit,
+    workflowId: String?,
 ) {
+    val context = LocalContext.current
+    var record by remember(workflowId) {
+        mutableStateOf(workflowId != null && RunRecords.isWorkflowRecordEnabled(context, workflowId))
+    }
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -409,6 +417,26 @@ private fun EditorHeader(
                     value = description, onValueChange = onDescriptionChange,
                     label = { Text("描述") }, maxLines = 3, modifier = Modifier.fillMaxWidth(),
                 )
+                if (workflowId != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("运行结果存到工作区", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "每次运行结束存一份：状态、耗时、日志末尾、输出变量（不含密钥类变量）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = record,
+                            onCheckedChange = {
+                                record = it
+                                RunRecords.setWorkflowRecordEnabled(context, workflowId, it)
+                            },
+                            modifier = Modifier.semantics { contentDescription = "运行结果存到工作区" },
+                        )
+                    }
+                }
                 TextButton(onClick = { onExpandedChange(false) }, modifier = Modifier.align(Alignment.End)) {
                     Icon(Icons.Outlined.ExpandLess, contentDescription = null)
                     Spacer(Modifier.width(Spacing.xs))
