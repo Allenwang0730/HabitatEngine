@@ -104,9 +104,9 @@ automation drive the device.
 
 ---
 
-## Node Types (84)
+## Node Types (86)
 
-The engine has 84 node types across categories. Common / core ones below (same list is in `NodeKnowledge`, the single source used for LLM generation — documented once here and in `README_CN.md`):
+The engine has 86 node types across categories. Common / core ones below (same list is in `NodeKnowledge`, the single source used for LLM generation — documented once here and in `README_CN.md`):
 
 | Type | Params | Purpose | Requires |
 |------|--------|---------|----------|
@@ -212,7 +212,7 @@ Full categories in each `NodeModules`; `NodeKnowledge` is the single source for 
 | `ACTION_HTTP_REQUEST` | HTTP GET / POST / PUT / DELETE with headers + body |
 | `ACTION_NETWORK_STATUS` | Query network type, WiFi IP, mobile IP |
 
-### Media & UI (6)
+### Media & UI (8)
 | Type | What it does |
 |------|-------------|
 | `ACTION_SCREENSHOT` | Screenshot (base64 or file) |
@@ -221,6 +221,8 @@ Full categories in each `NodeModules`; `NodeKnowledge` is the single source for 
 | `ACTION_VIBRATE` | Haptic vibration |
 | `ACTION_SEND_NOTIFICATION` | System notification |
 | `ACTION_DYNAMIC_ISLAND` | Floating heads-up notification |
+| `ACTION_MINI_SCREEN` | Floating mini screen: live text / image / progress from a workflow, the agent or an MCP script (draggable, collapsible; moves out of the way of agent taps) |
+| `ACTION_WORKSPACE` | Local workspace: write / append / read / list / delete results, notes and images (viewed in the app's Workspace tab, on-device only) |
 
 ### AI (1)
 | Type | What it does |
@@ -326,7 +328,7 @@ WorkflowAIGenerator.generate(context, "call 10086 and record")  // → Generated
 ```
 
 - **13 typical scenarios, 100% generation accuracy** (incl. "dial directly via CALL_DIRECT instead of UI simulation", "repeated text uses region")
-- Prompt includes: 84-node list + common package map + priority rule (direct API preferred) + permission prerequisites + few-shot examples
+- Prompt includes: 86-node list + common package map + priority rule (direct API preferred) + permission prerequisites + few-shot examples
 - Per-generation cost ≈ 0.02–0.05 CNY (DeepSeek)
 
 ## MCP Mobile Agent (AI controls the phone)
@@ -524,4 +526,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 84 node types · LLM-friendly · MCP agent · embeddable · accessibility + system API · `habitat-server` companion backend
+**Habitat** · 86 node types · LLM-friendly · MCP agent · embeddable · accessibility + system API · `habitat-server` companion backend

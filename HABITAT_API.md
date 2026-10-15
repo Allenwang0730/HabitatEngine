@@ -123,7 +123,7 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 | [ACTION_SCREENSHOT](#action_screenshot) | 截屏 |
 | [ACTION_TEXT_TO_SPEECH](#action_text_to_speech) | 文字转语音 |
 
-### UI — 4 个节点
+### UI — 5 个节点
 
 | 类型 | 说明 |
 |------|------|
@@ -131,6 +131,13 @@ Habitat 是一个轻量级的 JSON 驱动工作流执行引擎，支持 **40+** 
 | [ACTION_VIBRATE](#action_vibrate) | 振动 |
 | [ACTION_SEND_NOTIFICATION](#action_send_notification) | 发送通知 |
 | [ACTION_DYNAMIC_ISLAND](#action_dynamic_island) | 灵动岛悬浮通知 |
+| [ACTION_MINI_SCREEN](#action_mini_screen) | 悬浮小屏（文字 / 图片 / 进度，实时反馈） |
+
+### 工作区 — 1 个节点
+
+| 类型 | 说明 |
+|------|------|
+| [ACTION_WORKSPACE](#action_workspace) | 本机工作区：结果、笔记、图片的读写 |
 
 ### 其他 — 2 个节点
 
@@ -880,6 +887,61 @@ iOS 风格灵动岛悬浮通知。
 {
   "type": "ACTION_DYNAMIC_ISLAND",
   "params": { "title": "执行中...", "message": "步骤 2/5", "duration": 3000 }
+}
+```
+
+### ACTION_MINI_SCREEN
+
+悬浮小屏：任务进行中给用户看实时内容（AI 回复、进度、截图）。可拖动、折叠、关闭。由宿主 App 注册（`:app`），需要无障碍服务或悬浮窗权限。
+
+| 参数 | 说明 |
+|------|------|
+| `action` | `show`（替换内容，默认）/ `append`（追加一段）/ `progress`（只更新进度）/ `hide`（隐藏，保留内容）/ `clear`（隐藏并清空） |
+| `title`、`text` | 标题、正文（支持 `${var}`，正文最多 4000 字，最多保留 20 段） |
+| `image` | 图片文件路径（经路径守卫）或 base64（可带 `data:image/...;base64,` 前缀），宽度缩到 1080px 以内 |
+| `progress` | 0–100 |
+| `position` | `top` / `center` / `bottom`；用户拖动过就按用户的位置 |
+| `duration_ms` | 大于 0 时到时自动隐藏 |
+
+输出：`mini_screen_success`、`mini_screen_shown`（false = 用户在本次运行里关掉了小屏，只更新了内容不再弹出）、`mini_screen_error`。
+
+- 来源标签（工作流名 / Agent / MCP）由调用方决定，不能用参数指定；MCP 写入的内容固定标「MCP」并用警示色。
+- 同一时刻只显示一个来源的内容：另一个来源 `append` 等同替换。
+- Agent 派发手势或截图时，小屏会自动让开 / 暂时隐藏，不会挡住点击，也不会被截进去。
+
+```json
+{
+  "type": "ACTION_MINI_SCREEN",
+  "params": { "title": "剪贴板摘要", "text": "${summary}", "position": "top" }
+}
+```
+
+### ACTION_WORKSPACE
+
+本机工作区（`filesDir/workspace`）：把结果、笔记、图片存下来，用户在 App 的「工作区」页查看、分享、置顶。只存本机。
+
+| 参数 | 说明 |
+|------|------|
+| `action` | `write`（新建，同名同类默认覆盖）/ `append`（文本追加）/ `read` / `list` / `delete` |
+| `name` | 显示名（落盘一律用 id，不会穿越目录）；`read`/`delete` 也可以给 `id` |
+| `content` | 文字或 JSON（支持 `${var}`）；`kind=image` 时为 base64 |
+| `kind` | `text`（默认）/ `json`（会校验）/ `image`（PNG/JPEG/WEBP/GIF，看文件头） |
+| `image_path` | `kind=image` 时也可以给图片路径（经路径守卫） |
+| `tags` | 逗号分隔 |
+| `overwrite` | `write` 时同名是否覆盖，默认 true；false 则自动改名「名字 (2)」 |
+| `tag`、`limit` | `list` 的筛选（`kind` 也可用，另有 `record` 表示运行记录） |
+| `output_var` | `read` 的内容 / `list` 的 JSON 数组写到这里（默认 `workspace_content` / `workspace_list`） |
+
+输出：`workspace_success`、`workspace_id`、`workspace_error`；`read` 另有 `workspace_kind`，图片给 `workspace_path`（可直接交给 `ACTION_MINI_SCREEN` 的 `image`）；`list` 另有 `workspace_count`。
+
+- 上限：文本/JSON 每条 1MB，图片每条 8MB，总共 200MB，超出从最早的未置顶条目删起。
+- 运行记录（`record`）只能由 App 写入（Agent 任务、打开了「运行结果存到工作区」的工作流），节点不能写，记录里的来源可信。
+- 远程（MCP）调用：`write`/`append`/`read`/`list` 默认放行；`delete` 需要开启「允许远程高危工具」。
+
+```json
+{
+  "type": "ACTION_WORKSPACE",
+  "params": { "action": "write", "name": "今日天气", "content": "${weather}", "tags": "天气" }
 }
 ```
 

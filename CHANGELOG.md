@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.10.0] - 2026-10-14
+
+App `versionName` 1.10.0（`versionCode` 7）；引擎 AAR `com.ailun:habitat-engine:1.9.0`（新增 `ACTION_WORKSPACE`、`OverlayGuard`、`WorkflowContext.origin`）。
+
+### Added — 悬浮小屏 `ACTION_MINI_SCREEN`
+- 任务进行中给用户看实时内容：文字、图片（路径或 base64，缩到 1080px 宽）、进度条。`show` 替换、`append` 追加（最多 20 段）、`progress`、`hide`（保留内容）、`clear`。
+- 可拖动（位置记住）、点一下折叠成胶囊、可关闭；关闭后同一次运行不再弹出（10 分钟后或换一次运行恢复），节点输出 `mini_screen_shown=false`。
+- 窗口优先挂在无障碍服务上（`TYPE_ACCESSIBILITY_OVERLAY`，不需要悬浮窗权限），没开无障碍时用悬浮窗权限。
+- 来源标签由调用方决定（工作流名 / Agent / Agent · 远程 / MCP），参数改不了；远程写入用警示色。同一时刻只显示一个来源的内容。
+- MCP 只读内置工具 `mini_screen_status`。
+
+### Added — 本机工作区 `ACTION_WORKSPACE` + 底部「工作区」标签
+- 节点：`write` / `append` / `read` / `list` / `delete`，`kind=text/json/image`，标签，`overwrite=false` 自动改名。存在 `filesDir/workspace`（`index.json` + 按 id 命名的条目文件，原子写入），名字只是显示名。上限：文本 1MB、图片 8MB、总共 200MB（超出删最早的未置顶条目）。
+- 「工作区」页：按天分组、置顶在前、筛选（笔记 / 图片 / Agent 记录 / 工作流记录）、搜索；详情页按类型展示（文本、格式化 JSON、可缩放图片、运行记录时间线），可复制、分享（`FileProvider` 只开放条目目录）、置顶、重命名、显示到小屏、删除（二次确认）。
+- **Agent 运行记录**：每次任务结束存一条（目标、执行器、是否规划、全部步骤、结果、耗时），Agent 页开关，默认开。
+- **工作流运行结果**：编辑器里每个工作流单独开关「运行结果存到工作区」（默认关）：状态、耗时、日志末尾 50 行、输出变量（名字含 token/key/password/secret/base64 等的不存，每个值截到 2000 字）。手动运行、悬浮窗运行、触发器运行、编辑器测试运行都会记录。
+- **Agent 输出工具**：`show_on_screen`、`save_note`（自由文字，可用 `{读数名}` 引用读到的值），只由用户目标原文里的「小屏 / 显示在 / 记下 / 工作区…」放行；目标要求了而计划里没做时，结束时自动把结果显示 / 记下。
+
+### Changed
+- 无障碍手势派发前问一遍宿主的悬浮窗（`OverlayGuard`）：小屏挡住目标就挪到另一端或暂时隐藏；`ACTION_SCREENSHOT` 与微信 OCR 截图前暂时隐藏小屏。
+- `WorkflowContext` 新增 `origin` / `runKey`（调用方设置，节点改不了）；`HabitatExecutionService.start` 新增 `origin` 参数。
+- 自测页带上 `:app` 注册的节点，新增 `ACTION_MINI_SCREEN·显示与清除`、`ACTION_WORKSPACE·写读删` 两条用例。
+- 评测新增 `battery_to_mini_screen`、`note_android_version`。
+- MCP `initialize` 返回的版本号改为 App 版本。
+
+### Security
+- 远程（MCP）调用 `ACTION_WORKSPACE` 的 `delete` 默认拒绝（需开启「允许远程高危工具」），写 / 读 / 列放行；按动作的规则放在 `RemoteToolPolicy`。
+- 工作流节点不能写运行记录类型；记录与小屏的来源只取调用方设置的 `origin`。
+
 ## [1.9.0] - 2026-10-14
 
 App `versionName` 1.9.0（`versionCode` 6）；引擎 AAR `com.ailun:habitat-engine:1.8.0`（`ACTION_LAUNCH_APP` 新增 `intent_action`；`ACTION_INPUT_TEXT` 新增 `target`，写入后读回核对，失败退回剪贴板粘贴）。JitPack：`com.github.Allenwang0730:HabitatEngine:v1.9.0`。

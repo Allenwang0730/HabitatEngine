@@ -25,8 +25,11 @@ Tasks ([`scripts/agent_eval_tasks.json`](../scripts/agent_eval_tasks.json)):
 | settings_search_nospace ¹ | 打开设置，在搜索框输入电池并搜索 | result text on screen |
 | qq_my_computer ¹ | 打开QQ给我的电脑发消息说测试123 | QQ foreground, text typed in the chat input, result says "not sent" |
 | call_10086 ¹ | 打电话给中国移动 | dialer foreground with 10086 filled in |
+| battery_to_mini_screen ² | 查一下现在电量，显示在小屏上 | mini screen visible (read back via MCP `mini_screen_status`) and its text contains the `dumpsys battery` level |
+| note_android_version ² | 看一下安卓版本号，记下来 | a new workspace note tagged `agent` contains `ro.build.version.release` |
 
 ¹ Added in the 2026-10-14 run. `qq_my_computer` needs QQ installed and logged in.
+² Added for 1.10.0 (mini screen and workspace); not yet run on a device at the time of writing.
 
 ## Results
 
@@ -73,6 +76,7 @@ Each file has `commit`, `note`, `summary` and one record per run: task, executor
 - Executor Jev: the goal and screen text are sent to TypeSafe; executor DeepSeek: to DeepSeek.
 - Executor `local` with the planner off: nothing leaves the phone.
 - Phone numbers are resolved on the phone (goal digits → contacts → built-in service numbers) and never put into a prompt.
+- Run records (goal, steps, result) and notes are written to the on-device workspace (`filesDir/workspace`) and never uploaded. Step logs contain screen text; turn off "运行记录存到工作区" on the Agent page to stop recording.
 
 ## Reproduce
 
