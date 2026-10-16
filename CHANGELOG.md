@@ -22,7 +22,8 @@ App `versionName` 1.10.0（`versionCode` 7）；引擎 AAR `com.ailun:habitat-en
 - 无障碍手势派发前问一遍宿主的悬浮窗（`OverlayGuard`）：小屏挡住目标就挪到另一端或暂时隐藏；`ACTION_SCREENSHOT` 与微信 OCR 截图前暂时隐藏小屏。
 - `WorkflowContext` 新增 `origin` / `runKey`（调用方设置，节点改不了）；`HabitatExecutionService.start` 新增 `origin` 参数。
 - 自测页带上 `:app` 注册的节点，新增 `ACTION_MINI_SCREEN·显示与清除`、`ACTION_WORKSPACE·写读删` 两条用例。
-- 评测新增 `battery_to_mini_screen`、`note_android_version`。
+- 评测新增 `battery_to_mini_screen`、`note_android_version`；`agent_eval.mjs --overlay` 全程挂着小屏跑（回归手势避让）。
+- 真机（vivo / Android 16，2026-10-16）：两条新自测 PASS；DeepSeek + 规划 新任务 2/2，挂着小屏的原 10 项 10/10（[EVAL.md](docs/EVAL.md)）。
 - MCP `initialize` 返回的版本号改为 App 版本。
 
 ### Security

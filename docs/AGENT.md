@@ -114,7 +114,7 @@ node scripts/agent_eval.mjs --providers jev --planner on --repeat 3
 任务在 `scripts/agent_eval_tasks.json`；结果用 adb / 读屏**独立验证**（不相信 agent 的 DONE），跑完恢复亮度等设备状态，明细写到 `selftest_results/`。
 `node scripts/agent_eval_show.mjs [--fail]` 查看每次运行的完整步骤日志。手机经电脑代理访问 Jev 时加 `JEV_PROXY_PORT=<端口>`，脚本会在 adb 重连后恢复 `adb reverse`。
 
-真机结果按日期与提交记录在 [EVAL.md](EVAL.md)（方法、任务、可公开的原始数据、局限）。摘要：2026-10-09（`09b0632`，7 类任务 × 4 次）有规划时 Jev、DeepSeek 都是 28/28，无规划 13/28、18/28；2026-10-14（`9069155`，10 类任务）DeepSeek 有规划 10/10、无规划 7/10。
+真机结果按日期与提交记录在 [EVAL.md](EVAL.md)（方法、任务、可公开的原始数据、局限）。摘要：2026-10-16（1.10.0）DeepSeek 有规划：小屏/工作区新任务 2/2，挂着小屏跑原 10 项 10/10；2026-10-09（`09b0632`，7 类任务 × 4 次）有规划时 Jev、DeepSeek 都是 28/28，无规划 13/28、18/28；2026-10-14（`9069155`，10 类任务）DeepSeek 有规划 10/10、无规划 7/10。
 
 无规划时的失败集中在提问类（没有复核环节读答案）和需要找入口的多步任务；有规划时这些都由设备工具一步完成。导出可公开的结果：`node scripts/agent_eval_export.mjs selftest_results/agent_eval_*.json --out docs/eval/<日期>.json --commit <sha>`（不导出步骤日志和屏幕文字）。
 

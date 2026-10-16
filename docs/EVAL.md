@@ -29,9 +29,20 @@ Tasks ([`scripts/agent_eval_tasks.json`](../scripts/agent_eval_tasks.json)):
 | note_android_version ² | 看一下安卓版本号，记下来 | a new workspace note tagged `agent` contains `ro.build.version.release` |
 
 ¹ Added in the 2026-10-14 run. `qq_my_computer` needs QQ installed and logged in.
-² Added for 1.10.0 (mini screen and workspace); not yet run on a device at the time of writing.
+² Added in 1.10.0 (mini screen and workspace).
 
 ## Results
+
+### 2026-10-16 — commit `edf0dc4` (branch `feat/mini-screen-workspace`, 1.10.0), DeepSeek + planner, 1 run per task
+
+| Session | Result |
+|---|:---:|
+| New output tasks (`battery_to_mini_screen`, `note_android_version`) | **2/2** |
+| The 10 earlier tasks with a mini screen kept on screen over the Settings list (`--overlay`) | **10/10** |
+
+The planner chose `read_battery → show_on_screen` and `read_device_info → save_note`, with `{battery_level}` / `{device_android_version}` filled from the tool readings. Only DeepSeek was run on this date (no Jev proxy). Gesture avoidance was also checked by hand: with the mini screen over the Settings "账号" row, `ACTION_CLICK` at that point moved the panel to the top and opened the account page; a raw `adb input tap` at the same point (which bypasses the hook) was swallowed by the panel, as expected.
+
+Raw data: [`eval/2026-10-16.json`](eval/2026-10-16.json).
 
 ### 2026-10-14 — commit `9069155` (branch `feat/agent-intent`), 1 run per task
 

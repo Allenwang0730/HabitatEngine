@@ -1,0 +1,161 @@
+{
+  "commit": "edf0dc4",
+  "note": "vivo V2329A (PD2329), Android 16. Branch feat/mini-screen-workspace at edf0dc4 (1.10.0). DeepSeek executor + planner only. Session 1: the two new output tasks. Session 2: the 10 earlier tasks with a mini screen kept on screen over the Settings list (agent_eval.mjs --overlay) to check gesture avoidance.",
+  "sources": [
+    "2026-10-16T07:18:54.255Z",
+    "2026-10-16T07:22:53.039Z"
+  ],
+  "summary": {
+    "deepseek/planner": {
+      "passed": 12,
+      "total": 12,
+      "blocked_by_451": 0
+    }
+  },
+  "runs": [
+    {
+      "started": "2026-10-16T07:18:54.255Z",
+      "task": "battery_to_mini_screen",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 9,
+      "steps": 2,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:18:54.255Z",
+      "task": "note_android_version",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 9,
+      "steps": 2,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "bluetooth_page",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 6,
+      "steps": 1,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "settings_search",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 12,
+      "steps": 3,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "about_phone",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 6,
+      "steps": 1,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "clock_stopwatch",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 9,
+      "steps": 2,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "brightness_max",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 9,
+      "steps": 1,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "battery_question",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 6,
+      "steps": 1,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "android_version",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 6,
+      "steps": 2,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "settings_search_nospace",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 6,
+      "steps": 3,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "qq_my_computer",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 6,
+      "steps": 3,
+      "jev_http_451": false
+    },
+    {
+      "started": "2026-10-16T07:22:53.039Z",
+      "task": "call_10086",
+      "provider": "deepseek",
+      "planner": true,
+      "run": 1,
+      "ok": true,
+      "status": "done",
+      "seconds": 3,
+      "steps": 1,
+      "jev_http_451": false
+    }
+  ]
+}
