@@ -122,12 +122,15 @@ object WorkflowAIGenerator {
     }
 
     /** 系统提示词：从 NodeKnowledge（节点百科）动态生成——加新节点只改 NodeKnowledge 一处。 */
-    private fun buildSystemPrompt(): String {
+    internal fun buildSystemPrompt(): String {
         val sb = StringBuilder()
         sb.append("你是 Habitat 安卓自动化引擎的工作流生成器。根据用户需求，生成一个 Habitat 工作流 JSON。\n\n")
         sb.append("【工作流格式】\n")
         sb.append("{\"name\":\"名称\",\"description\":\"说明\",\"workflow\":{\"start_node_id\":\"起始id\",\"nodes\":{\"节点id\":{\"id\":\"节点id\",\"type\":\"节点类型\",\"params\":{...},\"next\":\"下一id\"},...}}}\n")
-        sb.append("规则：start_node_id 必须指向已存在节点；节点有 id/type；params 可选；next 可选；变量用 \${变量名} 引用；节点 id 唯一；只输出这一个 JSON 对象。可选顶层 trigger（notification|timer|clipboard|sms|key）。\n\n")
+        sb.append("规则：start_node_id 必须指向已存在节点；节点有 id/type；params 可选；next 可选；变量用 \${变量名} 引用；节点 id 唯一；只输出这一个 JSON 对象。\n")
+        sb.append("【自动触发】需求里有「收到通知/短信时」「每隔 N 分钟」「复制文字后」等，在 workflow 里加 trigger（与 start_node_id 同级），否则工作流只能手动运行：\n")
+        NodeKnowledge.triggers.forEach { t -> sb.append("- ${t.example} —— 触发时可用变量：${t.variables}\n") }
+        sb.append("触发器只认这些变量名（如通知内容是 \${trigger_text}，不是 notification_text）。\n\n")
         sb.append("【可用节点类型与参数】（只用这些 type；优先用直接 API 节点，避免 UI 点击模拟）\n")
         NodeKnowledge.nodes.forEach { n ->
             val beforePart = if (n.before.isNotBlank()) "（${n.before}）" else ""

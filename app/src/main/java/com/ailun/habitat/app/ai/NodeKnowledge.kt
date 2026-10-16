@@ -60,6 +60,16 @@ object NodeKnowledge {
         NodeDoc("ACTION_MEDIA_CONTROL", "cmd=play/pause/next", "媒体控制"),
     )
 
+    data class TriggerDoc(val example: String, val variables: String)
+
+    /** 触发器（写在 workflow 里，与 start_node_id 同级）与触发时注入的变量：变量名来自 TriggerManager（trigger_ + 事件字段）。 */
+    val triggers: List<TriggerDoc> = listOf(
+        TriggerDoc("\"trigger\":{\"type\":\"notification\"}（可加 \"package\":\"com.xx\" 只听某个应用）", "\${trigger_title} \${trigger_text} \${trigger_big_text} \${trigger_package}"),
+        TriggerDoc("\"trigger\":{\"type\":\"sms\"}", "\${trigger_sender} \${trigger_body}"),
+        TriggerDoc("\"trigger\":{\"type\":\"timer\",\"interval_ms\":3600000,\"repeat\":true}", "无"),
+        TriggerDoc("\"trigger\":{\"type\":\"clipboard\"}", "\${trigger_text}"),
+    )
+
     /** 常见包名映射（LLM 常不知道 App 的包名）。 */
     val packageHints: Map<String, String> = mapOf(
         "设置" to "com.android.settings",
@@ -82,6 +92,7 @@ object NodeKnowledge {
 
     /** few-shot 示例（JSON 字符串）。 */
     val examples: List<String> = listOf(
+        """需求"收到含验证码的短信时，在小屏上显示 20 秒"→{"name":"验证码提醒","workflow":{"trigger":{"type":"sms"},"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"CONDITION_SWITCH","params":{"expression":"trigger_body contains 验证码"},"branches":{"true":"s2"}},"s2":{"id":"s2","type":"ACTION_MINI_SCREEN","params":{"title":"验证码","text":"${'$'}{trigger_body}","duration_ms":20000}}}}}""",
         """需求"让 AI 总结剪贴板内容并显示在小屏上，同时存到工作区"→{"name":"剪贴板摘要","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CLIPBOARD","params":{"action":"get","output_var":"clip"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_AI_CHAT","params":{"prompt":"用三句话总结：${'$'}{clip}","output_var":"summary"},"next":"s3"},"s3":{"id":"s3","type":"ACTION_MINI_SCREEN","params":{"title":"剪贴板摘要","text":"${'$'}{summary}"},"next":"s4"},"s4":{"id":"s4","type":"ACTION_WORKSPACE","params":{"action":"write","name":"剪贴板摘要","content":"${'$'}{summary}","tags":"摘要"}}}}}""",
         """需求"启动应用并显示提示"→{"name":"启动设置","description":"打开系统设置后弹提示","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_LAUNCH_APP","params":{"package_name":"com.android.settings"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":1500},"next":"s3"},"s3":{"id":"s3","type":"ACTION_TOAST","params":{"message":"已打开设置"}}}}}""",
         """需求"读取网络状态，wifi则提示当前WiFi否则提示没有网络"→{"name":"网络检查","workflow":{"start_node_id":"n1","nodes":{"n1":{"id":"n1","type":"ACTION_NETWORK_STATUS","params":{"action":"all"},"next":"n2"},"n2":{"id":"n2","type":"CONDITION_SWITCH","params":{"expression":"network_type == wifi"},"branches":{"true":"n3","false":"n4"}},"n3":{"id":"n3","type":"ACTION_TOAST","params":{"message":"当前WiFi"}},"n4":{"id":"n4","type":"ACTION_TOAST","params":{"message":"没有网络"}}}}}""",
