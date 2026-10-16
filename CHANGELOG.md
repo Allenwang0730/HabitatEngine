@@ -26,6 +26,13 @@ App `versionName` 1.10.0（`versionCode` 7）；引擎 AAR `com.ailun:habitat-en
 - 真机（vivo / Android 16，2026-10-16）：两条新自测 PASS；DeepSeek + 规划 新任务 2/2，挂着小屏的原 10 项 10/10（[EVAL.md](docs/EVAL.md)）。
 - MCP `initialize` 返回的版本号改为 App 版本。
 
+### Fixed
+- 「发消息说：……」「内容是：……」里的冒号被当成消息内容的一部分。
+- AI 生成工作流时提示词没写触发器的写法和变量名，模型会编出 `notification_text` 这类变量、漏写 `trigger`，生成的工作流不会自动触发。提示词新增「自动触发」一节（`NodeKnowledge.triggers`）和一个短信触发示例。
+
+### Added
+- `docs/INTRO.md`：面向介绍的项目说明（定位、能力、真机示例、架构、安全与数据、使用、局限）；`scripts/demo_mcp_orchestrate.mjs`：电脑端经 MCP 编排手机多步任务、进度推到小屏、报告写进工作区。
+
 ### Security
 - 远程（MCP）调用 `ACTION_WORKSPACE` 的 `delete` 默认拒绝（需开启「允许远程高危工具」），写 / 读 / 列放行；按动作的规则放在 `RemoteToolPolicy`。
 - 工作流节点不能写运行记录类型；记录与小屏的来源只取调用方设置的 `origin`。

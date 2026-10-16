@@ -12,7 +12,7 @@
 [![MCP](https://img.shields.io/badge/MCP-server-green)]()
 [![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
-[中文文档](README_CN.md)
+[中文文档](README_CN.md) · [项目介绍（中文，含真机示例）](docs/INTRO.md)
 
 **What you get**
 

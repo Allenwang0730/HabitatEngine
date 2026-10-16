@@ -33,6 +33,17 @@ Tasks ([`scripts/agent_eval_tasks.json`](../scripts/agent_eval_tasks.json)):
 
 ## Results
 
+### 2026-10-16 (full) — commit `d6b49cd` (1.10.0), all configs, 1 run per task, Jev via proxy
+
+| Executor | Planner | No planner |
+|---|:---:|:---:|
+| Jev | **12/12** | 9/12 |
+| DeepSeek | **12/12** | 11/12 |
+
+12 tasks (the 10 earlier ones + `battery_to_mini_screen` + `note_android_version`). Jev was reached through a proxy on the phone; no request was refused. Failures without the planner: `android_version` (both executors) and `battery_to_mini_screen` (Jev) reached the right page but ended with "完成" and no value — without the planner there is no review step to read the answer off the screen; Jev `about_phone` tapped the 「关于手机」 row repeatedly without the page opening and was stopped by loop detection.
+
+Raw data: [`eval/2026-10-16-full.json`](eval/2026-10-16-full.json).
+
 ### 2026-10-16 — commit `edf0dc4` (branch `feat/mini-screen-workspace`, 1.10.0), DeepSeek + planner, 1 run per task
 
 | Session | Result |
