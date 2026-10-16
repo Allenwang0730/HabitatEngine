@@ -6,6 +6,7 @@ import android.os.Environment
 import android.util.Base64
 import android.util.Log
 import com.ailun.habitat.INodeHandler
+import com.ailun.habitat.OverlayGuard
 import com.ailun.habitat.WorkflowContext
 import com.ailun.habitat.WorkflowNode
 import com.ailun.habitat.api.IShellExecutor
@@ -19,6 +20,33 @@ import java.io.File
 class NodeScreenshotHandler(
     private val shellExecutor: IShellExecutor? = null
 ) : INodeHandler {
+
+    /** 执行 screencap；失败返回错误文案，成功返回 null。 */
+    private suspend fun capture(outFile: File, context: WorkflowContext): String? {
+        if (shellExecutor != null) {
+            val cmd = "screencap -p ${outFile.absolutePath}"
+            context.log("Screenshot: exec '$cmd'")
+            val result = shellExecutor.exec(cmd, asRoot = false)
+            context.log("Screenshot: shell result='${result.take(200)}' (len=${result.length})")
+
+            if (result.contains("Error", ignoreCase = true) ||
+                result.contains("denied", ignoreCase = true) ||
+                result.contains("not found", ignoreCase = true)
+            ) {
+                Log.e(TAG, "Screenshot shell error: $result")
+                return "Shell: $result"
+            }
+        } else {
+            context.log("Screenshot: no shell executor, trying Runtime.exec")
+            val out = LocalShell.run(arrayOf("screencap", "-p", outFile.absolutePath), 15_000)
+            if (out.startsWith("Error:")) {
+                context.log("Screenshot: local exec failed: ${out.take(200)}")
+                return "exec: $out"
+            }
+            if (out.isNotBlank()) context.log("Screenshot: output='${out.take(200)}'")
+        }
+        return null
+    }
 
     override suspend fun handle(node: WorkflowNode, context: WorkflowContext): String? {
         val params = node.params ?: return node.next
@@ -37,30 +65,12 @@ class NodeScreenshotHandler(
         context.log("Screenshot: output=$outFile")
 
         try {
-            if (shellExecutor != null) {
-                val cmd = "screencap -p ${outFile.absolutePath}"
-                context.log("Screenshot: exec '$cmd'")
-                val result = shellExecutor.exec(cmd, asRoot = false)
-                context.log("Screenshot: shell result='${result.take(200)}' (len=${result.length})")
-
-                if (result.contains("Error", ignoreCase = true) ||
-                    result.contains("denied", ignoreCase = true) ||
-                    result.contains("not found", ignoreCase = true)
-                ) {
-                    Log.e(TAG, "Screenshot shell error: $result")
-                    context.putVariable("screenshot_success", false)
-                    context.putVariable("screenshot_error", "Shell: $result")
-                    return node.next
-                }
-            } else {
-                context.log("Screenshot: no shell executor, trying Runtime.exec")
-                val out = LocalShell.run(arrayOf("screencap", "-p", outFile.absolutePath), 15_000)
-                if (out.startsWith("Error:")) {
-                    context.log("Screenshot: local exec failed: ${out.take(200)}")
-                    context.putVariable("screenshot_error", "exec: $out")
-                    return node.next
-                }
-                if (out.isNotBlank()) context.log("Screenshot: output='${out.take(200)}'")
+            // 宿主的悬浮窗（小屏）截图前先藏起来，不把它截进去
+            val captureError: String? = OverlayGuard.aroundCapture { capture(outFile, context) }
+            if (captureError != null) {
+                context.putVariable("screenshot_success", false)
+                context.putVariable("screenshot_error", captureError)
+                return node.next
             }
 
             // Small delay for file system sync

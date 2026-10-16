@@ -15,6 +15,9 @@ object WorkflowRepository {
     private val gson = GsonBuilder().create()
     private val lock = Any()
 
+    /** 按 id 取名字（运行来源标注用）；找不到返回 null。 */
+    fun nameOf(context: Context, workflowId: String): String? = getAll(context).firstOrNull { it.id == workflowId }?.name
+
     fun getAll(context: Context): List<HabitatWorkflow> {
         synchronized(lock) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

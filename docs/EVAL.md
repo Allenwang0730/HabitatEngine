@@ -25,10 +25,35 @@ Tasks ([`scripts/agent_eval_tasks.json`](../scripts/agent_eval_tasks.json)):
 | settings_search_nospace ¹ | 打开设置，在搜索框输入电池并搜索 | result text on screen |
 | qq_my_computer ¹ | 打开QQ给我的电脑发消息说测试123 | QQ foreground, text typed in the chat input, result says "not sent" |
 | call_10086 ¹ | 打电话给中国移动 | dialer foreground with 10086 filled in |
+| battery_to_mini_screen ² | 查一下现在电量，显示在小屏上 | mini screen visible (read back via MCP `mini_screen_status`) and its text contains the `dumpsys battery` level |
+| note_android_version ² | 看一下安卓版本号，记下来 | a new workspace note tagged `agent` contains `ro.build.version.release` |
 
 ¹ Added in the 2026-10-14 run. `qq_my_computer` needs QQ installed and logged in.
+² Added in 1.10.0 (mini screen and workspace).
 
 ## Results
+
+### 2026-10-16 (full) — commit `d6b49cd` (1.10.0), all configs, 1 run per task, Jev via proxy
+
+| Executor | Planner | No planner |
+|---|:---:|:---:|
+| Jev | **12/12** | 9/12 |
+| DeepSeek | **12/12** | 11/12 |
+
+12 tasks (the 10 earlier ones + `battery_to_mini_screen` + `note_android_version`). Jev was reached through a proxy on the phone; no request was refused. Failures without the planner: `android_version` (both executors) and `battery_to_mini_screen` (Jev) reached the right page but ended with "完成" and no value — without the planner there is no review step to read the answer off the screen; Jev `about_phone` tapped the 「关于手机」 row repeatedly without the page opening and was stopped by loop detection.
+
+Raw data: [`eval/2026-10-16-full.json`](eval/2026-10-16-full.json).
+
+### 2026-10-16 — commit `edf0dc4` (branch `feat/mini-screen-workspace`, 1.10.0), DeepSeek + planner, 1 run per task
+
+| Session | Result |
+|---|:---:|
+| New output tasks (`battery_to_mini_screen`, `note_android_version`) | **2/2** |
+| The 10 earlier tasks with a mini screen kept on screen over the Settings list (`--overlay`) | **10/10** |
+
+The planner chose `read_battery → show_on_screen` and `read_device_info → save_note`, with `{battery_level}` / `{device_android_version}` filled from the tool readings. Only DeepSeek was run on this date (no Jev proxy). Gesture avoidance was also checked by hand: with the mini screen over the Settings "账号" row, `ACTION_CLICK` at that point moved the panel to the top and opened the account page; a raw `adb input tap` at the same point (which bypasses the hook) was swallowed by the panel, as expected.
+
+Raw data: [`eval/2026-10-16.json`](eval/2026-10-16.json).
 
 ### 2026-10-14 — commit `9069155` (branch `feat/agent-intent`), 1 run per task
 
@@ -73,6 +98,7 @@ Each file has `commit`, `note`, `summary` and one record per run: task, executor
 - Executor Jev: the goal and screen text are sent to TypeSafe; executor DeepSeek: to DeepSeek.
 - Executor `local` with the planner off: nothing leaves the phone.
 - Phone numbers are resolved on the phone (goal digits → contacts → built-in service numbers) and never put into a prompt.
+- Run records (goal, steps, result) and notes are written to the on-device workspace (`filesDir/workspace`) and never uploaded. Step logs contain screen text; turn off "运行记录存到工作区" on the Agent page to stop recording.
 
 ## Reproduce
 

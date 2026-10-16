@@ -222,6 +222,12 @@ class AgentLoop(
 ) {
     @Volatile var stopRequested: Boolean = false
 
+    /** 本轮任务的标识：小屏/工作区据此区分"同一次运行"。 */
+    val runId: String = "agent-" + java.util.UUID.randomUUID().toString().take(8)
+
+    /** 本轮已经成功交给用户的输出工具（show_on_screen / save_note），结束时不再重复交付。 */
+    private val delivered = mutableSetOf<String>()
+
     private val factory by lazy {
         NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(context))
             .apply { applyAppHandlers(context) }
@@ -251,6 +257,20 @@ class AgentLoop(
     private data class NodeResult(val ok: Boolean, val detail: String, val outputs: Map<String, String> = emptyMap())
 
     suspend fun run(goal: String, onStep: (String) -> Unit): LoopResult {
+        val result = runGoal(goal, onStep)
+        if (goal.isNotBlank()) {
+            try {
+                deliver(goal, result, onStep)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onStep("结果没能交付：${e.message}")
+            }
+        }
+        return result
+    }
+
+    private suspend fun runGoal(goal: String, onStep: (String) -> Unit): LoopResult {
         if (goal.isBlank()) return LoopResult("error", 0, "目标为空")
         val intent = IntentParser.parse(goal)
         val scope = scopeFor(intent)
@@ -366,6 +386,42 @@ class AgentLoop(
     private fun typedInRun(run: Run, text: String): Boolean =
         run.history.any { it.operation == "TYPE_TEXT" && it.error.isEmpty() && it.label.contains("「$text」") }
 
+    /**
+     * 写小屏/工作区：不看屏幕变化（小屏不在读屏里），成功就算这一步完成；失败不影响任务本身。
+     * 成功后记成事实，复核员才知道"已经显示/记下了"。
+     */
+    private suspend fun runOutputTool(run: Run, inv: DeviceTools.Invocation, onStep: (String) -> Unit): StepOutcome {
+        onStep("工具：${inv.label}")
+        val result = runNode(inv.node, inv.params, inv.successFlag, inv.outputs)
+        if (!result.ok) {
+            onStep("${inv.label}没成功：${result.detail}")
+            return StepOutcome("done", result.detail)
+        }
+        delivered += inv.tool
+        val text = (inv.params["text"] ?: inv.params["content"])?.toString().orEmpty()
+        run.facts[if (inv.tool == "show_on_screen") "mini_screen" else "workspace_note"] =
+            (if (inv.tool == "show_on_screen") "已显示：" else "已记下：") + text.take(60)
+        return StepOutcome("done", inv.label)
+    }
+
+    /**
+     * 目标要求"显示在小屏上 / 记下来"而计划里没做：结束时把结果交给用户。
+     * 只看用户目标原文（[DeviceTools.SHOW_WORDS] / [DeviceTools.NOTE_WORDS]）；被停止的不交。
+     */
+    private suspend fun deliver(goal: String, result: LoopResult, onStep: (String) -> Unit) {
+        if (result.status == "stopped") return
+        val ok = result.status == "done"
+        val wanted = DeviceTools.available(goal).map { it.id }.filter { it in DeviceTools.OUTPUT_TOOLS && it !in delivered }
+        for (tool in wanted) {
+            if (tool == "save_note" && !ok) continue
+            val text = (if (ok) result.detail else "没完成：${result.detail}").take(DeviceTools.MAX_TOOL_TEXT)
+            val args = if (tool == "show_on_screen") mapOf("text" to text, "title" to DeviceTools.noteName(goal)) else mapOf("text" to text)
+            val inv = DeviceTools.resolve(tool, args, goal, emptyList()) ?: continue
+            val node = runNode(inv.node, inv.params, inv.successFlag, inv.outputs)
+            onStep(if (node.ok) "结果已${inv.label}" else "${inv.label}没成功：${node.detail}")
+        }
+    }
+
     /** 没有复核时，把读到的事实（电量、时间…）带进结果，提问类目标也有答案可看。 */
     private fun withFacts(detail: String, run: Run): String =
         if (run.facts.isEmpty()) detail else detail + "：" + run.facts.entries.joinToString("，") { "${it.key}=${it.value}" }
@@ -430,8 +486,11 @@ class AgentLoop(
     private suspend fun runToolStep(
         run: Run, step: PlanStep, index: Int, total: Int, budget: Int, onStep: (String) -> Unit,
     ): StepOutcome {
-        val inv = DeviceTools.resolve(step.tool!!, step.args, run.goal, run.apps, run.scope)
-            ?: return runUiStep(run, step, index, total, budget, onStep)
+        val args = step.args.mapValues { (_, v) -> DeviceTools.fillFacts(v, run.facts) }
+        val output = step.tool in DeviceTools.OUTPUT_TOOLS
+        val inv = DeviceTools.resolve(step.tool!!, args, run.goal, run.apps, run.scope)
+            ?: return if (output) StepOutcome("done", "跳过（参数不合法）") else runUiStep(run, step, index, total, budget, onStep)
+        if (output) return runOutputTool(run, inv, onStep)
         val toolKey = "${inv.tool}|${inv.args}"
         if (toolKey in run.failedTools) {
             onStep("工具「${inv.label}」本次已失败过，直接在界面上完成这一步")
@@ -698,6 +757,8 @@ class AgentLoop(
             this.params = params
         }
         val ctx = WorkflowContext(context)
+        ctx.origin = if (allowGoalUnlock) WorkflowContext.ORIGIN_AGENT else ORIGIN_REMOTE_AGENT
+        ctx.runKey = runId
         val result = withContext(Dispatchers.Default) {
             withTimeoutOrNull(30_000) {
                 try {
@@ -728,6 +789,9 @@ class AgentLoop(
     }
 
     companion object {
+        /** 远程（MCP agent_start）发起的 Agent 写小屏/工作区时的来源：界面上和本机 Agent 区分开。 */
+        const val ORIGIN_REMOTE_AGENT = "agent:remote"
+
         /** 一次任务最多重规划几次（步骤卡住或复核未通过）。 */
         const val MAX_REPLANS = 2
 

@@ -55,5 +55,19 @@
     "goal": "打电话给中国移动",
     "verify": { "focus": "(dialer|Dialer|contacts)", "screen": "1\\s?0\\s?0\\s?8\\s?6", "detailContains": "手动拨出" },
     "restore": ["input keyevent HOME"]
+  },
+  {
+    "id": "battery_to_mini_screen",
+    "goal": "查一下现在电量，显示在小屏上",
+    "verify": {
+      "miniScreenShell": "dumpsys battery | grep level"
+    }
+  },
+  {
+    "id": "note_android_version",
+    "goal": "看一下安卓版本号，记下来",
+    "verify": {
+      "workspaceNoteShell": "getprop ro.build.version.release"
+    }
   }
 ]

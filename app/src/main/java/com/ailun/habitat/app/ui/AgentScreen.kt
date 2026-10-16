@@ -82,6 +82,7 @@ import com.ailun.habitat.app.HabitatTextStyles
 import com.ailun.habitat.app.HabitatTheme
 import com.ailun.habitat.app.Spacing
 import com.ailun.habitat.app.agent.AgentLoopController
+import com.ailun.habitat.app.workspace.RunRecords
 import com.ailun.habitat.app.agent.JevDecisionProvider
 import com.ailun.habitat.app.ai.WorkflowAIClient
 import com.ailun.habitat.app.tabular
@@ -135,6 +136,7 @@ fun AgentScreen() {
     var deepseekKey by remember { mutableStateOf(WorkflowAIClient.getApiKey(context).orEmpty()) }
     var steps by rememberSaveable { mutableFloatStateOf(AgentLoopController.DEFAULT_STEPS.toFloat()) }
     var plannerEnabled by remember { mutableStateOf(AgentLoopController.isPlannerEnabled(context)) }
+    var recordToWorkspace by remember { mutableStateOf(RunRecords.isAgentRecordEnabled(context)) }
     var privacyFor by remember { mutableStateOf<String?>(null) }
 
     // serverRunning 是同进程的内存标志，轮询代价极低
@@ -452,6 +454,21 @@ fun AgentScreen() {
                             onCheckedChange = { plannerEnabled = it; AgentLoopController.setPlannerEnabled(context, it) },
                             enabled = !loop.running,
                             modifier = Modifier.semantics { contentDescription = "DeepSeek 规划与复核" },
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("运行记录存到工作区", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "目标、步骤和结果存一份在本机「工作区」，含屏幕文字，不上传",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = recordToWorkspace,
+                            onCheckedChange = { recordToWorkspace = it; RunRecords.setAgentRecordEnabled(context, it) },
+                            modifier = Modifier.semantics { contentDescription = "运行记录存到工作区" },
                         )
                     }
                     Column {

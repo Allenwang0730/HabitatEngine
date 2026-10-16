@@ -5,6 +5,7 @@
 //   node scripts/agent_eval.mjs                                  # 默认：jev + deepseek，各自 有/无 规划，每项 1 次
 //   node scripts/agent_eval.mjs --providers jev --planner on --repeat 2
 //   node scripts/agent_eval.mjs --only about_phone,clock_stopwatch
+//   node scripts/agent_eval.mjs --providers deepseek --planner on --overlay   # 全程挂着小屏，检查手势避让
 //   JEV_PROXY_PORT=7897 node scripts/agent_eval.mjs   # 手机经 PC 代理访问 Jev：每个任务前恢复 adb reverse
 // 结果写到 selftest_results/agent_eval_<时间>.json（目录已在 .gitignore）。
 import { execFileSync } from 'node:child_process';
@@ -24,6 +25,8 @@ const repeat = Number(opt('repeat', '1'));
 const only = opt('only', '') ? new Set(opt('only', '').split(',')) : null;
 const maxSteps = Number(opt('steps', '20'));
 const timeoutSec = Number(opt('timeout', '240'));
+/** --overlay：每个任务开始前挂一个小屏（回归：手势避让）。 */
+const overlay = argv.includes('--overlay');
 
 const ADB = process.env.ADB || join(process.env.LOCALAPPDATA || '', 'Android/Sdk/platform-tools/adb.exe');
 const TOKEN = process.env.AGENT_TOKEN;
@@ -132,9 +135,37 @@ async function screenText() {
   return [r.data.screen_text || '', ...(r.data.windows || []).map((w) => w.text || '')].join('\n');
 }
 
-async function verify(task, status) {
+/** 工作区里带 tag 的条目 id（list 只回元数据，不含正文）。 */
+async function workspaceIds(tag) {
+  const r = await call('ACTION_WORKSPACE', { action: 'list', tag, limit: 200 });
+  try {
+    return JSON.parse(r.data.workspace_list || '[]').map((e) => e.id);
+  } catch {
+    return [];
+  }
+}
+
+async function verify(task, status, before = {}) {
   const v = task.verify;
   const reasons = [];
+  if (v.miniScreenShell) {
+    // 小屏不在无障碍树里（Agent 读屏会排除本应用窗口），用只读的 mini_screen_status 读回
+    const ms = (await call('mini_screen_status')).data;
+    const truth = sh(v.miniScreenShell).match(/(\d+)/)?.[1];
+    if (!ms.visible) reasons.push('小屏没有显示');
+    else if (!truth || !String(ms.text || '').includes(truth)) reasons.push(`小屏内容「${ms.text}」里没有实际值 ${truth}`);
+  }
+  if (v.workspaceNoteShell) {
+    const truth = sh(v.workspaceNoteShell);
+    const fresh = (await workspaceIds('agent')).filter((id) => !(before.workspace || []).includes(id));
+    let found = false;
+    for (const id of fresh) {
+      const r = await call('ACTION_WORKSPACE', { action: 'read', id });
+      if (String(r.data.workspace_content || '').includes(truth)) found = true;
+    }
+    if (!fresh.length) reasons.push('工作区没有新笔记');
+    else if (!found) reasons.push(`工作区新笔记里没有实际值 ${truth}`);
+  }
   if (v.focus && !new RegExp(v.focus).test(focus())) reasons.push(`前台 ${focus()} 不匹配 /${v.focus}/`);
   if (v.screen) {
     const text = await screenText();
@@ -165,6 +196,14 @@ async function runOne(task, provider, planner) {
   for (const [k, cmd] of Object.entries(task.save || {})) saved[k] = sh(cmd);
   sh('input keyevent HOME');
   for (const cmd of task.setup || []) sh(cmd);
+  const before = {};
+  if (task.verify.miniScreenShell) await call('ACTION_MINI_SCREEN', { action: 'clear' });
+  else if (overlay) {
+    // 回归：任务全程挂着一个小屏（停在用户上次拖到的位置），检查手势避让不影响通过率
+    await call('ACTION_MINI_SCREEN', { action: 'clear' });
+    await call('ACTION_MINI_SCREEN', { title: '回归：小屏常驻', text: `${task.id} 进行中` });
+  }
+  if (task.verify.workspaceNoteShell) before.workspace = await workspaceIds('agent');
   await sleep(1200);
   const started = Date.now();
   const start = await call('agent_start', { goal: task.goal, provider, max_steps: maxSteps, planner });
@@ -179,11 +218,12 @@ async function runOne(task, provider, planner) {
   const seconds = Math.round((Date.now() - started) / 1000);
   // 结束那一刻界面可能还在转场：等稳定再验，失败再验一次，避免把"刚好在切换"误判成失败
   await sleep(1500);
-  let reasons = await verify(task, status);
+  let reasons = await verify(task, status, before);
   if (reasons.length) {
     await sleep(2000);
-    reasons = await verify(task, status);
+    reasons = await verify(task, status, before);
   }
+  if (task.verify.miniScreenShell || overlay) await call('ACTION_MINI_SCREEN', { action: 'clear' });
   for (const cmd of task.restore || []) sh(cmd.replace(/\{(\w+)\}/g, (_, k) => saved[k] ?? ''));
   const lines = String(status.log || '').split('\n');
   return {

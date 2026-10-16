@@ -54,6 +54,11 @@ class IntentParserTest {
         val colon = IntentParser.parse("发微信给李四：明天见")
         assertEquals("李四", colon.contact)
         assertEquals("明天见", colon.text)
+
+        // 「说：」后面的冒号不是消息的一部分
+        assertEquals("今天下午三点的会改到四点", IntentParser.parse("打开QQ给我的电脑发消息说：今天下午三点的会改到四点").text)
+        assertEquals("明天见", IntentParser.parse("给张三发消息说: 明天见").text)
+        assertEquals("下午到", IntentParser.parse("给张三发消息，内容是：下午到").text)
     }
 
     @Test

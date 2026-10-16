@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import com.ailun.habitat.app.ai.WorkflowAIClient
 import com.ailun.habitat.app.auth.SecretStore
+import com.ailun.habitat.app.workspace.RunRecords
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -40,6 +41,12 @@ object AgentLoopController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
     private var loop: AgentLoop? = null
+
+    /** 本轮的完整步骤日志（[AgentLoopState.lines] 只留最近 40 行给界面），结束时存进工作区。 */
+    private val runLog = mutableListOf<String>()
+    private var runInfo: RunInfo? = null
+
+    private data class RunInfo(val context: Context, val goal: String, val provider: String, val planner: Boolean, val remote: Boolean, val startedAt: Long)
 
     private val _state = MutableStateFlow(AgentLoopState())
     val state: StateFlow<AgentLoopState> = _state.asStateFlow()
@@ -168,7 +175,11 @@ object AgentLoopController {
         synchronized(this) {
             if (_state.value.running) return "自主模式已在运行"
             val tag = (if (origin == ORIGIN_REMOTE) " · 远程" else "") + (if (planner != null) " · DeepSeek 规划" else "")
-            _state.value = AgentLoopState(running = true, phase = "running", lines = listOf("开始：$providerName$tag · $text"))
+            val first = "开始：$providerName$tag · $text"
+            _state.value = AgentLoopState(running = true, phase = "running", lines = listOf(first))
+            runLog.clear()
+            runLog += first
+            runInfo = RunInfo(context.applicationContext, text, providerName, planner != null, origin == ORIGIN_REMOTE, System.currentTimeMillis())
             loop = agent
             // LAZY：先登记 job 再启动，finally 里按 job 身份清理，旧循环的收尾不会覆盖新一轮
             val started = scope.launch(start = CoroutineStart.LAZY) {
@@ -207,11 +218,19 @@ object AgentLoopController {
     }
 
     private fun finish(owner: Job?, status: String, result: String) {
-        synchronized(this) {
+        val record = synchronized(this) {
             if (owner == null || owner !== job) return
             job = null
             loop = null
             _state.value = _state.value.copy(running = false, phase = status, detail = result)
+            val info = runInfo
+            runInfo = null
+            info?.let { it to runLog.toList() }
+        } ?: return
+        // 运行记录存工作区：在锁外、IO 线程，失败不影响任务结果
+        val (info, lines) = record
+        scope.launch(Dispatchers.IO) {
+            RunRecords.saveAgent(info.context, info.goal, info.provider, info.planner, info.remote, status, result, info.startedAt, lines)
         }
     }
 
@@ -219,6 +238,7 @@ object AgentLoopController {
         synchronized(this) {
             val lines = (_state.value.lines + line.take(180)).takeLast(MAX_LINES)
             _state.value = _state.value.copy(lines = lines)
+            if (runLog.size < RunRecords.MAX_LINES) runLog += line.take(RunRecords.MAX_LINE)
         }
     }
 }

@@ -24,6 +24,7 @@ import com.ailun.habitat.app.TriggerManager
 import com.ailun.habitat.app.bridge.AppAccessibilityProvider
 import com.ailun.habitat.app.bridge.ShizukuShellExecutor
 import com.ailun.habitat.app.bridge.applyAppHandlers
+import com.ailun.habitat.app.workspace.WorkflowRunRecorder
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
@@ -282,10 +283,20 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
         RunLogStore.reset(runId, "— 开始执行 —")
         viewModelScope.launch(Dispatchers.IO) {
             val factory = NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(ctx)).apply { applyAppHandlers(ctx) }
+            val name = editName.ifBlank { "测试运行" }
+            val recorder = session?.base?.id?.let { WorkflowRunRecorder.create(ctx, it, name) }
             HabitatExecutionService.start(
                 runId, json, ctx, factory,
-                onComplete = { RunLogStore.append(runId, "— 执行结束 —") },
-                onLog = { line -> RunLogStore.append(runId, line) },
+                onComplete = {
+                    recorder?.onComplete()
+                    RunLogStore.append(runId, "— 执行结束 —")
+                },
+                onLog = { line ->
+                    recorder?.onLog(line)
+                    RunLogStore.append(runId, line)
+                },
+                onResult = recorder?.let { r -> r::onResult },
+                origin = com.ailun.habitat.WorkflowContext.workflowOrigin(name),
             )
         }
     }

@@ -44,6 +44,8 @@ object HabitatExecutionService {
         onComplete: (() -> Unit)? = null,
         onLog: ((String) -> Unit)? = null,
         onResult: ((Map<String, Any?>) -> Unit)? = null,
+        /** 见 [WorkflowContext.origin]；一般是 [WorkflowContext.workflowOrigin]。 */
+        origin: String = "",
     ): Boolean = synchronized(lock) {
         if (isRunning(workflowId)) {
             Log.w(TAG, "Workflow '$workflowId' already running — skip duplicate start")
@@ -58,6 +60,7 @@ object HabitatExecutionService {
                 val graph = HabitatJson.fromJson(jsonContent)
                 val executor = HabitatExecutor(factory)
                 val ctx = WorkflowContext(androidContext)
+                ctx.origin = origin
                 initialVars?.forEach { (k, v) -> ctx.variables[k] = v }
                 // executor 在自己的 scope 里 launch，与本 job 没有父子关系，取消需手动级联
                 val execJob = executor.execute(graph, ctx, onLog)

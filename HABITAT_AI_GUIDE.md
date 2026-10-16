@@ -132,6 +132,8 @@
 |------|------|----------|---------|
 | `ACTION_TOAST` | Toast 消息 | `message`: 内容 | 无 |
 | `ACTION_VIBRATE` | 振动 | `duration`(ms), `amplitude`(0-255) | 无 |
+| `ACTION_MINI_SCREEN` | 悬浮小屏（实时显示文字/图片/进度） | `action`=show/append/progress/hide/clear, `title`, `text`, `image`(路径或 base64), `progress`(0-100), `position`, `duration_ms` | `mini_screen_success`, `mini_screen_shown` |
+| `ACTION_WORKSPACE` | 本机工作区读写（结果/笔记/图片） | `action`=write/append/read/list/delete, `name`, `content`, `kind`=text/json/image, `tags`, `output_var` | `workspace_success`, `workspace_id`, 读：`workspace_content`，列：`workspace_list` |
 
 ### 2.10 AI
 

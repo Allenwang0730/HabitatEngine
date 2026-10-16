@@ -68,6 +68,8 @@ object NodeSelfTests {
         testNetworkStatus(),
         // ── UI ──
         testToast(),
+        testMiniScreen(),
+        testWorkspaceRoundTrip(),
         testVibrate(),
         // ── 系统 ──
         testShell(),
@@ -971,6 +973,48 @@ object NodeSelfTests {
     )
 
     // ── UI ──
+
+    /** 小屏在 :app 注册（自测页会带上宿主节点）；显示后再清掉，不在屏幕上留东西。 */
+    private fun testMiniScreen() = SelfTestCase(
+        name = "ACTION_MINI_SCREEN·显示与清除",
+        description = "show 成功且已显示，append 成功，clear 后结束",
+        requiresAccessibility = true,
+        workflowJson = """
+        {
+          "start_node_id": "show",
+          "nodes": {
+            "show":   {"id":"show","type":"ACTION_MINI_SCREEN","params":{"title":"自测","text":"第一段"},"next":"keep"},
+            "keep":   {"id":"keep","type":"ACTION_SET_VARIABLE","params":{"name":"shown_after_show","value":"${'$'}{mini_screen_shown}"},"next":"append"},
+            "append": {"id":"append","type":"ACTION_MINI_SCREEN","params":{"action":"append","text":"第二段"},"next":"clear"},
+            "clear":  {"id":"clear","type":"ACTION_MINI_SCREEN","params":{"action":"clear"},"next":"done"},
+            "done":   {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v -> v["wf_completed"] == true && v["shown_after_show"] == "true" && v["mini_screen_success"] == true },
+    )
+
+    private fun testWorkspaceRoundTrip() = SelfTestCase(
+        name = "ACTION_WORKSPACE·写读删",
+        description = "写入 → 追加 → 读回内容一致 → 列表能找到 → 删除",
+        workflowJson = """
+        {
+          "start_node_id": "write",
+          "nodes": {
+            "write":  {"id":"write","type":"ACTION_WORKSPACE","params":{"action":"write","name":"selftest_note","content":"第一行","tags":"selftest"},"next":"append"},
+            "append": {"id":"append","type":"ACTION_WORKSPACE","params":{"action":"append","name":"selftest_note","content":"第二行"},"next":"read"},
+            "read":   {"id":"read","type":"ACTION_WORKSPACE","params":{"action":"read","name":"selftest_note","output_var":"note"},"next":"list"},
+            "list":   {"id":"list","type":"ACTION_WORKSPACE","params":{"action":"list","tag":"selftest","output_var":"items"},"next":"delete"},
+            "delete": {"id":"delete","type":"ACTION_WORKSPACE","params":{"action":"delete","name":"selftest_note"},"next":"done"},
+            "done":   {"id":"done","type":"ACTION_SET_VARIABLE","params":{"name":"wf_completed","value":true,"type":"bool"}}
+          }
+        }
+        """.trimIndent(),
+        verify = { v ->
+            v["wf_completed"] == true && v["workspace_success"] == true &&
+                v["note"] == "第一行\n第二行" && (v["items"] as? String)?.contains("selftest_note") == true
+        },
+    )
 
     private fun testToast() = SelfTestCase(
         name = "ACTION_TOAST·显示",

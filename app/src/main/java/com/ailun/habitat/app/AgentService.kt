@@ -294,11 +294,9 @@ class AgentService : Service() {
     }
 
     /** 远程调用策略：高危节点需显式开启。返回拒绝原因，null 表示放行。 */
-    private fun remotePolicyError(tool: String): String? {
-        if (tool in REMOTE_DANGEROUS_TOOLS && !isRemoteDangerousAllowed(this)) {
-            return "远程调用 $tool 已被拒绝：该节点属于高危操作，需在 Agent 控制页开启「允许远程高危工具」"
-        }
-        return null
+    private fun remotePolicyError(tool: String, params: JsonObject): String? {
+        val action = runCatching { params.get("action")?.asString }.getOrNull()
+        return RemoteToolPolicy.check(tool, action, REMOTE_DANGEROUS_TOOLS, isRemoteDangerousAllowed(this))
     }
 
     /**
@@ -322,6 +320,7 @@ class AgentService : Service() {
 
         if (tool == "ping") return buildReplyJson(id, ok = true, outputs = mapOf("pong" to true))
         if (tool == "screen") return buildReplyJson(id, ok = true, outputs = screenSnapshot())
+        if (tool == "mini_screen_status") return buildReplyJson(id, ok = true, outputs = com.ailun.habitat.app.miniscreen.MiniScreen.statusMap())
         if (tool == "debug_screen") {
             val params = req.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
             val goal = runCatching { params.get("goal")?.asString }.getOrNull()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -341,7 +340,7 @@ class AgentService : Service() {
 
     /** 执行节点并组装自定义协议响应。 */
     private suspend fun executeNodeReply(factory: NodeHandlerFactory, id: String, tool: String, params: JsonObject): String {
-        remotePolicyError(tool)?.let { return buildReplyJson(id, ok = false, error = it) }
+        remotePolicyError(tool, params)?.let { return buildReplyJson(id, ok = false, error = it) }
         val handler = factory.get(tool)
             ?: return buildReplyJson(id, ok = false, error = "未知工具: $tool（/tools 查看可用列表）")
 
@@ -351,6 +350,7 @@ class AgentService : Service() {
             this.params = toParamMap(params)
         }
         val ctx = WorkflowContext(applicationContext)
+        ctx.origin = WorkflowContext.ORIGIN_MCP
         val result = runHandler(handler, node, ctx)
         val error = when {
             result == null -> "工具执行超时（${TOOL_TIMEOUT_MS}ms）"
@@ -401,7 +401,7 @@ class AgentService : Service() {
                 add("capabilities", JsonObject().apply { add("tools", JsonObject()) })
                 add("serverInfo", JsonObject().apply {
                     addProperty("name", "habitat-agent")
-                    addProperty("version", "1.7.0")
+                    addProperty("version", com.ailun.habitat.BuildConfig.VERSION_NAME)
                 })
             })
 
@@ -435,13 +435,14 @@ class AgentService : Service() {
     private suspend fun executeNodeAsText(factory: NodeHandlerFactory, tool: String, args: JsonObject): Pair<Boolean, String> {
         if (tool == "ping") return true to """{"pong":true}"""
         if (tool == "screen") return true to gson.toJson(screenSnapshot())
+        if (tool == "mini_screen_status") return true to gson.toJson(com.ailun.habitat.app.miniscreen.MiniScreen.statusMap())
         if (tool == "debug_screen") {
             val goal = runCatching { args.get("goal")?.asString }.getOrNull()?.trim().takeUnless { it.isNullOrEmpty() }
                 ?: "打开设置"
             return true to debugScreen(goal)
         }
         if (tool.startsWith("agent_")) return handleAgentControl(tool, args)
-        remotePolicyError(tool)?.let { return false to it }
+        remotePolicyError(tool, args)?.let { return false to it }
 
         val handler = factory.get(tool)
             ?: return false to "未知工具: $tool"
@@ -451,6 +452,7 @@ class AgentService : Service() {
             this.params = toParamMap(args)
         }
         val ctx = WorkflowContext(applicationContext)
+        ctx.origin = WorkflowContext.ORIGIN_MCP
         val result = runHandler(handler, node, ctx)
         return when {
             result == null -> false to "工具执行超时（${TOOL_TIMEOUT_MS}ms）"
@@ -465,6 +467,7 @@ class AgentService : Service() {
         arr.add(mcpToolSchema("screen", "获取当前屏幕无障碍树文本 + 前台应用包名（AI 的眼睛）"))
         arr.add(mcpToolSchema("debug_screen", "排查用：当前观测快照 + 候选动作清单。arguments: goal（可空，默认「打开设置」）"))
         arr.add(mcpToolSchema("ping", "连通性测试"))
+        arr.add(mcpToolSchema("mini_screen_status", "悬浮小屏当前内容（是否显示、标题、来源、文字、进度），只读"))
         arr.add(mcpToolSchema("agent_start", "启动自主循环。arguments: goal（必填）, provider（jev/deepseek/local，可空）, max_steps（1-40，默认 20，可空）, planner（true/false，可空，覆盖界面开关）。配了 DeepSeek key 且开启规划时，先由 DeepSeek 拆步骤、最后复核"))
         arr.add(mcpToolSchema("agent_stop", "停止自主循环"))
         arr.add(mcpToolSchema("agent_status", "自主循环状态与最近步骤"))
@@ -679,7 +682,7 @@ class AgentService : Service() {
             mapOf(
                 "count" to factory.size,
                 "modules" to modules,
-                "builtin_tools" to listOf("ping", "screen", "debug_screen", "agent_start", "agent_stop", "agent_status"),
+                "builtin_tools" to listOf("ping", "screen", "debug_screen", "mini_screen_status", "agent_start", "agent_stop", "agent_status"),
                 "debug_screen" to "排查用：当前观测快照 + 候选动作清单；params.goal（默认「打开设置」）",
                 "remote_dangerous_allowed" to isRemoteDangerousAllowed(this),
                 "remote_dangerous_tools" to REMOTE_DANGEROUS_TOOLS.sorted(),

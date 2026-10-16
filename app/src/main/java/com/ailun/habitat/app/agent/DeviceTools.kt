@@ -37,6 +37,11 @@ object DeviceTools {
         val args: Map<String, List<String>>,
         /** 目标原文里出现其中任意一个词才可用；空表示不改设备状态（导航/只读），总是可用。 */
         val gate: List<String> = emptyList(),
+        /**
+         * 自由文字参数（只写进小屏/工作区，不进入任何设备操作，所以不要求是目标原文子串）。
+         * 值 → 是否必填。可用 `{读数名}` 引用前面工具读到的值，执行时替换。
+         */
+        val textArgs: Map<String, Boolean> = emptyMap(),
     )
 
     /** 系统设置页：键 → (显示名, intent action, 目标里出现就推荐的词)。 */
@@ -64,6 +69,22 @@ object DeviceTools {
     /** `call` 的门控词：目标原文里写了"打电话"这类词才能拨号。必须在 [ALL] 之前初始化。 */
     val CALL_WORDS = listOf("打电话", "电话给", "打给", "拨打", "拨给", "呼叫", "致电")
 
+    /**
+     * 写小屏的门控词。不收单独的「显示」「悬浮」：「打开显示与亮度」「打开悬浮窗权限」不是要上小屏。
+     */
+    val SHOW_WORDS = listOf("小屏", "悬浮屏", "显示在", "显示到", "显示出来", "屏幕上显示", "放到屏幕", "放在屏幕", "展示给我", "弹出来")
+
+    /** 写工作区的门控词。不收单独的「保存」「记录」「工作区」：「保存图片」「通话记录」「打开工作区」不是要记笔记。 */
+    val NOTE_WORDS = listOf(
+        "记下", "记一下", "记到", "记住", "记笔记", "做笔记", "存一份", "存下来",
+        "存到工作区", "存进工作区", "保存到工作区", "写到工作区", "放进工作区",
+    )
+
+    const val MAX_TOOL_TEXT = 2000
+
+    /** 输出类工具：只把结果交给用户（小屏/工作区），不操作界面。 */
+    val OUTPUT_TOOLS = setOf("show_on_screen", "save_note")
+
     val ALL: List<DeviceTool> = listOf(
         DeviceTool("open_settings", "直接打开系统设置的某一页（不用在设置里翻找）", mapOf("page" to SETTINGS_PAGES.keys.toList())),
         DeviceTool("open_app", "打开一个已安装应用", mapOf("package" to emptyList())),
@@ -82,6 +103,14 @@ object DeviceTools {
         DeviceTool("read_time", "读取当前日期时间", emptyMap()),
         DeviceTool("read_device_info", "读取手机型号、品牌、安卓版本", emptyMap()),
         DeviceTool("read_network", "读取当前网络连接状态与类型", emptyMap()),
+        DeviceTool(
+            "show_on_screen", "把一段文字显示在悬浮小屏上给用户看（不改变设备状态）", emptyMap(),
+            gate = SHOW_WORDS, textArgs = mapOf("text" to true, "title" to false),
+        ),
+        DeviceTool(
+            "save_note", "把一段文字存进本机工作区（不改变设备状态）", emptyMap(),
+            gate = NOTE_WORDS, textArgs = mapOf("text" to true, "name" to false),
+        ),
     )
 
     private val BY_ID = ALL.associateBy { it.id }
@@ -108,7 +137,32 @@ object DeviceTools {
             val value = args[name] ?: return null
             if (allowed.isNotEmpty() && value !in allowed) return null
         }
+        for ((name, required) in spec.textArgs) {
+            val value = args[name]?.trim()
+            if (required && value.isNullOrEmpty()) return null
+            if (value != null && value.length > MAX_TOOL_TEXT) return null
+        }
         return when (tool) {
+            "show_on_screen" -> Invocation(
+                tool, args, "ACTION_MINI_SCREEN",
+                buildMap {
+                    put("action", "show")
+                    put("text", args.getValue("text").trim())
+                    args["title"]?.trim()?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
+                },
+                "显示到小屏", "mini_screen_success",
+            )
+            "save_note" -> Invocation(
+                tool, args, "ACTION_WORKSPACE",
+                mapOf(
+                    "action" to "write",
+                    "name" to (args["name"]?.trim()?.takeIf { it.isNotEmpty() } ?: noteName(goal)),
+                    "content" to args.getValue("text").trim(),
+                    "tags" to "agent",
+                    "overwrite" to false,
+                ),
+                "存到工作区", "workspace_success",
+            )
             "open_settings" -> {
                 val (label, action, _) = SETTINGS_PAGES[args.getValue("page")] ?: return null
                 // 部分 ROM 的电池页由厂商省电应用提供（不是 com.android.settings），只要 intent 成功就算跳过去了
@@ -208,11 +262,22 @@ object DeviceTools {
 
     /** 规划器提示词里的工具说明（只列目标点名可用的）。 */
     fun describeFor(goal: String, scope: ToolScope = ToolScope()): String = available(goal, scope).joinToString("\n") { tool ->
-        val args = if (tool.args.isEmpty()) "无参数" else tool.args.entries.joinToString("，") { (k, v) ->
+        val enumArgs = tool.args.entries.map { (k, v) ->
             if (v.isEmpty()) "$k=<已安装应用包名>" else "$k ∈ ${v.joinToString("/")}"
         }
+        val textArgs = tool.textArgs.entries.map { (k, required) ->
+            "$k=<自由文字${if (required) "" else "，可空"}，可用 {读数名} 引用前面工具读到的值>"
+        }
+        val args = (enumArgs + textArgs).ifEmpty { listOf("无参数") }.joinToString("，")
         "- ${tool.id}：${tool.description}（$args）"
     }
+
+    /** 自由文字参数里的 `{读数名}` 换成已读到的值；没读到的保留原样。 */
+    fun fillFacts(text: String, facts: Map<String, String>): String =
+        Regex("\\{([A-Za-z_][A-Za-z0-9_]*)\\}").replace(text) { m -> facts[m.groupValues[1]] ?: m.value }
+
+    /** 工作区条目的默认名：目标前 20 个字。 */
+    fun noteName(goal: String): String = goal.replace(Regex("\\s+"), " ").trim().take(20).ifEmpty { "Agent 笔记" }
 
     private fun toggle(tool: String, args: Map<String, String>, node: String, name: String, flag: String, outputs: List<String>): Invocation {
         val on = args.getValue("state") == "on"

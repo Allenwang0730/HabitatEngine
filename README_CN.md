@@ -13,6 +13,8 @@
 
 [English](README.md)
 
+> 第一次了解这个项目，先看 **[项目介绍（含真机示例）](docs/INTRO.md)**。
+
 **能做什么**
 
 - **一句话让手机自己做**——"打开设置进入蓝牙""亮度调到最高""现在电量多少"。Agent 先规划，能用设备工具就直接用，不能就在界面上点，最后按屏幕证据复核。真机评测：有规划时 Jev、DeepSeek 两种执行器都是 **28/28**（2026-10-09，无规划 13–18/28）——[方法与原始数据](docs/EVAL.md)。
@@ -86,9 +88,9 @@ HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
 
 ---
 
-## 节点类型速览 (84)
+## 节点类型速览 (86)
 
-引擎共有 84 种节点，分多类。常用/核心节点如下（与 `README.md` 英文版为同一清单，`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源）：
+引擎共有 86 种节点，分多类。常用/核心节点如下（与 `README.md` 英文版为同一清单，`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源）：
 
 | 类型 | 参数 | 用途 | 前置条件 |
 |------|------|------|----------|
@@ -137,7 +139,7 @@ WorkflowAIGenerator.generate(context, "拨打10086并开启录音")  // → Gene
 ```
 
 - **13 个典型场景生成正确率 100%**（含"直接拨号用 CALL_DIRECT 而非 UI 模拟"、"多实例文本用 region"校验）
-- 提示词含：84 节点清单 + 常见包名映射 + 优先规则（直接 API 优先）+ 权限前置 + few-shot
+- 提示词含：86 节点清单 + 常见包名映射 + 优先规则（直接 API 优先）+ 权限前置 + few-shot
 - 单次生成成本 ≈ 0.02-0.05 元（DeepSeek）
 - App 内「AI 生成」独立底栏：多轮对话记忆（history）、编辑后保存、挂载悬浮窗
 
@@ -263,7 +265,7 @@ ws://127.0.0.1:8931/mcp                # Authorization: Bearer <令牌>（或 ?t
 | `ACTION_HTTP_REQUEST` | HTTP GET / POST / PUT / DELETE (含 headers + body) |
 | `ACTION_NETWORK_STATUS` | 查询网络类型、WiFi IP、移动网络 IP |
 
-### 媒体 & UI (6)
+### 媒体 & UI (8)
 | 类型 | 功能 |
 |------|------|
 | `ACTION_SCREENSHOT` | 截屏 (Base64 或文件) |
@@ -272,6 +274,8 @@ ws://127.0.0.1:8931/mcp                # Authorization: Bearer <令牌>（或 ?t
 | `ACTION_VIBRATE` | 振动反馈 |
 | `ACTION_SEND_NOTIFICATION` | 系统通知 |
 | `ACTION_DYNAMIC_ISLAND` | 灵动岛悬浮通知 |
+| `ACTION_MINI_SCREEN` | 悬浮小屏：工作流 / Agent / MCP 脚本实时写入文字、图片、进度（可拖动、折叠；Agent 点击时自动让开） |
+| `ACTION_WORKSPACE` | 本机工作区：结果、笔记、图片的写/追加/读/列/删（在 App「工作区」页查看，只存本机） |
 
 ### AI (1)
 | 类型 | 功能 |
@@ -398,7 +402,7 @@ Habitat/                          # 根项目
 ├── lib/                          # :lib — 引擎（零 Android UI 依赖）
 │   └── com/ailun/habitat/
 │       ├── api/                  # IAccessibilityProvider, IShellExecutor
-│       ├── handlers/             # 84 INodeHandler 实现
+│       ├── handlers/             # 86 INodeHandler 实现
 │       ├── HabitatExecutor.kt    # 协程式执行循环
 │       ├── HabitatJson.kt        # JSON 解析 + 示例工作流
 │       ├── WorkflowGraph.kt      # 图模型 (start_node_id + nodes)
@@ -501,4 +505,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 84 节点类型 · AI 工作流生成（LLM-friendly）· MCP Agent · `habitat-server` 配套后端
+**Habitat** · 86 节点类型 · AI 工作流生成（LLM-friendly）· MCP Agent · `habitat-server` 配套后端

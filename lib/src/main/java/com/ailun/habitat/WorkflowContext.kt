@@ -29,6 +29,12 @@ class WorkflowContext internal constructor(
         /** `${name}`：name 允许 \w 与 `.`（整体作为变量名查找，不做路径解析）。 */
         private val VAR_PATTERN = Regex("""\$\{([\w.]+)\}""")
 
+        const val ORIGIN_AGENT = "agent"
+        const val ORIGIN_MCP = "mcp"
+        const val ORIGIN_WORKFLOW_PREFIX = "workflow:"
+
+        fun workflowOrigin(name: String): String = ORIGIN_WORKFLOW_PREFIX + name.trim().take(40)
+
         /** 不绑定 android Context 的上下文（仅 JVM 单测 / 纯逻辑节点用；访问 appContext 会抛异常）。 */
         internal fun detached(workflowId: String = UUID.randomUUID().toString()): WorkflowContext =
             WorkflowContext(null, workflowId, true)
@@ -36,6 +42,20 @@ class WorkflowContext internal constructor(
 
     val appContext: Context
         get() = boundAppContext ?: throw IllegalStateException("WorkflowContext 未绑定 android Context")
+
+    /**
+     * 谁发起的这次执行：`workflow:<名字>`、`agent`、`mcp`，空表示未知。
+     * 由调用方（执行服务 / Agent / MCP 服务）设置；它是 Kotlin 字段而不是变量，工作流节点改不了，
+     * 小屏、工作区用它标注内容来源，远程写入不能冒充本机。
+     */
+    @Volatile
+    var origin: String = ""
+
+    /** 同一次运行的标识（Agent 一轮任务里多个节点共用）；空时用 [workflowId]。 */
+    @Volatile
+    var runKey: String = ""
+
+    val effectiveRunKey: String get() = runKey.ifEmpty { workflowId }
 
     /** 线程安全的变量存储 */
     val variables: MutableMap<String, Any?> = ConcurrentHashMap()
