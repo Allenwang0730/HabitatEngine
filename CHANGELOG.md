@@ -1,10 +1,17 @@
 # Changelog
 
-## [1.9.0] - 2026-10-09
+## [1.9.0] - 2026-10-14
 
-App `versionName` 1.9.0（`versionCode` 6）；引擎 AAR `com.ailun:habitat-engine:1.8.0`（`ACTION_LAUNCH_APP` 新增 `intent_action`）。
+App `versionName` 1.9.0（`versionCode` 6）；引擎 AAR `com.ailun:habitat-engine:1.8.0`（`ACTION_LAUNCH_APP` 新增 `intent_action`；`ACTION_INPUT_TEXT` 新增 `target`，写入后读回核对，失败退回剪贴板粘贴）。JitPack：`com.github.Allenwang0730:HabitatEngine:v1.9.0`。
 
-**真机评测**（vivo / Android 16，7 类任务 × 2 次，adb/读屏独立验证，`scripts/agent_eval.mjs`）：有规划时 Jev 14/14、DeepSeek 14/14；无规划时 Jev 6–7/14、DeepSeek 8–10/14。
+**真机评测**（vivo / Android 16，adb/读屏独立验证，方法与原始数据见 [docs/EVAL.md](docs/EVAL.md)）：2026-10-09，7 类任务 × 4 次，有规划时 Jev、DeepSeek 都是 28/28，无规划 13/28、18/28；2026-10-14，10 类任务（新增发消息、打电话），DeepSeek 有规划 10/10、无规划 7/10。
+
+### Added — 意图槽位与固定做法（「只点输入框不输入」「打电话变打开应用」）
+- **`IntentParser`**：规则解析「打电话给 X」「给 X 发消息说 Y」「输入/搜索 X」，每个槽位都是目标原文子串，不做自由改写；「输入电池」不再要求空格。
+- **拨号工具 `call`**：号码只在本机查（目标里的号码 → 通讯录 → 内置客服号码表），不进任何提示词；本机发起且有拨号权限才直接拨出，远程发起和紧急号码只填拨号盘。联系人与应用同名（「中国移动」）时不再作为打开候选。新增 `READ_CONTACTS` 权限，Agent 页开始前按需申请。
+- **`SkillPlans`**：打电话、QQ/微信发消息直接出固定步骤；完成条件由代码看屏幕判定（`StepCheck`：已进入会话 / 输入框正好是 Y / 已发送）；会话行由代码按名字点；整件事有终点判定，重规划也遵守。
+- **输入链路**：只有一个输入框时不要求它报告焦点；`TYPE_TEXT` 按坐标写入指定输入框；输好后「发送/搜索/确定」排到候选最前；本地决策器会输入和提交。
+- 评测新增 `settings_search_nospace`、`qq_my_computer`、`call_10086`；`scripts/agent_eval_export.mjs` 导出可公开的结果（不含屏幕文字）到 `docs/eval/`。
 
 ### Added — 自主模式重构：规划（DeepSeek）+ 执行（Jev）+ 代码控制
 - **规划器**（`Planner` / `DeepSeekPlanner`）：先把目标拆成 1~6 步，每步带屏幕上可验证的完成条件，能用设备工具就直接用；执行卡住时从当前屏幕重规划剩下的部分（最多 2 次）；全部完成后按屏幕证据**复核**，提问类目标在复核里读出答案。Agent 页新增「DeepSeek 规划与复核」开关（默认开，需 DeepSeek key）；MCP `agent_start` 新增 `planner` 参数。
@@ -16,6 +23,9 @@ App `versionName` 1.9.0（`versionCode` 6）；引擎 AAR `com.ailun:habitat-eng
 - 评测脚本 `scripts/agent_eval.mjs` + `agent_eval_tasks.json`：固定任务集，adb/读屏独立验证，跑完恢复设备状态，支持按执行器 × 有/无规划对比。
 
 ### Fixed（真机评测暴露）
+- QQ 聊天页：整条输入栏容器吞掉了真正的发送按钮（借了「发送」二字，中心落在输入框上）；顶栏聚合行里读不出标题，页面标题落到正文里的「下载」。
+- vivo 设置首页的搜索框只是入口：第一次允许点击，这一步点过之后才只给输入。
+- 控件一览标出不在候选里的控件（模型曾连续 6 次选无效序号）。
 - 拖滑块、拨开关时文字不变，旧"屏幕是否变化"判定把成功当成无变化后反复操作；现在控件状态也算。
 - 工具失败后把「亮度设为最高」偷换成「设为中等」；现在只能换别的工具，不换同一工具的另一档。失败过的工具本次任务不再提供。
 - 读数工具不改屏幕被判"无变化"而反复调用；读到值算进展，已知事实对应的工具不再提供。
@@ -24,12 +34,15 @@ App `versionName` 1.9.0（`versionCode` 6）；引擎 AAR `com.ailun:habitat-eng
 - 决策器不可用（key 无效、HTTP 451）时不再无意义地重规划，直接结束并提示。
 
 ### Changed
+- 默认 `standard` 包不含微信读屏服务（它冒用 Google `SelectToSpeakService` 类名），移到 `wechat` 渠道（`assembleWechatDebug`），只适合自用。
+- 新增 GitHub Actions（单元测试 + 构建 APK/AAR）与 `jitpack.yml`。
 - 默认最多步数 12 → 20，上限 30 → 40；多步计划里每步最多 8 步。
 - 页面标题识别跳过状态栏时钟。
 - Jev 可配 HTTP 代理（Agent 页「Jev 代理」，只存本机）：国内网络直连返回 451 时，经 `adb reverse` 走电脑代理。
 - 文档与脚本去掉个人信息：设备序列号、局域网 IP、本机路径（`run_selftest.ps1` 改用 `%LOCALAPPDATA%` 与脚本相对路径）。
 
 ### Security
+- 「发送」与聊天页回车列为敏感动作：目标写了「发消息/发给/回复」等才放行；远程发起只填好消息，不发送。
 - 规划器输出一律当不可信：工具/参数白名单与枚举、输入文字必须是目标原文子串、敏感按钮与权限弹窗的放行只看用户目标原文（规划器写进步骤说明的文字不能解锁）。
 - 规划器开启时屏幕文字也会发给 DeepSeek：即使执行器选 Jev/本地，首次也会弹出 DeepSeek 的隐私提示。
 
