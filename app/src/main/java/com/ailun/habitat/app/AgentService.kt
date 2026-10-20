@@ -34,6 +34,7 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
@@ -268,6 +269,25 @@ class AgentService : Service() {
                         }
                     }
                 }
+                // MCP Streamable HTTP（标准传输）：Claude Code / Cursor 直接连，Claude Desktop 经 scripts/habitat_mcp_stdio.mjs
+                post("/mcp") {
+                    if (!McpHttp.originAllowed(call.request.headers[HttpHeaders.Origin])) {
+                        call.respondText("forbidden origin", status = HttpStatusCode.Forbidden)
+                        return@post
+                    }
+                    if (!authorized(call)) {
+                        call.respondText("unauthorized", status = HttpStatusCode.Unauthorized)
+                        return@post
+                    }
+                    val reply = when (val body = McpHttp.split(call.receiveText())) {
+                        is McpHttp.Body.Single -> handleMcpMessageSafely(factory, body.message)
+                        is McpHttp.Body.Batch -> McpHttp.joinReplies(body.messages.map { handleMcpMessageSafely(factory, it) })
+                        is McpHttp.Body.Invalid -> mcpError(null, if (body.reason == "Parse error") -32700 else -32600, body.reason)
+                    }
+                    // 通知（没有 id）不回包：202
+                    if (reply == null) call.respond(HttpStatusCode.Accepted)
+                    else call.respondText(reply, ContentType.Application.Json)
+                }
                 // MCP（Model Context Protocol）端点：JSON-RPC 2.0 over WebSocket
                 webSocket("/mcp") {
                     if (!authorized(call)) {
@@ -397,7 +417,7 @@ class AgentService : Service() {
 
         return when (method) {
             "initialize" -> mcpResult(id, JsonObject().apply {
-                addProperty("protocolVersion", "2025-06-18")
+                addProperty("protocolVersion", McpHttp.negotiate(runCatching { params.get("protocolVersion")?.asString }.getOrNull()))
                 add("capabilities", JsonObject().apply { add("tools", JsonObject()) })
                 add("serverInfo", JsonObject().apply {
                     addProperty("name", "habitat-agent")
@@ -474,14 +494,24 @@ class AgentService : Service() {
         val allowDangerous = isRemoteDangerousAllowed(this)
         factory.availableTypes().sorted().forEach { type ->
             if (!allowDangerous && type in REMOTE_DANGEROUS_TOOLS) return@forEach
-            val module = ALL_NODE_TYPES_BY_MODULE.entries.firstOrNull { type in it.value }?.key?.name ?: "?"
-            arr.add(
-                mcpToolSchema(
-                    type,
-                    "执行 Habitat 节点（模块 $module）。arguments 为该节点的 params 键值对，值支持 \${var} 插值；" +
-                        "执行结果（变量快照）以 JSON 返回。失败时 isError=true。",
-                ),
-            )
+            // 参数定义来自节点规格（lib/.../spec），外部 AI 不用猜参数名
+            val spec = com.ailun.habitat.spec.NodeSpecs.get(type)
+            if (spec != null) {
+                arr.add(JsonObject().apply {
+                    addProperty("name", type)
+                    addProperty("description", com.ailun.habitat.spec.NodeSpecRender.toolDescription(spec))
+                    add("inputSchema", com.ailun.habitat.spec.NodeSpecRender.jsonSchema(spec))
+                })
+            } else {
+                val module = ALL_NODE_TYPES_BY_MODULE.entries.firstOrNull { type in it.value }?.key?.name ?: "?"
+                arr.add(
+                    mcpToolSchema(
+                        type,
+                        "执行 Habitat 节点（模块 $module）。arguments 为该节点的 params 键值对，值支持 \${var} 插值；" +
+                            "执行结果（变量快照）以 JSON 返回。失败时 isError=true。",
+                    ),
+                )
+            }
         }
         return arr
     }
