@@ -18,7 +18,7 @@
 **能做什么**
 
 - **一句话让手机自己做**——"打开设置进入蓝牙""亮度调到最高""现在电量多少"。Agent 先规划，能用设备工具就直接用，不能就在界面上点，最后按屏幕证据复核。真机评测：有规划时 Jev、DeepSeek 两种执行器都是 **28/28**（2026-10-09，无规划 13–18/28）——[方法与原始数据](docs/EVAL.md)。
-- **手机上的 MCP 服务**——任意 MCP 客户端（Claude、Cursor、自己的 Agent）经 `ws://127.0.0.1:8931/mcp` 读屏、调用约 80 个自动化节点；令牌鉴权，高危节点默认关闭。
+- **手机上的 MCP 服务**——Claude Code、Cursor 经 Streamable HTTP（`http://127.0.0.1:8931/mcp`）直接接入，Claude Desktop 用自带的 stdio 桥：读屏、调用全部 88 个节点（每个都带参数定义）、启动 Agent 任务；令牌鉴权，高危节点默认关闭——[接入方法](docs/MCP.md)。
 - **可嵌入的引擎**——把 `:lib` 引入你自己的 App（JitPack），运行 LLM 生成的 JSON 工作流：触发器、分支、循环、变量、Shell、HTTP、传感器、通知。
 
 ## 两分钟上手
@@ -90,9 +90,9 @@ HabitatExecutionService.start(
 
 ---
 
-## 节点类型速览 (86)
+## 节点类型速览 (88)
 
-引擎共有 86 种节点，分多类。常用/核心节点如下（与 `README.md` 英文版为同一清单，`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源）：
+完整参数见 [docs/NODES.md](docs/NODES.md)（由节点规格生成）。引擎共有 88 种节点，分多类。常用/核心节点如下（与 `README.md` 英文版为同一清单，`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源）：
 
 | 类型 | 参数 | 用途 | 前置条件 |
 |------|------|------|----------|
@@ -141,7 +141,7 @@ WorkflowAIGenerator.generate(context, "拨打10086并开启录音")  // → Gene
 ```
 
 - **13 个典型场景生成正确率 100%**（含"直接拨号用 CALL_DIRECT 而非 UI 模拟"、"多实例文本用 region"校验）
-- 提示词含：86 节点清单 + 常见包名映射 + 优先规则（直接 API 优先）+ 权限前置 + few-shot
+- 提示词含：全部节点及参数（来自节点规格） + 常见包名映射 + 优先规则（直接 API 优先）+ 权限前置 + few-shot
 - 单次生成成本 ≈ 0.02-0.05 元（DeepSeek）
 - App 内「AI 生成」独立底栏：多轮对话记忆（history）、编辑后保存、挂载悬浮窗
 
@@ -151,10 +151,12 @@ WorkflowAIGenerator.generate(context, "拨打10086并开启录音")  // → Gene
 
 ```bash
 adb forward tcp:8931 tcp:8931          # 服务默认只监听手机 127.0.0.1
-ws://127.0.0.1:8931/mcp                # Authorization: Bearer <令牌>（或 ?token=）
+http://127.0.0.1:8931/mcp              # Streamable HTTP，Authorization: Bearer <令牌>
+ws://127.0.0.1:8931/mcp?token=<令牌>   # WebSocket（scripts/mcp_call.mjs）
+claude mcp add --transport http habitat http://127.0.0.1:8931/mcp --header "Authorization: Bearer <令牌>"
 ```
 
-- `initialize / tools/list / tools/call` 标准 MCP，任意 LLM 客户端可接入
+- `initialize / tools/list / tools/call` 标准 MCP。Cursor、Claude Desktop 配置见 [docs/MCP.md](docs/MCP.md)；每个节点工具都带由节点规格生成的参数定义
 - **鉴权**：令牌每台设备首次启动随机生成，在 App「Agent」页查看/复制/重新生成；局域网访问默认关闭；Shell、文件、短信、拨号等高危节点远程默认拒绝，需在 Agent 页手动开启
 - 支持 `region`/`occurrence` 精准定位多实例文本（如"点下半屏的确定"）
 - 微信读屏：只在 `wechat` 渠道包里（`./gradlew :app:assembleWechatDebug`）。微信只对类名为 `SelectToSpeakService` 的服务返回节点，这等于冒用 Google 组件身份，**仅限自用，不能上架分发**。默认的 `standard` 包不含它，树为空时用 ML Kit 中文离线 OCR
@@ -404,7 +406,7 @@ Habitat/                          # 根项目
 ├── lib/                          # :lib — 引擎（零 Android UI 依赖）
 │   └── com/ailun/habitat/
 │       ├── api/                  # IAccessibilityProvider, IShellExecutor
-│       ├── handlers/             # 86 INodeHandler 实现
+│       ├── handlers/             # 88 种节点的 INodeHandler 实现
 │       ├── HabitatExecutor.kt    # 协程式执行循环
 │       ├── HabitatJson.kt        # JSON 解析 + 示例工作流
 │       ├── WorkflowGraph.kt      # 图模型 (start_node_id + nodes)
@@ -507,4 +509,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 86 节点类型 · AI 工作流生成（LLM-friendly）· MCP Agent · `habitat-server` 配套后端
+**Habitat** · 88 节点类型 · AI 工作流生成（LLM-friendly）· MCP Agent · `habitat-server` 配套后端
