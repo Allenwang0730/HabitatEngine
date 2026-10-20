@@ -370,11 +370,68 @@ private fun RecordBody(record: RunRecord) {
             }
         }
     }
+    SaveAsWorkflow(record)
     if (record.lines.isNotEmpty()) {
         SectionHeader("步骤（${record.lines.size}）")
         Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
             record.lines.forEachIndexed { i, line -> TimelineRow(line, last = i == record.lines.lastIndex) }
         }
+    }
+}
+
+/**
+ * Agent 记录：把成功执行过的动作存成工作流，以后同样的事直接跑工作流、不再调模型。
+ * 只在本机界面上由用户点按钮触发（远程不能存），存的是用户自己确认过的动作序列。
+ */
+@Composable
+private fun SaveAsWorkflow(record: RunRecord) {
+    if (record.type != "agent") return
+    val steps = remember(record) { com.ailun.habitat.app.agent.RunReplay.replayable(record.actions) }
+    if (steps.isEmpty()) return
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var confirm by remember { mutableStateOf(false) }
+    var savedId by remember { mutableStateOf<String?>(null) }
+    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Text("存为工作流", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            Text(
+                "这次成功执行的 ${steps.size} 个动作：" + steps.take(4).joinToString("、") { it.label.take(16) } + if (steps.size > 4) "…" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text(
+                "以后直接运行工作流，不再调用 AI；界面变了（比如应用升级）可能需要重新录一次。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+            )
+            TextButton(onClick = { confirm = true }, enabled = savedId == null) {
+                Text(if (savedId == null) "存为工作流" else "已存到「工作流」")
+            }
+        }
+    }
+    if (confirm) {
+        ConfirmDialog(
+            title = "存为工作流？",
+            message = "会按这次的顺序重放 ${steps.size} 个动作（包括其中的发送、拨号等操作），每步没成功就停下。",
+            confirmLabel = "存",
+            onConfirm = {
+                confirm = false
+                scope.launch {
+                    val json = com.ailun.habitat.app.agent.RunReplay.toWorkflowJson(record.actions) ?: return@launch
+                    val wf = com.ailun.habitat.HabitatWorkflow(
+                        name = com.ailun.habitat.app.agent.RunReplay.workflowName(record.meta["goal"] ?: record.title),
+                        description = "由 Agent 运行记录生成：${record.title}",
+                        jsonContent = json,
+                    )
+                    withContext(Dispatchers.IO) { com.ailun.habitat.WorkflowRepository.upsert(context, wf) }
+                    com.ailun.habitat.HabitatStateStore.notifyLibraryChanged()
+                    savedId = wf.id
+                    android.widget.Toast.makeText(context, "已存到「工作流」：${wf.name}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { confirm = false },
+        )
     }
 }
 

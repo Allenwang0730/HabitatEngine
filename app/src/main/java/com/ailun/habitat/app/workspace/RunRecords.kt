@@ -29,6 +29,8 @@ data class RunRecord(
     val meta: Map<String, String> = emptyMap(),
     /** 工作流的输出变量（已过滤敏感项、截断）。 */
     val outputs: Map<String, String> = emptyMap(),
+    /** Agent 成功执行的动作（「存为工作流」用）；旧记录没有这个字段。 */
+    val actions: List<com.ailun.habitat.app.agent.RecordedAction> = emptyList(),
 ) {
     val durationMs: Long get() = (endedAt - startedAt).coerceAtLeast(0)
     val ok: Boolean get() = status == "done" || status == "completed"
@@ -40,6 +42,7 @@ object RunRecords {
     const val MAX_OUTPUT_VALUE = 2000
     const val MAX_OUTPUTS = 60
     const val WORKFLOW_LOG_TAIL = 50
+    const val MAX_ACTIONS = 60
 
     private const val PREFS = "workspace_prefs"
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
@@ -94,6 +97,7 @@ object RunRecords {
             lines = r.lines.orEmpty(),
             meta = r.meta.orEmpty(),
             outputs = r.outputs.orEmpty(),
+            actions = r.actions.orEmpty().filter { it.node != null && it.params != null },
         )
     }.getOrNull()
 
@@ -118,6 +122,7 @@ object RunRecords {
     fun saveAgent(
         context: Context, goal: String, provider: String, planner: Boolean, remote: Boolean,
         status: String, result: String, startedAt: Long, lines: List<String>,
+        actions: List<com.ailun.habitat.app.agent.RecordedAction> = emptyList(),
     ) {
         if (!isAgentRecordEnabled(context)) return
         val record = RunRecord(
@@ -134,6 +139,7 @@ object RunRecords {
                 "planner" to planner.toString(),
                 "origin" to if (remote) "remote" else "local",
             ),
+            actions = actions.take(MAX_ACTIONS),
         )
         save(
             context, record,

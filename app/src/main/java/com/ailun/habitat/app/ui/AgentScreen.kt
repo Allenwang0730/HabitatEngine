@@ -3,6 +3,12 @@ package com.ailun.habitat.app.ui
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -509,6 +515,7 @@ fun AgentScreen() {
                 }
             }
 
+            PlanChecklistCard(loop.plan)
             LoopTimeline(loop.phase, loop.running, loop.detail, loop.lines)
             Spacer(Modifier.height(Spacing.xl))
         }
@@ -626,6 +633,52 @@ private fun HeroRow(label: String, value: String, active: Boolean, mono: Boolean
         Text(label, style = MaterialTheme.typography.bodyMedium, color = fg.copy(alpha = 0.72f), modifier = Modifier.width(88.dp))
         Text(value, style = if (mono) HabitatTextStyles.codeSmall.copy(color = fg) else MaterialTheme.typography.bodyMedium.copy(color = fg))
     }
+}
+
+/** 实时计划清单：每一步一个圆点——灰=未开始，主色转圈=进行中，绿勾=完成，警示色=卡住（会重新规划）。 */
+@Composable
+private fun PlanChecklistCard(plan: List<com.ailun.habitat.app.agent.PlanItem>) {
+    if (plan.size < 2) return
+    val cs = MaterialTheme.colorScheme
+    val ext = HabitatTheme.extendedColors
+    val done = plan.count { it.status == com.ailun.habitat.app.agent.PlanStatus.DONE }
+    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("计划", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text("$done / ${plan.size}", style = MaterialTheme.typography.labelLarge.tabular(), color = cs.onSurfaceVariant)
+            }
+            plan.forEachIndexed { i, item ->
+                val (desc, color) = when (item.status) {
+                    com.ailun.habitat.app.agent.PlanStatus.PENDING -> "未开始" to cs.outline
+                    com.ailun.habitat.app.agent.PlanStatus.RUNNING -> "进行中" to cs.primary
+                    com.ailun.habitat.app.agent.PlanStatus.DONE -> "已完成" to ext.success
+                    com.ailun.habitat.app.agent.PlanStatus.FAILED -> "卡住" to ext.warning
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "第 ${i + 1} 步，$desc：${item.text}" },
+                ) {
+                    Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                        when (item.status) {
+                            com.ailun.habitat.app.agent.PlanStatus.RUNNING ->
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = color)
+                            com.ailun.habitat.app.agent.PlanStatus.DONE ->
+                                Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+                            else -> Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+                        }
+                    }
+                    Spacer(Modifier.width(Spacing.sm))
+                    Text(
+                        item.text + if (item.tool) "（工具）" else "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (item.status == com.ailun.habitat.app.agent.PlanStatus.PENDING) cs.onSurfaceVariant else cs.onSurface,
+                    )
+                }
+            }
+        }
+    }
+    Spacer(Modifier.height(Spacing.md))
 }
 
 /** 自主模式步骤时间线：每行一个节点，结束状态用语义色。 */
