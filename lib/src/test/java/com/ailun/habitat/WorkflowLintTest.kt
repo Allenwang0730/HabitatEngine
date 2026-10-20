@@ -15,7 +15,7 @@ class WorkflowLintTest {
     fun cleanGraphHasNoIssues() {
         val issues = lint(
             """{"start_node_id":"a","nodes":{
-                "a":{"id":"a","type":"CONDITION_SWITCH","branches":{"true":"b","false":null}},
+                "a":{"id":"a","type":"CONDITION_SWITCH","params":{"expression":"x == 1"},"branches":{"true":"b","false":null}},
                 "b":{"id":"b","type":"ACTION_LOG"}}}""",
             setOf("CONDITION_SWITCH", "ACTION_LOG"),
         )
