@@ -29,6 +29,14 @@ data class TriggerConfig(
     val intervalMs: Long
         get() = (params["interval_ms"] as? Number)?.toLong() ?: 60000L
 
+    /** 按时刻定时：`at`（"HH:mm"）不合法或没写时为 null，表示按 [intervalMs] 间隔定时。 */
+    val at: java.time.LocalTime?
+        get() = ScheduleMath.parseTime(params["at"]?.toString())
+
+    /** `days`：空=每天，weekdays/weekends，或 "1,3,5" / "1-5"（1=周一）。不合法返回 null。 */
+    val days: Set<java.time.DayOfWeek>?
+        get() = ScheduleMath.parseDays(params["days"]?.toString())
+
     val repeat: Boolean
         get() = params["repeat"]?.toString()?.toBooleanStrictOrNull() ?: false
 

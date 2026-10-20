@@ -37,6 +37,8 @@ object TriggerManager {
 
     /** repeat=true 时每个工作流默认最多并行的实例数（trigger 参数 max_concurrent 覆盖）。 */
     private const val DEFAULT_MAX_CONCURRENT = 3
+    /** 按时刻定时到点后，最多为短工作流保持这么久的广播（之后进程可能被回收）。 */
+    private const val SCHEDULE_HOLD_MS = 8_000L
 
     private data class TriggerEntry(
         val workflowId: String,
@@ -222,7 +224,10 @@ object TriggerManager {
             if (entries.values.count { it.config.type == config.type } == 1) {
                 source.start(app) { event -> onTriggerEvent(event, app) }
             }
-            if (source is TimerTriggerSource) {
+            if (ScheduleAlarms.isTimeBased(config)) {
+                // 按时刻：系统闹钟，进程被杀也按时拉起
+                ScheduleAlarms.schedule(app, workflowId, config)?.let { ScheduleAlarms.logError(workflowId, it) }
+            } else if (source is TimerTriggerSource) {
                 source.schedule(
                     workflowId,
                     intervalMs = config.intervalMs,
@@ -240,6 +245,7 @@ object TriggerManager {
             val entry = entries.remove(workflowId) ?: return
             val type = entry.config.type
             (sourceInstances[type] as? TimerTriggerSource)?.cancel(workflowId)
+            if (ScheduleAlarms.isTimeBased(entry.config)) ScheduleAlarms.cancel(app, workflowId)
 
             if (entries.values.none { it.config.type == type }) {
                 sourceInstances[type]?.stop(app)
@@ -289,6 +295,39 @@ object TriggerManager {
     fun triggerConfigFor(workflowId: String): TriggerConfig? = entries[workflowId]?.config
 
     // ── Internals ──
+
+    /**
+     * 按时刻定时的闹钟到点（[ScheduleReceiver]）：先排下一次，再按普通定时事件触发。
+     * [done] 在工作流结束或最多 [SCHEDULE_HOLD_MS] 后调用——短工作流（提醒、通知）在此期间进程不会被回收。
+     */
+    fun fireScheduled(context: Context, workflowId: String, done: () -> Unit) {
+        val app = context.applicationContext
+        val entry = synchronized(lock) { entries[workflowId] }
+        if (entry == null || !ScheduleAlarms.isTimeBased(entry.config) || !isWorkflowEnabled(app, workflowId)) {
+            HabitatLogger.habitat("Schedule '$workflowId' 到点，但已停用或已改成别的触发方式")
+            done()
+            return
+        }
+        ScheduleAlarms.schedule(app, workflowId, entry.config)?.let { ScheduleAlarms.logError(workflowId, it) }
+        onTriggerEvent(TriggerEvent(TriggerConfig.TYPE_TIMER, mapOf(TimerTriggerSource.PARAM_WORKFLOW_ID to workflowId)), app)
+        observerScope.launch {
+            val until = System.currentTimeMillis() + SCHEDULE_HOLD_MS
+            while (isAnyRunning(workflowId) && System.currentTimeMillis() < until) kotlinx.coroutines.delay(250)
+            done()
+        }
+    }
+
+    /** 开机、升级、改时间/时区后：所有已启用的按时刻定时重新安排。 */
+    fun rescheduleTimeAlarms(context: Context) {
+        val app = context.applicationContext
+        val timed = synchronized(lock) { entries.values.filter { ScheduleAlarms.isTimeBased(it.config) } }
+        for (e in timed) {
+            if (isWorkflowEnabled(app, e.workflowId)) {
+                ScheduleAlarms.schedule(app, e.workflowId, e.config)?.let { ScheduleAlarms.logError(e.workflowId, it) }
+            }
+        }
+        HabitatLogger.habitat("Schedule: 重新安排 ${timed.size} 个按时刻定时")
+    }
 
     private fun createSource(type: String): ITriggerSource = when (type) {
         TriggerConfig.TYPE_NOTIFICATION -> NotificationTriggerSource()

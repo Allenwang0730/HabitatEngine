@@ -119,6 +119,21 @@ object TriggerVisuals {
         else -> "触发：$type"
     }
 
+    /** 带细节的标签：按时刻定时显示「每天 08:00」，按间隔显示「每 30 分钟」，其它同 [label]。 */
+    fun label(config: TriggerConfig?): String {
+        if (config?.type != TriggerConfig.TYPE_TIMER) return label(config?.type)
+        val at = config.at
+        val days = config.days
+        if (at != null && days != null) return com.ailun.habitat.ScheduleMath.describe(at, days)
+        if (config.params["at"] != null) return "定时（时间格式不对）"
+        val ms = config.intervalMs
+        return when {
+            ms % 3_600_000L == 0L -> "每 ${ms / 3_600_000L} 小时"
+            ms % 60_000L == 0L -> "每 ${ms / 60_000L} 分钟"
+            else -> "每 ${ms / 1000L} 秒"
+        }
+    }
+
     fun shortLabel(type: String?): String = when (type) {
         null, MANUAL -> "手动"
         TriggerConfig.TYPE_NOTIFICATION -> "通知"

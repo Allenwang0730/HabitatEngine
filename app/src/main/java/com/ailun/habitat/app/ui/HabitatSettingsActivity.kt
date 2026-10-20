@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.Accessibility
 import androidx.compose.material.icons.outlined.BatterySaver
 import androidx.compose.material.icons.outlined.Bolt
@@ -133,6 +134,20 @@ internal fun buildPermissionItems(): List<PermissionItem> = buildList {
             createRequestIntent = { ctx -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")) },
         ),
     )
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        add(
+            PermissionItem(
+                id = "exact_alarm",
+                name = "闹钟和提醒",
+                description = "按时刻定时（如「每天 08:00」）准时运行；不开也能用，但可能晚几分钟",
+                icon = Icons.Outlined.Alarm,
+                isGranted = { ctx -> com.ailun.habitat.app.triggers.ScheduleAlarms.canScheduleExact(ctx) },
+                createRequestIntent = { ctx ->
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${ctx.packageName}"))
+                },
+            ),
+        )
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         add(
             PermissionItem(
