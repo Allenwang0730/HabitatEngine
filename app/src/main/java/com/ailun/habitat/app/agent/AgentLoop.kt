@@ -393,6 +393,7 @@ class AgentLoop(
     private suspend fun runOutputTool(run: Run, inv: DeviceTools.Invocation, onStep: (String) -> Unit): StepOutcome {
         onStep("工具：${inv.label}")
         val result = runNode(inv.node, inv.params, inv.successFlag, inv.outputs)
+        run.used++
         if (!result.ok) {
             onStep("${inv.label}没成功：${result.detail}")
             return StepOutcome("done", result.detail)

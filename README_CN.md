@@ -81,9 +81,11 @@ val factory = NodeHandlerFactory(
     shell = ShizukuShellExecutor(context),
 )
 val graph = HabitatJson.fromJson(jsonString)
-HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
-    println(log)
-}
+HabitatExecutionService.start(
+    workflowId, jsonString, context, factory,
+    onLog = { line -> println(line) },
+    onResult = { vars -> println(vars) },   // 工作流结束时的变量快照
+)
 ```
 
 ---
