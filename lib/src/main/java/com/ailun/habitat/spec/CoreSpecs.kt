@@ -180,7 +180,7 @@ internal object CoreSpecs {
         NodeSpec(
             F.ACTION_WORKSPACE, "读写本机工作区条目（结果、笔记、图片），用户在 App「工作区」页查看",
             params = listOf(
-                ParamSpec("action", ParamType.STRING, "操作类型", enum = listOf("write", "append", "read", "list", "delete"), default = "write"),
+                ParamSpec("action", ParamType.STRING, "操作类型", enum = listOf("write", "append", "read", "list", "delete", "search"), default = "write"),
                 ParamSpec("name", ParamType.STRING, "条目显示名（write/append 必填；read/delete 可用它或 id 定位）"),
                 ParamSpec("id", ParamType.STRING, "read/delete：条目 id，优先于 name"),
                 ParamSpec("content", ParamType.STRING, "write/append：内容，支持 \${var}；kind=json 时须为合法 JSON，kind=image 时为 base64"),
@@ -192,11 +192,12 @@ internal object CoreSpecs {
                 ParamSpec("tags", ParamType.STRING, "write/append：标签，逗号分隔"),
                 ParamSpec("overwrite", ParamType.BOOL, "write：同名同类时覆盖；false 则自动改名为「名字 (2)」", default = "true"),
                 ParamSpec("tag", ParamType.STRING, "list：按标签筛选"),
+                ParamSpec("query", ParamType.STRING, "search：找最近一条名字/标签/内容包含它的笔记（文本或 JSON）；空=最近一条"),
                 ParamSpec("limit", ParamType.STRING_OR_NUMBER, "list：最多返回条数（1–200）", default = "20"),
-                ParamSpec("output_var", ParamType.STRING, "read 的内容 / list 的 JSON 数组存到的变量名（默认 workspace_content / workspace_list）"),
+                ParamSpec("output_var", ParamType.STRING, "read/search 的内容 / list 的 JSON 数组存到的变量名（默认 workspace_content / workspace_list）"),
             ),
             outputs = listOf(
-                "workspace_id", "workspace_kind", "workspace_content", "workspace_path", "workspace_list", "workspace_count",
+                "workspace_id", "workspace_kind", "workspace_content", "workspace_path", "workspace_list", "workspace_count", "workspace_name",
                 "workspace_success", "workspace_error",
             ),
         ),

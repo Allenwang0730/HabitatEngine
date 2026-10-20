@@ -80,10 +80,19 @@ object DeviceTools {
         "存到工作区", "存进工作区", "保存到工作区", "写到工作区", "放进工作区",
     )
 
+    /**
+     * 读工作区笔记的门控词：目标里提到"之前记下/存过的东西"。只读，不改设备、不发出任何东西；
+     * 读到的内容进事实，供复核回答或显示到小屏。
+     */
+    val READ_NOTE_WORDS = listOf("记下的", "记过的", "存的", "存过的", "保存的", "笔记里", "工作区里", "之前记", "上次记", "查笔记", "看笔记")
+
     const val MAX_TOOL_TEXT = 2000
 
     /** 输出类工具：只把结果交给用户（小屏/工作区），不操作界面。 */
     val OUTPUT_TOOLS = setOf("show_on_screen", "save_note")
+
+    /** 失败了也不该交给界面执行器去"找"的工具（在界面上找不到工作区笔记）。 */
+    val NO_UI_FALLBACK = OUTPUT_TOOLS + "read_note"
 
     val ALL: List<DeviceTool> = listOf(
         DeviceTool("open_settings", "直接打开系统设置的某一页（不用在设置里翻找）", mapOf("page" to SETTINGS_PAGES.keys.toList())),
@@ -110,6 +119,10 @@ object DeviceTools {
         DeviceTool(
             "save_note", "把一段文字存进本机工作区（不改变设备状态）", emptyMap(),
             gate = NOTE_WORDS, textArgs = mapOf("text" to true, "name" to false),
+        ),
+        DeviceTool(
+            "read_note", "从本机工作区找一条之前记下的笔记，读出内容（query 填要找的关键词，如「取件码」；不填取最近一条）", emptyMap(),
+            gate = READ_NOTE_WORDS, textArgs = mapOf("query" to false),
         ),
     )
 
@@ -151,6 +164,12 @@ object DeviceTools {
                     args["title"]?.trim()?.takeIf { it.isNotEmpty() }?.let { put("title", it) }
                 },
                 "显示到小屏", "mini_screen_success",
+            )
+            "read_note" -> Invocation(
+                tool, args, "ACTION_WORKSPACE",
+                mapOf("action" to "search", "query" to args["query"]?.trim().orEmpty()),
+                "从工作区读笔记" + (args["query"]?.trim()?.takeIf { it.isNotEmpty() }?.let { "「$it」" } ?: ""),
+                "workspace_success", listOf("workspace_content", "workspace_name"),
             )
             "save_note" -> Invocation(
                 tool, args, "ACTION_WORKSPACE",

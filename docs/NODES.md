@@ -227,7 +227,7 @@ Base64 编码或解码（UTF-8 文本）
 
 | 参数 | 类型 | 说明 |
 |---|---|---|
-| `action` | write / append / read / list / delete | 操作类型（默认 write） |
+| `action` | write / append / read / list / delete / search | 操作类型（默认 write） |
 | `name` | string | 条目显示名（write/append 必填；read/delete 可用它或 id 定位） |
 | `id` | string | read/delete：条目 id，优先于 name |
 | `content` | string | write/append：内容，支持 ${var}；kind=json 时须为合法 JSON，kind=image 时为 base64 |
@@ -236,10 +236,11 @@ Base64 编码或解码（UTF-8 文本）
 | `tags` | string | write/append：标签，逗号分隔 |
 | `overwrite` | bool | write：同名同类时覆盖；false 则自动改名为「名字 (2)」（默认 true） |
 | `tag` | string | list：按标签筛选 |
+| `query` | string | search：找最近一条名字/标签/内容包含它的笔记（文本或 JSON）；空=最近一条 |
 | `limit` | string_or_number | list：最多返回条数（1–200）（默认 20） |
-| `output_var` | string | read 的内容 / list 的 JSON 数组存到的变量名（默认 workspace_content / workspace_list） |
+| `output_var` | string | read/search 的内容 / list 的 JSON 数组存到的变量名（默认 workspace_content / workspace_list） |
 
-输出：`workspace_id` `workspace_kind` `workspace_content` `workspace_path` `workspace_list` `workspace_count` `workspace_success` `workspace_error`
+输出：`workspace_id` `workspace_kind` `workspace_content` `workspace_path` `workspace_list` `workspace_count` `workspace_name` `workspace_success` `workspace_error`
 
 ### ACTION_SQLITE_QUERY
 

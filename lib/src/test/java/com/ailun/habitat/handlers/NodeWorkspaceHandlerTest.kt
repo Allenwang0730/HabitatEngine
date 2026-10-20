@@ -18,11 +18,12 @@ class NodeWorkspaceHandlerTest {
     private lateinit var dir: File
     private lateinit var store: WorkspaceStore
     private lateinit var handler: NodeWorkspaceHandler
+    private var clock = 1_000L
 
     @Before
     fun setUp() {
         dir = Files.createTempDirectory("wsh").toFile()
-        store = WorkspaceStore(dir)
+        store = WorkspaceStore(dir, clock = { clock })
         handler = NodeWorkspaceHandler { store }
     }
 
@@ -92,6 +93,21 @@ class NodeWorkspaceHandlerTest {
         val c = run(ctx(), "action" to "delete", "id" to e.id)
         assertEquals(true, c.getVariable("workspace_success"))
         assertNull(store.get(e.id))
+    }
+
+    @Test
+    fun searchFindsByNameTagOrContent() {
+        store.writeText("取件码通知", "菜鸟驿站 取件码 8-3-1026", "workflow:x", tags = listOf("取件码"))
+        clock += 10
+        store.writeText("会议纪要", "下午三点 周会改到四点", "agent")
+        val byTag = run(ctx(), "action" to "search", "query" to "取件码")
+        assertEquals("菜鸟驿站 取件码 8-3-1026", byTag.getVariable("workspace_content"))
+        assertEquals("取件码通知", byTag.getVariable("workspace_name"))
+        val byContent = run(ctx(), "action" to "search", "query" to "周会")
+        assertEquals("会议纪要", byContent.getVariable("workspace_name"))
+        val none = run(ctx(), "action" to "search", "query" to "不存在的东西")
+        assertEquals(false, none.getVariable("workspace_success"))
+        assertEquals("空 query 取最近一条", "会议纪要", run(ctx(), "action" to "search").getVariable("workspace_name"))
     }
 
     @Test

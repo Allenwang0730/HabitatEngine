@@ -501,8 +501,9 @@ class AgentLoop(
     ): StepOutcome {
         val args = step.args.mapValues { (_, v) -> DeviceTools.fillFacts(v, run.facts) }
         val output = step.tool in DeviceTools.OUTPUT_TOOLS
+        val noUi = step.tool in DeviceTools.NO_UI_FALLBACK
         val inv = DeviceTools.resolve(step.tool!!, args, run.goal, run.apps, run.scope)
-            ?: return if (output) StepOutcome("done", "跳过（参数不合法）") else runUiStep(run, step, index, total, budget, onStep)
+            ?: return if (noUi) StepOutcome("done", "跳过（参数不合法）") else runUiStep(run, step, index, total, budget, onStep)
         if (output) return runOutputTool(run, inv, onStep)
         val toolKey = "${inv.tool}|${inv.args}"
         if (toolKey in run.failedTools) {
@@ -530,6 +531,10 @@ class AgentLoop(
             return StepOutcome("done", inv.label)
         }
         run.failedTools += toolKey
+        if (noUi) {
+            onStep("${inv.label}没成功：${result.detail}")
+            return StepOutcome("done", result.detail)
+        }
         onStep("工具没起作用（${if (!result.ok) result.detail else "前台不是预期页面"}），改为在界面上完成这一步")
         return runUiStep(run, step, index, total, budget, onStep)
     }
@@ -802,7 +807,10 @@ class AgentLoop(
             else -> null
         }
         val ok = flag == null || ctx.variables[flag] == true
-        val values = outputs.mapNotNull { key -> ctx.variables[key]?.let { key to it.toString().take(80) } }.toMap()
+        // 笔记内容要完整交给复核/小屏；其它读数短
+        val values = outputs.mapNotNull { key ->
+            ctx.variables[key]?.let { key to it.toString().take(if (key == "workspace_content") 600 else 80) }
+        }.toMap()
         val error = ctx.variables.entries.firstOrNull { it.key.endsWith("_error") }?.value?.toString()
         return NodeResult(ok, if (ok) "ok" else (error ?: "节点返回失败"), values)
     }
