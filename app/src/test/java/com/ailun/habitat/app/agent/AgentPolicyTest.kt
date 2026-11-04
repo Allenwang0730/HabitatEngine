@@ -269,6 +269,26 @@ class AgentPolicyTest {
     }
 
     @Test
+    fun textlessIconButtonsBecomeTapTargets() {
+        // AndroidWorld Expense：右下角「+」悬浮按钮没有文字也没有 contentDescription，只有 viewId
+        val fab = ScreenElement("13", "", 981, 2213, clickable = true, editable = false, focused = false,
+            viewId = "com.arduia.expense:id/fb_main_add", bounds = ElementBounds(918, 2150, 1044, 2276))
+        // 左上角汉堡菜单：无文字、无 viewId，但小且在边上
+        val menu = ScreenElement("1", "", 62, 190, clickable = true, editable = false, focused = false,
+            bounds = ElementBounds(20, 148, 104, 232))
+        // 中间一大块无文字容器：不该当成按钮
+        val blob = ScreenElement("5", "", 540, 1200, clickable = true, editable = false, focused = false,
+            bounds = ElementBounds(0, 600, 1080, 1800))
+        val obs = listScreen().copy(elements = listOf(menu, blob, fab), visibleText = "")
+        val catalog = Catalogs.build("Add an expense", obs, emptyList())
+        assertTrue(catalog.tapTargets.keys.toString(), "13" in catalog.tapTargets)
+        assertTrue(catalog.tapTargets.getValue("13").contains("fb main add"))
+        assertTrue("1" in catalog.tapTargets)
+        assertFalse("5" in catalog.tapTargets)
+        assertTrue(Catalogs.iconLabel(fab, 1080, 2400)!!.contains("底部右"))
+    }
+
+    @Test
     fun nonClickableTextNodeIsNotATapTarget() {
         // 纯文字节点（clickable=false 且不可编辑）不该进候选，否则模型会去点一行说明文字
         val obs = listScreen().copy(

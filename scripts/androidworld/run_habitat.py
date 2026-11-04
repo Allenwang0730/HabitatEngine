@@ -40,6 +40,7 @@ DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 # --------------------------------------------------------------------------- DeepSeek forwarder
 class _Forwarder(http.server.BaseHTTPRequestHandler):
     key = ""
+    network_errors = 0  # requests that still failed after retries; reported per task
 
     def do_POST(self):  # noqa: N802 (http.server API)
         if self.path != "/chat/completions":
@@ -52,13 +53,24 @@ class _Forwarder(http.server.BaseHTTPRequestHandler):
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.key}"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                status, data = resp.status, resp.read()
-        except urllib.error.HTTPError as e:
-            status, data = e.code, e.read()
-        except Exception as e:  # network error: report as 502, the app retries/fails the step
-            status, data = 502, json.dumps({"error": str(e)}).encode()
+        # Network errors through a local proxy (TLS EOF, resets) are transient: retry them here so a flaky
+        # link does not show up as an agent failure. HTTP errors from DeepSeek itself are passed through.
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    status, data = resp.status, resp.read()
+                break
+            except urllib.error.HTTPError as e:
+                status, data = e.code, e.read()
+                if e.code not in (429, 500, 502, 503) or attempt == 3:
+                    break
+            except Exception as e:  # network error: report as 502 after the last attempt
+                status, data = 502, json.dumps({"error": str(e)}).encode()
+                if attempt == 3:
+                    break
+            time.sleep(2 * (attempt + 1))
+        if status == 502:
+            _Forwarder.network_errors += 1
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -101,7 +113,23 @@ def enable_habitat_a11y(adb: Adb) -> None:
     adb.shell("settings put secure accessibility_enabled 1")
 
 
+# AndroidWorld's own setup leaves some apps asking for storage access on first open. Remote-origin goals
+# never tap permission buttons (by design), so grant once here, as a user installing the app would.
+APP_PERMISSIONS = {
+    "net.gsantner.markor": ["MANAGE_EXTERNAL_STORAGE"],
+}
+
+
+def grant_app_permissions(adb: Adb) -> None:
+    for pkg, ops in APP_PERMISSIONS.items():
+        for op in ops:
+            adb.shell(f"appops set --uid {pkg} {op} allow", check=False)
+        for perm in ("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"):
+            adb.shell(f"pm grant {pkg} android.permission.{perm}", check=False)
+
+
 def setup_habitat(adb: Adb, apk: str | None, token: str, forwarder_port: int, provider: str) -> None:
+    grant_app_permissions(adb)
     if apk:
         adb.run("install", "-r", "-g", apk)
     adb.shell(f"appops set {PKG} SYSTEM_ALERT_WINDOW allow", check=False)
@@ -221,7 +249,9 @@ def main() -> None:
             enable_habitat_a11y(adb)  # AndroidWorld resets can drop extra services
             task.initialize_task(env)
             t0 = time.time()
+            net_before = _Forwarder.network_errors
             status = run_goal(mcp, task.goal, a.provider, a.planner == "on", a.max_steps, a.timeout)
+            status["network_errors"] = _Forwarder.network_errors - net_before
             seconds = round(time.time() - t0)
             env.interaction_cache = status.get("detail", "")  # only information-retrieval tasks read it
             try:
@@ -235,9 +265,16 @@ def main() -> None:
                 "phase": status.get("phase"), "detail": status.get("detail", "")[:500],
                 "seconds": seconds, "provider": a.provider, "planner": a.planner == "on",
                 "complexity": task.complexity, "check_error": status.get("check_error"),
+                "network_errors": status["network_errors"],
             }
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
             out.flush()
+            # step log for failure analysis; contains screen text, so keep it next to the results, not in git
+            log_dir = os.path.splitext(a.out)[0] + "_logs"
+            os.makedirs(log_dir, exist_ok=True)
+            with open(os.path.join(log_dir, f"{i:03d}_{name}.log"), "w", encoding="utf-8") as f:
+                f.write(f"goal: {task.goal}\nscore: {score}\nphase: {status.get('phase')}\ndetail: {status.get('detail', '')}\n\n")
+                f.write(status.get("log", ""))
             print(f"[{i + 1}/{len(names)}] {'PASS' if score == 1.0 else 'FAIL'} {name} ({seconds}s, {status.get('phase')}) — {task.goal}")
     print(f"\n{passed}/{len(names)} passed; results appended to {a.out}")
     env.close()

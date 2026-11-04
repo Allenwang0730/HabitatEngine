@@ -374,7 +374,11 @@ object Catalogs {
      */
     fun orderedTaps(goal: String, observation: ScreenObservation, allowGoalUnlock: Boolean = true): List<ScreenElement> {
         if (observation.packageName == SELF_PACKAGE) return emptyList()
+        val w = observation.screenWidth.takeIf { it > 0 } ?: 1080
+        val h = observation.screenHeight.takeIf { it > 0 } ?: 2400
         return observation.elements
+            // 无文字的图标按钮换成生成的名字，后面的标签、候选描述、判重都用它
+            .map { el -> if (el.text.isBlank()) iconLabel(el, w, h)?.let { el.copy(text = it) } ?: el else el }
             .filter { (it.clickable || it.selectable || it.editable) && it.text.isNotBlank() }
             // 状态栏/灵动岛（vivo 的「电话,8分钟18秒」胶囊）属于系统窗口，点了会跳去别的应用，不是页面控件
             .filter { !it.system }
@@ -384,6 +388,37 @@ object Catalogs {
             // 先按"控件可信度"分层，再在层内按屏幕从上到下（模型看屏幕的习惯顺序）
             .sortedWith(compareBy({ tierOf(it) }, { it.centerY }, { it.centerX }))
             .take(MAX_TAPS)
+    }
+
+    /**
+     * 没有文字也没有 contentDescription 的可点控件（图标按钮：「+」悬浮按钮、汉堡菜单）。
+     * 以前整个丢掉，模型在控件一览里看到「13=」去选，结果报"候选里没有"——AndroidWorld 实测 25 个任务里 4 个因此失败。
+     * 有 viewId 的用 viewId 的末段当名字（fb_main_add → 「fb main add」），再加位置；
+     * 都没有的只在屏幕边角（工具栏、底部悬浮按钮的常见位置）才放进来，避免把整块容器当按钮。
+     */
+    fun iconLabel(el: ScreenElement, width: Int = 1080, height: Int = 2400): String? {
+        if (el.text.isNotBlank() || !el.clickable || el.editable) return null
+        val name = shortViewId(el.viewId).removePrefix("id/").replace('_', ' ').trim()
+        val where = positionWord(el, width, height)
+        if (name.isNotEmpty()) return "图标按钮 $name（$where）"
+        val b = el.bounds
+        val small = b == null || ((b.right - b.left) <= width / 4 && (b.bottom - b.top) <= height / 8)
+        val edge = el.centerY < height * 0.14 || el.centerY > height * 0.80
+        return if (small && edge) "无文字图标按钮（$where）" else null
+    }
+
+    private fun positionWord(el: ScreenElement, width: Int, height: Int): String {
+        val v = when {
+            el.centerY < height / 3 -> "顶部"
+            el.centerY > height * 2 / 3 -> "底部"
+            else -> "中部"
+        }
+        val h = when {
+            el.centerX < width / 3 -> "左"
+            el.centerX > width * 2 / 3 -> "右"
+            else -> "中"
+        }
+        return "$v$h"
     }
 
     /** 0 = 真按钮/开关，1 = 列表行/容器，2 = 只有文字的节点。 */

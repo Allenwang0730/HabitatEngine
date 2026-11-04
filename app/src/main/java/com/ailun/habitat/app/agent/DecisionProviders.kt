@@ -315,7 +315,8 @@ class DeepSeekDecisionProvider(
                         // 可点但不在 TAP 候选里（试过没用/被安全闸挡住）：明说，否则模型照着一览一直选它
                         if (el.clickable && el.index !in catalog.tapTargets) append("[不可选]")
                     }
-                    "${el.index}=${el.text.take(60)}(${Catalogs.typeOf(el)})$suffix$mark"
+                    val label = el.text.ifBlank { Catalogs.iconLabel(el, observation.screenWidth, observation.screenHeight).orEmpty() }
+                    "${el.index}=${label.take(60)}(${Catalogs.typeOf(el)})$suffix$mark"
                 },
             )
             appendLine("可选操作: ${catalog.operations.keys.joinToString()}")

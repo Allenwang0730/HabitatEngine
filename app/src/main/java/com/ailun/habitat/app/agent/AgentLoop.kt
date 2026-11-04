@@ -694,6 +694,12 @@ class AgentLoop(
             run.used++
             // 执行器选的工具快捷方式失败（多半是缺权限）：本次任务不再提供它
             if (!result.ok && action.operation == "USE_TOOL") action.toolKey?.let { run.failedTools += it }
+            // 跳页类工具（open_settings / open_app）成功了但屏幕没变：已经在那一页了，再跳一次还是一样。
+            // AndroidWorld 实测：已在蓝牙页时模型反复选「直接打开蓝牙设置页」，直到被判兜圈结束。
+            if (result.ok && action.operation == "USE_TOOL" && action.tool == "ACTION_LAUNCH_APP") {
+                delay(500)
+                if (LoopPolicy.sameScreen(ScreenObserver.observe(context), observation)) action.toolKey?.let { run.failedTools += it }
+            }
             var executed = action
             if (!result.ok) {
                 onStep("${action.tool} 失败: ${result.detail}")
@@ -767,7 +773,9 @@ class AgentLoop(
         val again = ScreenObserver.observe(context)
         if (again.elements.isEmpty() || again.source != before.source) return true
         return again.elements.any {
-            it.text == text && kotlin.math.abs(it.centerX - x) <= 120 && kotlin.math.abs(it.centerY - y) <= 120
+            // 图标按钮的 matchText 是生成的名字（Catalogs.iconLabel），复查时也按同样的规则算
+            val label = it.text.ifBlank { Catalogs.iconLabel(it, again.screenWidth, again.screenHeight).orEmpty() }
+            label == text && kotlin.math.abs(it.centerX - x) <= 120 && kotlin.math.abs(it.centerY - y) <= 120
         }
     }
 

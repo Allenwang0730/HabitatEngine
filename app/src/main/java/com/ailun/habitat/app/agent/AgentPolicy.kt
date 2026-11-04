@@ -174,7 +174,7 @@ object MobilePriors {
     /** 元素摘要，供 prompt 与 state 复用。 */
     fun elementBrief(el: ScreenElement): Map<String, Any?> = buildMap {
         put("index", el.index)
-        put("text", el.text.take(80))
+        put("text", el.text.ifBlank { Catalogs.iconLabel(el).orEmpty() }.take(80))
         put("type", Catalogs.typeOf(el))
         put("clickable", el.clickable)
         put("editable", el.editable)
