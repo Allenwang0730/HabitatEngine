@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.11.0] - 2026-10-17
+## [1.11.0] - 2026-11-04
 
 App `versionName` 1.11.0（`versionCode` 8）；引擎 AAR `com.ailun:habitat-engine:1.10.0`（新增 `spec` 节点规格、`ScheduleMath`；`ACTION_WORKSPACE` 新增 `search`）。
 
