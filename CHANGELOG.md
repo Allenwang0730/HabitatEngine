@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- MCP 内置工具（screen、debug_screen、ping、mini_screen_status、agent_start/stop/status）重写说明：返回什么、只读还是会操作、和相近工具的区别；`agent_start`、`debug_screen` 的参数写进 inputSchema；加上 MCP 工具注解（readOnlyHint 等）。
+
 ## [1.11.0] - 2026-11-04
 
 App `versionName` 1.11.0（`versionCode` 8）；引擎 AAR `com.ailun:habitat-engine:1.10.0`（新增 `spec` 节点规格、`ScheduleMath`；`ACTION_WORKSPACE` 新增 `search`）。
