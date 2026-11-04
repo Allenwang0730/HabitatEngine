@@ -98,6 +98,7 @@ object SystemNodes {
         NodeHandlerFactory.ACTION_SHARE to { _, _ -> NodeShareHandler() },
         NodeHandlerFactory.ACTION_SEND_BROADCAST to { _, _ -> NodeSendBroadcastHandler() },
         NodeHandlerFactory.ACTION_MEDIA_CONTROL to { _, s -> NodeMediaControlHandler(s) },
+        NodeHandlerFactory.ACTION_OPEN_URL to { _, _ -> NodeOpenUrlHandler() },
     )
 }
 

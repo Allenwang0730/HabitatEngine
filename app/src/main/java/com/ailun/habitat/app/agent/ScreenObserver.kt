@@ -114,7 +114,7 @@ object ScreenObserver {
      * 整块屏幕的像素尺寸。无障碍坐标和截图都是整屏坐标；displayMetrics 在部分机型上
      * 不含导航栏，会让 OCR 坐标换算和滑动位置偏移。
      */
-    private fun screenSize(context: Context): Pair<Int, Int> {
+    internal fun screenSize(context: Context): Pair<Int, Int> {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val wm = context.getSystemService(WindowManager::class.java)
             val bounds = wm?.maximumWindowMetrics?.bounds

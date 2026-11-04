@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- **`ACTION_OCR`**：截当前屏幕，本机 ML Kit 离线识字，输出文字（按阅读顺序）和每段的屏幕坐标（`ocr_blocks`，可直接交给 `ACTION_CLICK`）。给无障碍树读不到字的界面用：图片里的字、游戏、Flutter/Unity。和 Agent 的 OCR 兜底共用截图与识别代码。
+- **`ACTION_OPEN_URL`**：用浏览器打开网址，只认 http/https，拒绝 `javascript:` / `file:` / `intent:` 和带用户名密码的网址。
+- Agent 设备工具 `open_url`：只有用户目标原文里写了网址才可用，打开的网址必须就是目标里那个，规划器不能自己挑网站。
+
 ### Changed
 - MCP 内置工具（screen、debug_screen、ping、mini_screen_status、agent_start/stop/status）重写说明：返回什么、只读还是会操作、和相近工具的区别；`agent_start`、`debug_screen` 的参数写进 inputSchema；加上 MCP 工具注解（readOnlyHint 等）。
 

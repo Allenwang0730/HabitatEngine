@@ -21,6 +21,7 @@ class NodeSpecTest {
         NodeHandlerFactory.ACTION_SEND_NOTIFICATION,
         NodeHandlerFactory.ACTION_DYNAMIC_ISLAND,
         NodeHandlerFactory.ACTION_MINI_SCREEN,
+        NodeHandlerFactory.ACTION_OCR,
     )
 
     @Test

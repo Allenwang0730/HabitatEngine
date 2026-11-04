@@ -165,5 +165,15 @@ internal object SystemSpecs {
             outputs = listOf("media_success", "media_error"),
             requires = "需 Shizuku 或 root",
         ),
+        NodeSpec(
+            F.ACTION_OPEN_URL, "用系统默认浏览器（或认领该链接的 App）打开一个网址",
+            params = listOf(
+                ParamSpec("url", ParamType.STRING, "要打开的网址，支持 \${var}；只接受 http / https，不写协议按 https 补全", required = true),
+                ParamSpec("package", ParamType.STRING, "可选：指定用哪个 App 打开，如 com.android.chrome；不填由系统选择"),
+            ),
+            outputs = listOf("open_url_success", "open_url", "open_url_error"),
+            notes = "拒绝 javascript: / file: / content: / intent: 等协议和带用户名密码的网址。只负责打开，不等页面加载完；" +
+                "页面里的点击、输入用 ACTION_CLICK / ACTION_INPUT_TEXT（浏览器页面的无障碍树通常可用）。",
+        ),
     )
 }

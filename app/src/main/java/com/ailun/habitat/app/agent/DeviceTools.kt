@@ -124,6 +124,10 @@ object DeviceTools {
             "read_note", "从本机工作区找一条之前记下的笔记，读出内容（query 填要找的关键词，如「取件码」；不填取最近一条）", emptyMap(),
             gate = READ_NOTE_WORDS, textArgs = mapOf("query" to false),
         ),
+        DeviceTool(
+            "open_url", "用浏览器打开目标里写的网址（url 必须原样出现在目标里；之后页面里的操作照常在界面上做）", emptyMap(),
+            textArgs = mapOf("url" to true),
+        ),
     )
 
     private val BY_ID = ALL.associateBy { it.id }
@@ -135,9 +139,22 @@ object DeviceTools {
     fun available(goal: String, scope: ToolScope = ToolScope()): List<DeviceTool> {
         val folded = goal.lowercase()
         return ALL.filter { tool ->
-            (tool.gate.isEmpty() || tool.gate.any { folded.contains(it) }) && (tool.id != "call" || scope.callee != null)
+            (tool.gate.isEmpty() || tool.gate.any { folded.contains(it) }) &&
+                (tool.id != "call" || scope.callee != null) &&
+                (tool.id != "open_url" || urlsIn(goal).isNotEmpty())
         }
     }
+
+    /** 目标原文里写出的网址（带协议的，或 www. / 常见顶级域名结尾的裸域名），规范化后返回。 */
+    fun urlsIn(goal: String): List<String> =
+        URL_IN_TEXT.findAll(goal).mapNotNull { m ->
+            com.ailun.habitat.handlers.NodeOpenUrlHandler.normalize(m.value.trimEnd('.', ',', '。', '，', ')', '）'))
+        }.distinct().toList()
+
+    // 只认 ASCII 网址字符：中文紧跟在网址后面（「打开 example.com看看」）时在汉字处截断
+    private val URL_IN_TEXT = Regex(
+        """(?i)\bhttps?://[A-Za-z0-9\-._~:/?#\[\]@!$&*+;=%]+|\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|cn|net|org|io|dev|app|edu|gov|co|me|info|top|xyz)\b(?::\d+)?(?:/[A-Za-z0-9\-._~:/?#\[\]@!$&*+;=%]*)?""",
+    )
 
     /**
      * 把规划器/执行器给的 (tool, args) 校验成可执行调用。任何一项不合法返回 null：
@@ -228,6 +245,12 @@ object DeviceTools {
                     tool, args, "ACTION_VOLUME", mapOf("action" to "set", "stream" to stream, "value" to value),
                     "${name}音量设为${levelName(level)}", "volume_success", listOf("volume_current", "volume_max"),
                 )
+            }
+            "open_url" -> {
+                // 规划器给的网址必须规范化后等于目标里写出的某个网址：不能自己挑网站
+                val url = com.ailun.habitat.handlers.NodeOpenUrlHandler.normalize(args.getValue("url")) ?: return null
+                if (url !in urlsIn(goal)) return null
+                Invocation(tool, args, "ACTION_OPEN_URL", mapOf("url" to url), "用浏览器打开 $url", "open_url_success")
             }
             "read_battery" -> Invocation(
                 tool, args, "ACTION_GET_BATTERY", emptyMap(), "读取电量", "battery_success",

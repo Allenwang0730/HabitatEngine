@@ -18,7 +18,7 @@
 **能做什么**
 
 - **一句话让手机自己做**——"打开设置进入蓝牙""亮度调到最高""现在电量多少"。Agent 先规划，能用设备工具就直接用，不能就在界面上点，最后按屏幕证据复核。真机评测：有规划时 Jev、DeepSeek 两种执行器都是 **28/28**（2026-10-09，无规划 13–18/28）——[方法与原始数据](docs/EVAL.md)。
-- **手机上的 MCP 服务**——Claude Code、Cursor 经 Streamable HTTP（`http://127.0.0.1:8931/mcp`）直接接入，Claude Desktop 用自带的 stdio 桥：读屏、调用全部 88 个节点（每个都带参数定义）、启动 Agent 任务；令牌鉴权，高危节点默认关闭——[接入方法](docs/MCP.md)。
+- **手机上的 MCP 服务**——Claude Code、Cursor 经 Streamable HTTP（`http://127.0.0.1:8931/mcp`）直接接入，Claude Desktop 用自带的 stdio 桥：读屏、调用全部 90 个节点（每个都带参数定义）、启动 Agent 任务；令牌鉴权，高危节点默认关闭——[接入方法](docs/MCP.md)。
 - **可嵌入的引擎**——把 `:lib` 引入你自己的 App（JitPack），运行 LLM 生成的 JSON 工作流：触发器、分支、循环、变量、Shell、HTTP、传感器、通知。
 
 ## 两分钟上手
@@ -90,9 +90,9 @@ HabitatExecutionService.start(
 
 ---
 
-## 节点类型速览 (88)
+## 节点类型速览 (90)
 
-完整参数见 [docs/NODES.md](docs/NODES.md)（由节点规格生成）。引擎共有 88 种节点，分多类。常用/核心节点如下（与 `README.md` 英文版为同一清单，`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源）：
+完整参数见 [docs/NODES.md](docs/NODES.md)（由节点规格生成）。引擎共有 90 种节点，分多类。常用/核心节点如下（与 `README.md` 英文版为同一清单，`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源）：
 
 | 类型 | 参数 | 用途 | 前置条件 |
 |------|------|------|----------|
@@ -127,6 +127,8 @@ HabitatExecutionService.start(
 | ACTION_SEND_NOTIFICATION | title, message, channel_id | 发通知 | |
 | ACTION_SWIPE | x1,y1,x2,y2,duration_ms | 滑动 | 需无障碍 |
 | ACTION_MEDIA_CONTROL | cmd | 媒体控制 | |
+| ACTION_OPEN_URL | url, package | 用浏览器打开网址（只认 http/https） | |
+| ACTION_OCR | contains, output_var | 截屏离线识字（文字 + 位置） | 无障碍，Android 11+ |
 
 完整分类见各 `NodeModules`；`NodeKnowledge` 是 AI 生成提示词 + 节点参考的单一数据源。
 
@@ -406,7 +408,7 @@ Habitat/                          # 根项目
 ├── lib/                          # :lib — 引擎（零 Android UI 依赖）
 │   └── com/ailun/habitat/
 │       ├── api/                  # IAccessibilityProvider, IShellExecutor
-│       ├── handlers/             # 88 种节点的 INodeHandler 实现
+│       ├── handlers/             # 90 种节点的 INodeHandler 实现
 │       ├── HabitatExecutor.kt    # 协程式执行循环
 │       ├── HabitatJson.kt        # JSON 解析 + 示例工作流
 │       ├── WorkflowGraph.kt      # 图模型 (start_node_id + nodes)
@@ -509,4 +511,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 88 节点类型 · AI 工作流生成（LLM-friendly）· MCP Agent · `habitat-server` 配套后端
+**Habitat** · 90 节点类型 · AI 工作流生成（LLM-friendly）· MCP Agent · `habitat-server` 配套后端
