@@ -72,6 +72,21 @@ class OutputToolsTest {
     }
 
     @Test
+    fun readNoteGatedAndSearchesWorkspace() {
+        val goal = "把昨天记下的取件码显示在小屏上"
+        val inv = DeviceTools.resolve("read_note", mapOf("query" to "取件码"), goal, apps)!!
+        assertEquals("ACTION_WORKSPACE", inv.node)
+        assertEquals("search", inv.params["action"])
+        assertEquals("取件码", inv.params["query"])
+        assertTrue("workspace_content" in inv.outputs)
+        assertNotNull("query 可以不填", DeviceTools.resolve("read_note", emptyMap(), goal, apps))
+        assertNull("目标没提到之前记的东西", DeviceTools.resolve("read_note", emptyMap(), "现在电量多少", apps))
+        // 同一个目标里 show_on_screen 也放行：读出来 → 显示
+        assertNotNull(DeviceTools.resolve("show_on_screen", mapOf("text" to "{workspace_content}"), goal, apps))
+        assertTrue("read_note" in DeviceTools.NO_UI_FALLBACK)
+    }
+
+    @Test
     fun plannerPromptDescribesFreeText() {
         val text = DeviceTools.describeFor("查电量并显示在小屏上")
         assertTrue(text.contains("show_on_screen"))

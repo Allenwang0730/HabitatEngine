@@ -159,7 +159,7 @@ object WorkflowRepository {
         }
     }
 
-    private fun defaultWorkflows(): List<HabitatWorkflow> = listOf(
+    internal fun defaultWorkflows(): List<HabitatWorkflow> = listOf(
         // ──────────────────────────────────────────
         //  1. 快速入门
         // ──────────────────────────────────────────
@@ -192,7 +192,7 @@ object WorkflowRepository {
             name = "屏幕感知",
             description = "读取当前屏幕文字 → 匹配关键词 → 条件分支反馈（需无障碍服务）",
             jsonContent = """
-{"start_node_id":"r1","nodes":{"r1":{"id":"r1","type":"ACTION_READ_SCREEN","params":{"keyword":"设置","context_lines":3},"next":"r2"},"r2":{"id":"r2","type":"CONDITION_SWITCH","params":{"expression":"screen_data == true"},"branches":{"true":"r3","false":"r4"}},"r3":{"id":"r3","type":"ACTION_TOAST","params":{"message":"✅ 找到关键词「设置」"},"next":null},"r4":{"id":"r4","type":"ACTION_TOAST","params":{"message":"❌ 未找到关键词「设置」"},"next":null}}}
+{"start_node_id":"r1","nodes":{"r1":{"id":"r1","type":"ACTION_READ_SCREEN","params":{"keyword":"设置"},"next":"r2"},"r2":{"id":"r2","type":"CONDITION_SWITCH","params":{"expression":"screen_data == true"},"branches":{"true":"r3","false":"r4"}},"r3":{"id":"r3","type":"ACTION_TOAST","params":{"message":"✅ 找到关键词「设置」"},"next":null},"r4":{"id":"r4","type":"ACTION_TOAST","params":{"message":"❌ 未找到关键词「设置」"},"next":null}}}
 """.trimIndent(),
         ),
 
@@ -324,7 +324,7 @@ object WorkflowRepository {
             name = "工具集演示",
             description = "RANDOM → BASE64 → SEND_NOTIFICATION → SHARE → TTS 语音播报",
             jsonContent = """
-{"start_node_id":"u1","nodes":{"u1":{"id":"u1","type":"ACTION_RANDOM","params":{"min":1000,"max":9999,"output_var":"code"},"next":"u2"},"u2":{"id":"u2","type":"ACTION_BASE64","params":{"action":"encode","input":"${'$'}{code}","output_var":"encoded"},"next":"u3"},"u3":{"id":"u3","type":"ACTION_LOG","params":{"message":"随机码: ${'$'}{code} → Base64: ${'$'}{encoded}"},"next":"u4"},"u4":{"id":"u4","type":"ACTION_SEND_NOTIFICATION","params":{"title":"Habitat 工具测试","message":"随机码: ${'$'}{code}"},"next":"u5"},"u5":{"id":"u5","type":"ACTION_TOAST","params":{"message":"随机码 ${'$'}{code} 已发送通知"},"next":"u6"},"u6":{"id":"u6","type":"ACTION_TEXT_TO_SPEECH","params":{"text":"随机码是 ${'$'}{code}","language":"zh","speed":1.0},"next":null}}}
+{"start_node_id":"u1","nodes":{"u1":{"id":"u1","type":"ACTION_RANDOM","params":{"min":1000,"max":9999,"output_var":"code"},"next":"u2"},"u2":{"id":"u2","type":"ACTION_BASE64","params":{"action":"encode","data":"${'$'}{code}","output_var":"encoded"},"next":"u3"},"u3":{"id":"u3","type":"ACTION_LOG","params":{"message":"随机码: ${'$'}{code} → Base64: ${'$'}{encoded}"},"next":"u4"},"u4":{"id":"u4","type":"ACTION_SEND_NOTIFICATION","params":{"title":"Habitat 工具测试","message":"随机码: ${'$'}{code}"},"next":"u5"},"u5":{"id":"u5","type":"ACTION_TOAST","params":{"message":"随机码 ${'$'}{code} 已发送通知"},"next":"u6"},"u6":{"id":"u6","type":"ACTION_TEXT_TO_SPEECH","params":{"text":"随机码是 ${'$'}{code}","language":"zh","speed":1.0},"next":null}}}
 """.trimIndent(),
         ),
     )

@@ -18,7 +18,8 @@ import java.io.File
  * [ACTION_WORKSPACE]：本地工作区读写（结果、笔记、图片），在 App 的「工作区」页查看。
  *
  * params：
- * - `action`：write（新建，同名同类则覆盖）/ append（文本追加）/ read / list / delete
+ * - `action`：write（新建，同名同类则覆盖）/ append（文本追加）/ read / list / delete /
+ *   search（找最近一条名字/标签/内容包含 `query` 的笔记，读出内容；query 为空取最近一条）
  * - `name`：显示名（write/append 必填；read/delete 也可用 `id`）
  * - `content`：文字或 JSON（支持 `${var}`）；kind=image 时为 base64
  * - `kind`：text（默认）/ json / image
@@ -118,9 +119,27 @@ class NodeWorkspaceHandler(
                 store.delete(entry.id)
                 ctx.putVariable("workspace_id", entry.id)
             }
-            else -> return "未知 action: $action（write/append/read/list/delete）"
+            "search" -> {
+                // 找最近一条名字/标签/内容包含 query 的笔记（文本或 JSON）；query 为空取最近一条
+                val query = paramString(node, ctx, "query")?.trim().orEmpty()
+                val entry = search(store, query) ?: return if (query.isEmpty()) "工作区里没有笔记" else "没有找到包含「$query」的笔记"
+                ctx.putVariable("workspace_id", entry.id)
+                ctx.putVariable("workspace_name", entry.name)
+                ctx.putVariable("workspace_kind", entry.kind.name.lowercase())
+                ctx.putVariable(outputVar(node, ctx, "workspace_content"), store.readText(entry.id) ?: return "条目文件丢失")
+            }
+            else -> return "未知 action: $action（write/append/read/list/delete/search）"
         }
         return null
+    }
+
+    /** 名字/标签命中优先，其次内容命中；都按置顶、最近更新排。只看最近 [SEARCH_SCAN] 条的内容。 */
+    private fun search(store: WorkspaceStore, query: String): WorkspaceStore.Entry? {
+        val notes = store.list().filter { it.kind == WorkspaceStore.Kind.TEXT || it.kind == WorkspaceStore.Kind.JSON }
+        if (query.isEmpty()) return notes.firstOrNull()
+        val q = query.lowercase()
+        notes.firstOrNull { e -> e.name.lowercase().contains(q) || e.tags.any { it.lowercase().contains(q) } }?.let { return it }
+        return notes.take(SEARCH_SCAN).firstOrNull { e -> store.readText(e.id)?.lowercase()?.contains(q) == true }
     }
 
     private fun locate(node: WorkflowNode, ctx: WorkflowContext, store: WorkspaceStore, name: String): WorkspaceStore.Entry? {
@@ -154,6 +173,9 @@ class NodeWorkspaceHandler(
     }
 
     companion object {
+        /** search 按内容匹配时最多读最近多少条。 */
+        private const val SEARCH_SCAN = 50
+
         /** 看文件头判断图片类型；不是图片返回 null。 */
         fun sniffImage(bytes: ByteArray): String? {
             fun at(i: Int) = if (i < bytes.size) bytes[i].toInt() and 0xFF else -1

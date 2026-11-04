@@ -222,11 +222,19 @@ class AgentLoop(
 ) {
     @Volatile var stopRequested: Boolean = false
 
+    /** 计划与步骤进度（Agent 页的实时清单）。 */
+    @Volatile var planListener: PlanListener? = null
+
     /** 本轮任务的标识：小屏/工作区据此区分"同一次运行"。 */
     val runId: String = "agent-" + java.util.UUID.randomUUID().toString().take(8)
 
     /** 本轮已经成功交给用户的输出工具（show_on_screen / save_note），结束时不再重复交付。 */
     private val delivered = mutableSetOf<String>()
+
+    /** 本轮成功执行、且有效果的动作（按顺序），用于「存为工作流」（[RunReplay]）。 */
+    private val recorded = java.util.Collections.synchronizedList(mutableListOf<RecordedAction>())
+
+    val recordedActions: List<RecordedAction> get() = synchronized(recorded) { recorded.toList() }
 
     private val factory by lazy {
         NodeHandlerFactory(AppAccessibilityProvider, ShizukuShellExecutor(context))
@@ -314,6 +322,7 @@ class AgentLoop(
         while (true) {
             var index = 0
             var replanned = false
+            planListener?.onPlan(plan.steps)
             while (index < plan.steps.size) {
                 if (stopRequested) return LoopResult("stopped", run.used, "已停止")
                 finished()?.let { return it }
@@ -321,6 +330,7 @@ class AgentLoop(
                 val step = plan.steps[index]
                 run.seq++
                 if (plan.steps.size > 1) onStep("步骤 ${index + 1}/${plan.steps.size}：${step.instruction}（完成条件：${step.doneWhen}）")
+                planListener?.onStepStatus(index, PlanStatus.RUNNING)
                 val outcome = if (step.tool != null) {
                     runToolStep(run, step, index, plan.steps.size, budgetFor(run, plan), onStep)
                 } else {
@@ -329,11 +339,13 @@ class AgentLoop(
                 when (outcome.status) {
                     "done" -> {
                         run.completed += step.instruction
+                        planListener?.onStepStatus(index, PlanStatus.DONE)
                         index++
                     }
                     "stopped" -> return LoopResult("stopped", run.used, outcome.detail)
                     "fatal" -> return LoopResult("error", run.used, outcome.detail)
                     else -> {
+                        planListener?.onStepStatus(index, PlanStatus.FAILED)
                         // 卡住时先看终点：远程任务卡在被挡住的发送按钮上，其实消息已经填好了
                         finished()?.let { return it }
                         if (planner == null || run.replans >= MAX_REPLANS || run.used >= maxSteps) {
@@ -393,6 +405,7 @@ class AgentLoop(
     private suspend fun runOutputTool(run: Run, inv: DeviceTools.Invocation, onStep: (String) -> Unit): StepOutcome {
         onStep("工具：${inv.label}")
         val result = runNode(inv.node, inv.params, inv.successFlag, inv.outputs)
+        run.used++
         if (!result.ok) {
             onStep("${inv.label}没成功：${result.detail}")
             return StepOutcome("done", result.detail)
@@ -488,8 +501,9 @@ class AgentLoop(
     ): StepOutcome {
         val args = step.args.mapValues { (_, v) -> DeviceTools.fillFacts(v, run.facts) }
         val output = step.tool in DeviceTools.OUTPUT_TOOLS
+        val noUi = step.tool in DeviceTools.NO_UI_FALLBACK
         val inv = DeviceTools.resolve(step.tool!!, args, run.goal, run.apps, run.scope)
-            ?: return if (output) StepOutcome("done", "跳过（参数不合法）") else runUiStep(run, step, index, total, budget, onStep)
+            ?: return if (noUi) StepOutcome("done", "跳过（参数不合法）") else runUiStep(run, step, index, total, budget, onStep)
         if (output) return runOutputTool(run, inv, onStep)
         val toolKey = "${inv.tool}|${inv.args}"
         if (toolKey in run.failedTools) {
@@ -512,10 +526,15 @@ class AgentLoop(
         run.nav.record(after, AppAccessibilityProvider.foregroundActivity, "USE_TOOL", inv.label, changed, result.ok)
         run.observation = after
         if (result.ok && pkgOk) {
+            recorded += RecordedAction(inv.node, inv.params, inv.label, successFlag = inv.successFlag)
             if (result.outputs.isNotEmpty()) onStep("读到：" + result.outputs.entries.joinToString("，") { "${it.key}=${it.value}" })
             return StepOutcome("done", inv.label)
         }
         run.failedTools += toolKey
+        if (noUi) {
+            onStep("${inv.label}没成功：${result.detail}")
+            return StepOutcome("done", result.detail)
+        }
         onStep("工具没起作用（${if (!result.ok) result.detail else "前台不是预期页面"}），改为在界面上完成这一步")
         return runUiStep(run, step, index, total, budget, onStep)
     }
@@ -730,6 +749,11 @@ class AgentLoop(
         val label = action.matchText?.takeIf { it.isNotBlank() } ?: action.label
         run.nav.record(after, AppAccessibilityProvider.foregroundActivity, action.operation, label, changed, ok)
         run.observation = after
+        // 输入不一定改变"屏幕签名"，也算有效果
+        val tool = action.tool
+        if (ok && tool != null && (changed || tool == "ACTION_INPUT_TEXT")) {
+            recorded += RecordedAction(tool, action.params, action.label, action.matchText, action.successFlag)
+        }
     }
 
     /**
@@ -783,7 +807,10 @@ class AgentLoop(
             else -> null
         }
         val ok = flag == null || ctx.variables[flag] == true
-        val values = outputs.mapNotNull { key -> ctx.variables[key]?.let { key to it.toString().take(80) } }.toMap()
+        // 笔记内容要完整交给复核/小屏；其它读数短
+        val values = outputs.mapNotNull { key ->
+            ctx.variables[key]?.let { key to it.toString().take(if (key == "workspace_content") 600 else 80) }
+        }.toMap()
         val error = ctx.variables.entries.firstOrNull { it.key.endsWith("_error") }?.value?.toString()
         return NodeResult(ok, if (ok) "ok" else (error ?: "节点返回失败"), values)
     }

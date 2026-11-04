@@ -1,64 +1,12 @@
 package com.ailun.habitat.app.ai
 
 /**
- * 节点百科 + 安卓操作指南（单一数据源）。
- * WorkflowAIGenerator 从本对象动态生成 LLM 系统提示词 —— 加新节点只需在此加一个条目，提示词自动包含。
- *
- * NodeDoc:
- * - type: 节点类型（与 NodeHandlerFactory 常量一致）
- * - params: 参数说明（供 LLM 填 params）
- * - usage: 用途/语义
- * - before: 前置条件（如"需无障碍"/"需权限"），空表示无
+ * 生成工作流用的安卓操作指南：触发器写法、常见包名、优先规则、示例。
+ * 节点和参数来自 [com.ailun.habitat.spec.NodeSpecs]（加新节点改规格即可，提示词自动包含）。
  */
 object NodeKnowledge {
 
-    data class NodeDoc(val type: String, val params: String, val usage: String, val before: String = "")
-
-    /** 常用节点百科（LLM 生成工作流时可选用的节点）。 */
-    val nodes: List<NodeDoc> = listOf(
-        NodeDoc("ACTION_SET_VARIABLE", "name, value, type=string/int/bool", "设变量"),
-        NodeDoc("ACTION_LOG", "message（支持 \${var}）", "记录日志"),
-        NodeDoc("ACTION_DELAY", "millis", "延时"),
-        NodeDoc("CONDITION_SWITCH", "expression, branches={\"true\":id,\"false\":id}", "条件分支"),
-        NodeDoc("ACTION_TOAST", "message", "弹提示"),
-        NodeDoc("ACTION_GET_TIME", "format, output_var", "取时间"),
-        NodeDoc("ACTION_MATH", "operation=add/subtract/multiply/divide, a, b, output_var", "数学"),
-        NodeDoc("ACTION_TEXT_OPERATION", "action=uppercase/lowercase/trim/replace, input, output_var", "文本处理"),
-        NodeDoc("ACTION_CLIPBOARD", "action=get/set, text, output_var", "剪贴板"),
-        NodeDoc("ACTION_PARSE_JSON", "json, path(如 data.items[0]), output_var", "解析 JSON"),
-        NodeDoc("ACTION_HTTP_REQUEST", "url, method=GET/POST, output_var, timeout", "HTTP 请求", "需网络；对不稳定第三方设 timeout + on_error=skip"),
-        NodeDoc("ACTION_LAUNCH_APP", "package_name", "打开应用", ""),
-        NodeDoc("ACTION_CLICK", "target（\"x,y\"坐标 或 界面文字）, region=top/bottom/left/right/center 或归一化\"x1,y1,x2,y2\", occurrence（第 N 个,0 起）", "点击", "需无障碍"),
-        NodeDoc("ACTION_INPUT_TEXT", "text, mode=a11y", "输入文字", "需无障碍"),
-        NodeDoc("ACTION_READ_SCREEN", "keyword, output_var", "读屏幕(变量 screen_data=是否找到)", "需无障碍"),
-        NodeDoc("ACTION_FIND_ELEMENT", "selector, search_mode=text, region(可选), timeout_ms, output_var", "找元素(变量 element_found)", "需无障碍"),
-        NodeDoc("ACTION_GLOBAL_KEY", "key=back/home/recents", "全局按键", "需无障碍"),
-        NodeDoc("ACTION_SHELL", "command, mode=auto", "shell 命令", "需 Shizuku/root，无则 Runtime.exec 兜底；command 里的 \${var} 会自动单引号转义，不要再给它加引号"),
-        NodeDoc("ACTION_GET_BATTERY", "output_var", "电量(battery_level)"),
-        NodeDoc("ACTION_NETWORK_STATUS", "action=all", "网络(network_type)"),
-        NodeDoc("ACTION_GET_DEVICE_INFO", "", "设备信息"),
-        NodeDoc("ACTION_SCREENSHOT", "format=base64, output_var", "截图", "需截图权限"),
-        NodeDoc("ACTION_VIBRATE", "duration", "振动"),
-        NodeDoc("ACTION_TEXT_TO_SPEECH", "text, language", "语音"),
-        NodeDoc("ACTION_FILE_OPERATION", "action=read/write/exists, path, content, output_var", "文件"),
-        NodeDoc("ACTION_AI_CHAT", "prompt, output_var", "本地 AI 对话"),
-        NodeDoc("ACTION_CALL_DIRECT", "phone_number, sim", "直接拨号（最优先，不用 UI 模拟）", "需 CALL_PHONE"),
-        NodeDoc("ACTION_CALL_PHONE", "phone_number", "拨打（走 Intent）", "需 CALL_PHONE"),
-        NodeDoc("ACTION_SEND_NOTIFICATION", "title, message, channel_id", "发通知"),
-        NodeDoc(
-            "ACTION_MINI_SCREEN",
-            "action=show/append/progress/hide/clear, title, text（支持 \${var}）, image（图片路径或 base64，可选）, progress（0-100）, position=top/center/bottom, duration_ms（0=一直显示）",
-            "悬浮小屏：任务进行中给用户看实时内容（AI 回复、进度、截图）。show 替换内容，append 追加一段",
-            "需无障碍或悬浮窗权限",
-        ),
-        NodeDoc(
-            "ACTION_WORKSPACE",
-            "action=write/append/read/list/delete, name, content（支持 \${var}）, kind=text/json/image, image_path（图片）, tags（逗号分隔）, output_var",
-            "本机工作区：把结果/笔记/图片存下来，用户在「工作区」页查看；read 读回内容，list 列出条目（JSON）",
-        ),
-        NodeDoc("ACTION_SWIPE", "x1,y1,x2,y2,duration_ms", "滑动", "需无障碍"),
-        NodeDoc("ACTION_MEDIA_CONTROL", "cmd=play/pause/next", "媒体控制"),
-    )
+    // 节点清单与参数不再写在这里：来自节点规格 com.ailun.habitat.spec.NodeSpecs（MCP、lint、docs/NODES.md 同一来源）。
 
     data class TriggerDoc(val example: String, val variables: String)
 
@@ -66,7 +14,8 @@ object NodeKnowledge {
     val triggers: List<TriggerDoc> = listOf(
         TriggerDoc("\"trigger\":{\"type\":\"notification\"}（可加 \"package\":\"com.xx\" 只听某个应用）", "\${trigger_title} \${trigger_text} \${trigger_big_text} \${trigger_package}"),
         TriggerDoc("\"trigger\":{\"type\":\"sms\"}", "\${trigger_sender} \${trigger_body}"),
-        TriggerDoc("\"trigger\":{\"type\":\"timer\",\"interval_ms\":3600000,\"repeat\":true}", "无"),
+        TriggerDoc("每天/每周几的固定时刻：\"trigger\":{\"type\":\"timer\",\"at\":\"08:00\",\"days\":\"weekdays\"}（days 可省=每天；weekdays/weekends 或 \"1,3,5\"，1=周一）", "无"),
+        TriggerDoc("按间隔重复：\"trigger\":{\"type\":\"timer\",\"interval_ms\":3600000,\"repeat\":true}（「每隔 N 分钟/小时」才用这个；「每天几点」用 at）", "无"),
         TriggerDoc("\"trigger\":{\"type\":\"clipboard\"}", "\${trigger_text}"),
     )
 
@@ -92,6 +41,7 @@ object NodeKnowledge {
 
     /** few-shot 示例（JSON 字符串）。 */
     val examples: List<String> = listOf(
+        """需求"每天早上 8 点提醒我喝水并震动一下"→{"name":"喝水提醒","workflow":{"trigger":{"type":"timer","at":"08:00"},"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_SEND_NOTIFICATION","params":{"title":"喝水提醒","message":"该喝水了"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_VIBRATE","params":{"duration":500}}}}}""",
         """需求"收到含验证码的短信时，在小屏上显示 20 秒"→{"name":"验证码提醒","workflow":{"trigger":{"type":"sms"},"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"CONDITION_SWITCH","params":{"expression":"trigger_body contains 验证码"},"branches":{"true":"s2"}},"s2":{"id":"s2","type":"ACTION_MINI_SCREEN","params":{"title":"验证码","text":"${'$'}{trigger_body}","duration_ms":20000}}}}}""",
         """需求"让 AI 总结剪贴板内容并显示在小屏上，同时存到工作区"→{"name":"剪贴板摘要","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_CLIPBOARD","params":{"action":"get","output_var":"clip"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_AI_CHAT","params":{"prompt":"用三句话总结：${'$'}{clip}","output_var":"summary"},"next":"s3"},"s3":{"id":"s3","type":"ACTION_MINI_SCREEN","params":{"title":"剪贴板摘要","text":"${'$'}{summary}"},"next":"s4"},"s4":{"id":"s4","type":"ACTION_WORKSPACE","params":{"action":"write","name":"剪贴板摘要","content":"${'$'}{summary}","tags":"摘要"}}}}}""",
         """需求"启动应用并显示提示"→{"name":"启动设置","description":"打开系统设置后弹提示","workflow":{"start_node_id":"s1","nodes":{"s1":{"id":"s1","type":"ACTION_LAUNCH_APP","params":{"package_name":"com.android.settings"},"next":"s2"},"s2":{"id":"s2","type":"ACTION_DELAY","params":{"millis":1500},"next":"s3"},"s3":{"id":"s3","type":"ACTION_TOAST","params":{"message":"已打开设置"}}}}}""",

@@ -22,6 +22,8 @@ data class AgentLoopState(
     val phase: String = "idle",
     val detail: String = "",
     val lines: List<String> = emptyList(),
+    /** 实时计划清单（没有计划的任务为空）。 */
+    val plan: List<PlanItem> = emptyList(),
 )
 
 /** 自主模式的开关、密钥和步骤日志。密钥进加密存储，不进日志。 */
@@ -181,6 +183,7 @@ object AgentLoopController {
             runLog += first
             runInfo = RunInfo(context.applicationContext, text, providerName, planner != null, origin == ORIGIN_REMOTE, System.currentTimeMillis())
             loop = agent
+            agent.planListener = planListener
             // LAZY：先登记 job 再启动，finally 里按 job 身份清理，旧循环的收尾不会覆盖新一轮
             val started = scope.launch(start = CoroutineStart.LAZY) {
                 var status = "error"
@@ -221,16 +224,39 @@ object AgentLoopController {
         val record = synchronized(this) {
             if (owner == null || owner !== job) return
             job = null
+            val actions = loop?.recordedActions.orEmpty()
             loop = null
-            _state.value = _state.value.copy(running = false, phase = status, detail = result)
+            _state.value = _state.value.copy(
+                running = false, phase = status, detail = result,
+                plan = PlanChecklist.finish(_state.value.plan, done = status == "done"),
+            )
             val info = runInfo
             runInfo = null
-            info?.let { it to runLog.toList() }
+            info?.let { Triple(it, runLog.toList(), actions) }
         } ?: return
         // 运行记录存工作区：在锁外、IO 线程，失败不影响任务结果
-        val (info, lines) = record
+        val (info, lines, actions) = record
         scope.launch(Dispatchers.IO) {
-            RunRecords.saveAgent(info.context, info.goal, info.provider, info.planner, info.remote, status, result, info.startedAt, lines)
+            RunRecords.saveAgent(info.context, info.goal, info.provider, info.planner, info.remote, status, result, info.startedAt, lines, actions)
+        }
+    }
+
+    /** 新计划接在已完成项后面；[planOffset] 记住前面保留了几项。 */
+    private var planOffset = 0
+
+    private val planListener = object : PlanListener {
+        override fun onPlan(steps: List<PlanStep>) {
+            synchronized(this@AgentLoopController) {
+                val next = PlanChecklist.replace(_state.value.plan, steps)
+                planOffset = next.size - steps.size
+                _state.value = _state.value.copy(plan = next)
+            }
+        }
+
+        override fun onStepStatus(index: Int, status: PlanStatus) {
+            synchronized(this@AgentLoopController) {
+                _state.value = _state.value.copy(plan = PlanChecklist.mark(_state.value.plan, planOffset, index, status))
+            }
         }
     }
 

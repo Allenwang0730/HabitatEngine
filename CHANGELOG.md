@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.11.0] - 2026-11-04
+
+App `versionName` 1.11.0（`versionCode` 8）；引擎 AAR `com.ailun:habitat-engine:1.10.0`（新增 `spec` 节点规格、`ScheduleMath`；`ACTION_WORKSPACE` 新增 `search`）。
+
+### Added
+- **节点参数规格（单一数据源）**：88 种节点的参数、类型、必填、可选值、输出、前置条件写在 `lib/.../spec`。由它生成 MCP 工具的参数定义（原来是空对象）、AI 生成工作流的节点清单（原来只写了 31 个）、lint 参数检查、`docs/NODES.md`。测试保证每个节点都有规格、规格里的参数名都真的被 handler 读取。
+- **MCP 标准传输**：`POST /mcp`（Streamable HTTP），Claude Code、Cursor 直接接入；`scripts/habitat_mcp_stdio.mjs` 给 Claude Desktop（stdio）用。接入说明 `docs/MCP.md`。
+- **按时刻定时**：`"trigger":{"type":"timer","at":"08:00","days":"weekdays"}`，用系统闹钟调度，进程被杀也按时运行；开机、改时间/时区后重新安排；设置页新增「闹钟和提醒」权限。
+- **Agent 运行存为工作流**：工作区里的 Agent 记录可以「存为工作流」，按控件文字重放，每步失败即停。
+- **工作区当记忆**：Agent 工具 `read_note`（目标提到「记下的 / 存的 / 笔记里」时可用），配合 `ACTION_WORKSPACE` 的 `search`。
+- **Agent 页实时计划清单**：每一步未开始 / 进行中 / 完成 / 卡住。
+- lint 参数检查：缺必填、可选值不对、不认识的参数名（提示最接近的正确名字）。
+- stdio 桥连不上手机时用离线清单 `scripts/habitat_mcp_tools.json` 回答 `initialize` / `tools/list`（没有令牌也能启动）；新增 `Dockerfile` 跑桥。
+
+### Fixed
+- `HabitatExecutionService.start(...) { }` 结尾 lambda 又能编译（1.10.0 把 `origin` 加在了参数最后）；README 示例改成具名参数。
+- 引擎嵌入方开混淆时工作区索引读不回来：`consumer-rules.pro` 保留 `com.ailun.habitat.workspace.**`。
+- 写小屏 / 写工作区没计入步数。
+- `BootReceiver` 没在 Manifest 声明，开机广播从没收到过。
+- 自带示例「工具集演示」的 BASE64 用了不存在的 `input` 参数（应为 `data`），每次都失败；「屏幕感知」带了没用的 `context_lines`。
+
 ## [1.10.0] - 2026-10-14
 
 App `versionName` 1.10.0（`versionCode` 7）；引擎 AAR `com.ailun:habitat-engine:1.9.0`（新增 `ACTION_WORKSPACE`、`OverlayGuard`、`WorkflowContext.origin`）。

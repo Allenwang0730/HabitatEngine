@@ -131,11 +131,12 @@ object WorkflowAIGenerator {
         sb.append("【自动触发】需求里有「收到通知/短信时」「每隔 N 分钟」「复制文字后」等，在 workflow 里加 trigger（与 start_node_id 同级），否则工作流只能手动运行：\n")
         NodeKnowledge.triggers.forEach { t -> sb.append("- ${t.example} —— 触发时可用变量：${t.variables}\n") }
         sb.append("触发器只认这些变量名（如通知内容是 \${trigger_text}，不是 notification_text）。\n\n")
-        sb.append("【可用节点类型与参数】（只用这些 type；优先用直接 API 节点，避免 UI 点击模拟）\n")
-        NodeKnowledge.nodes.forEach { n ->
-            val beforePart = if (n.before.isNotBlank()) "（${n.before}）" else ""
-            sb.append("- ${n.type}: ${n.params} —— ${n.usage}${beforePart}\n")
+        sb.append("【可用节点类型与参数】（只用这些 type 和列出的参数名；* 为必填，=a/b 为可选值；优先用直接 API 节点，避免 UI 点击模拟）\n")
+        // 全部节点的参数来自节点规格（lib/.../spec），与 MCP、lint、docs/NODES.md 同一来源
+        com.ailun.habitat.spec.NodeSpecs.all.forEach { spec ->
+            sb.append(com.ailun.habitat.spec.NodeSpecRender.promptLine(spec)).append("\n")
         }
+        sb.append("所有节点都可加 on_error=skip/stop、require=<成功标志变量>。\n")
         sb.append("\n【安卓操作指南】\n")
         val pkgStr = NodeKnowledge.packageHints.entries.joinToString(" / ") { "${it.key}=${it.value}" }
         sb.append("- 常见包名：$pkgStr\n")

@@ -41,11 +41,11 @@ object HabitatExecutionService {
         androidContext: Context,
         factory: NodeHandlerFactory,
         initialVars: Map<String, Any>? = null,
+        /** 见 [WorkflowContext.origin]；一般是 [WorkflowContext.workflowOrigin]。放在回调之前：结尾 lambda 仍对应 [onResult]。 */
+        origin: String = "",
         onComplete: (() -> Unit)? = null,
         onLog: ((String) -> Unit)? = null,
         onResult: ((Map<String, Any?>) -> Unit)? = null,
-        /** 见 [WorkflowContext.origin]；一般是 [WorkflowContext.workflowOrigin]。 */
-        origin: String = "",
     ): Boolean = synchronized(lock) {
         if (isRunning(workflowId)) {
             Log.w(TAG, "Workflow '$workflowId' already running — skip duplicate start")

@@ -1,5 +1,8 @@
 package com.ailun.habitat
 
+import com.ailun.habitat.spec.CommonParams
+import com.ailun.habitat.spec.NodeSpecs
+
 /**
  * 工作流静态检查结果。severity 为 [ERROR] 或 [WARNING]。
  * nodeId 为 null 表示图级问题（如缺少 start_node_id）。
@@ -102,6 +105,7 @@ internal object WorkflowLint {
                 }
             }
             edges[key] = refs
+            if (!type.isNullOrBlank()) issues += paramIssues(key, type, node.params)
         }
 
         if (!startId.isNullOrBlank() && startId in nodes) {
@@ -123,6 +127,55 @@ internal object WorkflowLint {
     }
 
     private fun isDynamic(ref: String) = ref.contains("\${")
+
+    /**
+     * 按节点规格（[NodeSpecs]）检查参数：缺必填、可选值不在列表里、不认识的参数名（多半拼错）。
+     * 一律 WARNING：规格之外的参数 handler 只是忽略，不阻止保存。没有规格的节点类型不检查。
+     */
+    internal fun paramIssues(key: String, type: String, params: Map<String, Any?>?): List<LintIssue> {
+        val spec = NodeSpecs.get(type) ?: return emptyList()
+        val given = params.orEmpty()
+        val out = mutableListOf<LintIssue>()
+        for (p in spec.params) {
+            val names = listOf(p.name) + p.aliases
+            val present = names.firstOrNull { given[it] != null && given[it].toString().isNotBlank() }
+            if (p.required && present == null) {
+                out += LintIssue(key, "$type 缺少必填参数 '${p.name}'（${p.description}）", LintIssue.WARNING)
+            }
+            if (present != null && p.enum.isNotEmpty()) {
+                val v = given[present].toString().trim()
+                if (!isDynamic(v) && v.lowercase() !in p.enum) {
+                    out += LintIssue(key, "$type 的 '${p.name}' = '$v' 不在可选值里：${p.enum.joinToString("/")}", LintIssue.WARNING)
+                }
+            }
+        }
+        val known = spec.params.flatMap { listOf(it.name) + it.aliases }.toSet() + CommonParams.names
+        for (name in given.keys) {
+            if (name !in known) {
+                val hint = known.minByOrNull { editDistance(it, name) }?.takeIf { editDistance(it, name) <= 2 }
+                out += LintIssue(
+                    key,
+                    "$type 不认识参数 '$name'" + (hint?.let { "，是不是 '$it'？" } ?: "（会被忽略）"),
+                    LintIssue.WARNING,
+                )
+            }
+        }
+        return out
+    }
+
+    private fun editDistance(a: String, b: String): Int {
+        val dp = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..b.length) {
+                val tmp = dp[j]
+                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = tmp
+            }
+        }
+        return dp[b.length]
+    }
 
     /** 与 executor 解析 FORK targets 的格式一致：List / JSON 数组串 / 逗号分隔。 */
     internal fun parseRefList(raw: Any?): List<String> {

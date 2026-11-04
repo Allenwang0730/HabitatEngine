@@ -6,6 +6,8 @@
 -keep class com.ailun.habitat.HabitatWorkflow { *; }
 -keep class com.ailun.habitat.TriggerConfig { *; }
 -keep class com.ailun.habitat.TriggerConfig$* { *; }
+# 工作区 index.json 用 Gson 按字段名/枚举名读写：混淆后旧索引读不回来（条目全丢），必须保留
+-keep class com.ailun.habitat.workspace.** { *; }
 
 # Gson：@SerializedName 字段、TypeToken 泛型签名
 -keepattributes Signature, InnerClasses, EnclosingMethod, *Annotation*

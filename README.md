@@ -17,7 +17,7 @@
 **What you get**
 
 - **Tell the phone what to do** — "open Settings and go to Bluetooth", "turn brightness to max", "what's my battery?" The agent plans, uses device tools directly when it can, taps through the UI when it must, and verifies the result on screen. On-device eval: with planning, **28/28** for both Jev and DeepSeek executors (2026-10-09, 13–18/28 without) — [method and raw data](docs/EVAL.md).
-- **An MCP server on the phone** — any MCP client (Claude, Cursor, your own agent) can read the screen and call ~80 automation nodes over `ws://127.0.0.1:8931/mcp`, token-authenticated, dangerous tools off by default.
+- **An MCP server on the phone** — Claude Code and Cursor connect over Streamable HTTP (`http://127.0.0.1:8931/mcp`), Claude Desktop through a bundled stdio bridge: read the screen, call all 88 nodes (each with a parameter schema), start agent tasks. Token-authenticated, dangerous tools off by default — [setup](docs/MCP.md).
 - **An embeddable engine** — drop `:lib` into your own app (JitPack) and run LLM-generated JSON workflows: triggers, branches, loops, variables, shell, HTTP, sensors, notifications.
 
 ## Try it in 2 minutes
@@ -82,9 +82,11 @@ val factory = NodeHandlerFactory(
     shell = ShizukuShellExecutor(context),
 )
 val graph = HabitatJson.fromJson(jsonString)
-HabitatExecutionService.start(workflowId, jsonString, context, factory) { log ->
-    println(log)
-}
+HabitatExecutionService.start(
+    workflowId, jsonString, context, factory,
+    onLog = { line -> println(line) },
+    onResult = { vars -> println(vars) },   // 工作流结束时的变量快照
+)
 ```
 
 ---
@@ -104,9 +106,9 @@ automation drive the device.
 
 ---
 
-## Node Types (86)
+## Node Types (88)
 
-The engine has 86 node types across categories. Common / core ones below (same list is in `NodeKnowledge`, the single source used for LLM generation — documented once here and in `README_CN.md`):
+Full parameter reference: [docs/NODES.md](docs/NODES.md) (generated from the node specs). The engine has 88 node types across categories. Common / core ones below (same list is in `NodeKnowledge`, the single source used for LLM generation — documented once here and in `README_CN.md`):
 
 | Type | Params | Purpose | Requires |
 |------|--------|---------|----------|
@@ -328,7 +330,7 @@ WorkflowAIGenerator.generate(context, "call 10086 and record")  // → Generated
 ```
 
 - **13 typical scenarios, 100% generation accuracy** (incl. "dial directly via CALL_DIRECT instead of UI simulation", "repeated text uses region")
-- Prompt includes: 86-node list + common package map + priority rule (direct API preferred) + permission prerequisites + few-shot examples
+- Prompt includes: full node list with parameters (from the node specs) + common package map + priority rule (direct API preferred) + permission prerequisites + few-shot examples
 - Per-generation cost ≈ 0.02–0.05 CNY (DeepSeek)
 
 ## MCP Mobile Agent (AI controls the phone)
@@ -337,10 +339,12 @@ The engine exposes an **MCP server** (JSON-RPC 2.0):
 
 ```bash
 adb forward tcp:8931 tcp:8931          # the server listens on the phone's 127.0.0.1 by default
-ws://127.0.0.1:8931/mcp                # Authorization: Bearer <token> (or ?token=)
+http://127.0.0.1:8931/mcp              # Streamable HTTP, Authorization: Bearer <token>
+ws://127.0.0.1:8931/mcp?token=<token>  # WebSocket (scripts/mcp_call.mjs)
+claude mcp add --transport http habitat http://127.0.0.1:8931/mcp --header "Authorization: Bearer <token>"
 ```
 
-- `initialize / tools/list / tools/call` standard MCP, any LLM client can connect
+- `initialize / tools/list / tools/call` standard MCP. Cursor / Claude Desktop config: [docs/MCP.md](docs/MCP.md); every node tool carries a JSON Schema generated from the node specs
 - **Auth**: a random token is generated per install (view / copy / regenerate on the App's Agent page); LAN access is off by default; dangerous nodes (shell, files, SMS, calls, …) are refused for remote callers unless explicitly enabled
 - supports `region`/`occurrence` to precisely target repeated text (e.g. "tap the confirm button at the bottom")
 - WeChat reading: only in the `wechat` build flavor (`./gradlew :app:assembleWechatDebug`), which adds a reader service named `SelectToSpeakService` — WeChat only exposes its UI tree to that class name, so this impersonates a Google component: personal use only, not for store distribution. The default `standard` flavor doesn't include it and falls back to on-device ML Kit OCR
@@ -526,4 +530,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 86 node types · LLM-friendly · MCP agent · embeddable · accessibility + system API · `habitat-server` companion backend
+**Habitat** · 88 node types · LLM-friendly · MCP agent · embeddable · accessibility + system API · `habitat-server` companion backend

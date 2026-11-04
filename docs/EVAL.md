@@ -87,7 +87,7 @@ Each file has `commit`, `note`, `summary` and one record per run: task, executor
 ## Limitations
 
 - One device, one ROM, one locale. Other launchers/ROMs/apps will lay screens out differently; the fixes in this repo were driven by what this device showed.
-- Ten short tasks. They cover settings navigation, in-app search, device toggles, questions, one messaging flow and one call — not long or open-ended goals.
+- Twelve short tasks. They cover settings navigation, in-app search, device toggles, questions, one messaging flow, one call, and writing to the mini screen and workspace — not long or open-ended goals.
 - 1–2 runs per task per date; small differences between configs are noise.
 - The QQ task only verifies "typed, not sent" (remote origin). Sending on local origin was not covered by the eval.
 - Results depend on third-party services (DeepSeek, TypeSafe) whose models and availability change without notice.

@@ -370,7 +370,7 @@ private fun WorkflowCard(
                 horizontalArrangement = Arrangement.spacedBy(Spacing.md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MetaItem(TriggerVisuals.icon(item.trigger?.type), TriggerVisuals.label(item.trigger?.type))
+                MetaItem(TriggerVisuals.icon(item.trigger?.type), TriggerVisuals.label(item.trigger))
                 MetaItem(Icons.Outlined.Hub, "${item.nodeCount} 个节点")
                 if (isMounted) MetaItem(Icons.Filled.PushPin, "悬浮窗", tint = cs.primary)
                 if (item.parseError != null) MetaItem(Icons.Outlined.ErrorOutline, "点击修复", tint = cs.error)
