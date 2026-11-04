@@ -49,6 +49,10 @@ Claude Desktop（只支持 stdio，用仓库里的桥 `scripts/habitat_mcp_stdio
 
 设了 `HABITAT_ADB`，桥启动时会自动执行 `adb forward`。
 
+桥连不上手机（或没设 `HABITAT_TOKEN`）时，`initialize` / `ping` / `tools/list` 用离线清单 `scripts/habitat_mcp_tools.json` 回答，调用工具返回错误。这份清单和手机端默认设置下的 `tools/list` 同一来源，单测 `McpToolsManifestTest` 保证它不过期。
+
+也可以用仓库根目录的 `Dockerfile` 跑桥：`docker build -t habitat-mcp .`，然后 `docker run -i --rm -e HABITAT_TOKEN=<令牌> -e HABITAT_URL=http://host.docker.internal:8931/mcp habitat-mcp`（电脑上先 `adb forward tcp:8931 tcp:8931`）。
+
 ## 能做什么
 
 - `screen`：当前屏幕文字和前台应用；`debug_screen`：观测快照 + 候选动作（排查用）。

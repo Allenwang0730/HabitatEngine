@@ -1,0 +1,4 @@
+# Only the stdio bridge goes into the image (see Dockerfile).
+*
+!scripts/habitat_mcp_stdio.mjs
+!scripts/habitat_mcp_tools.json

@@ -12,6 +12,7 @@ App `versionName` 1.11.0（`versionCode` 8）；引擎 AAR `com.ailun:habitat-en
 - **工作区当记忆**：Agent 工具 `read_note`（目标提到「记下的 / 存的 / 笔记里」时可用），配合 `ACTION_WORKSPACE` 的 `search`。
 - **Agent 页实时计划清单**：每一步未开始 / 进行中 / 完成 / 卡住。
 - lint 参数检查：缺必填、可选值不对、不认识的参数名（提示最接近的正确名字）。
+- stdio 桥连不上手机时用离线清单 `scripts/habitat_mcp_tools.json` 回答 `initialize` / `tools/list`（没有令牌也能启动）；新增 `Dockerfile` 跑桥。
 
 ### Fixed
 - `HabitatExecutionService.start(...) { }` 结尾 lambda 又能编译（1.10.0 把 `origin` 加在了参数最后）；README 示例改成具名参数。
