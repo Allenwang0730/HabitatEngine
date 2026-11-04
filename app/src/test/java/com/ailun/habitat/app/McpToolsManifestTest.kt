@@ -44,4 +44,21 @@ class McpToolsManifestTest {
         assertFalse(NodeHandlerFactory.ACTION_SHELL in names)
         AgentService.REMOTE_DANGEROUS_TOOLS.forEach { assertFalse(it, it in names) }
     }
+
+    @Test
+    fun builtinsDescribeArgsAndBehavior() {
+        val byName = defaultTools().associateBy { it.asJsonObject.get("name").asString }.mapValues { it.value.asJsonObject }
+        val builtins = listOf("screen", "debug_screen", "ping", "mini_screen_status", "agent_start", "agent_stop", "agent_status")
+        builtins.forEach { name ->
+            val tool = byName.getValue(name)
+            assertTrue("$name 有注解", tool.has("annotations"))
+            assertTrue("$name 描述写清楚", tool.get("description").asString.length > 60)
+        }
+        val start = byName.getValue("agent_start")
+        assertFalse(start.getAsJsonObject("annotations").get("readOnlyHint").asBoolean)
+        val schema = start.getAsJsonObject("inputSchema")
+        assertEquals(setOf("goal", "provider", "max_steps", "planner"), schema.getAsJsonObject("properties").keySet())
+        assertEquals("goal", schema.getAsJsonArray("required").single().asString)
+        assertTrue(byName.getValue("screen").getAsJsonObject("annotations").get("readOnlyHint").asBoolean)
+    }
 }
