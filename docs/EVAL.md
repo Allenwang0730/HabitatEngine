@@ -80,6 +80,43 @@ Per session the no-planner results were Jev 7/14 and 6/14, DeepSeek 10/14 and 8/
 
 Raw data: [`eval/2026-10-09.json`](eval/2026-10-09.json).
 
+## AndroidWorld (public benchmark, emulator)
+
+[AndroidWorld](https://github.com/google-research/android_world) (Google, Apache-2.0): 116 task templates over 20 apps on an Android 13 emulator. Each task's own code sets up the device and checks the end state, so the agent's DONE counts for nothing. Habitat runs as a black box through [`scripts/androidworld/run_habitat.py`](../scripts/androidworld/README.md): AndroidWorld gives the goal, the adapter starts it over MCP, AndroidWorld scores the device state.
+
+### 2026-11-04 — branch `feat/ocr-open-url` at `ed6116b`, 25-task subset, 3 seeds
+
+DeepSeek executor + DeepSeek planner, max 30 steps, remote origin. Emulator: `AndroidWorldAvd` (Pixel 6, Android 13 `google_apis` x86_64) under WSL2.
+
+| Seed | Passed | Mean seconds per task |
+|---|:---:|:---:|
+| 30 | 14/25 | 32 |
+| 31 | 12/25 | 29 |
+| 32 | 11/25 | 31 |
+| **Mean** | **12.3/25 (49%)** | |
+
+The subset ([`smoke25.txt`](../scripts/androidworld/smoke25.txt)) is the 25 shortest tasks (complexity 1–1.2) that need no answer and no sending: Clock, Contacts, Expense, Markor, Broccoli recipes, Simple Calendar, Bluetooth / Wi-Fi / brightness / clipboard. Seeds 30–32 give each task different parameters. Seed 32 was interrupted after 8 tasks (a host-side time limit) and resumed at task 9 with the same per-task seeds. No DeepSeek request failed on the network in these three runs.
+
+Per task over the 3 seeds: passed 3/3 — both Contacts tasks, both stopwatch tasks, Markor create folder, Expense delete single, Calendar delete one event, Bluetooth on, Wi-Fi on and off; 2/3 — Bluetooth off, Open app; 1/3 — Expense add, Expense delete duplicates, Calendar delete events on a relative day; 0/3 — Clock timer entry, all four other Markor tasks, both Broccoli tasks, brightness max and min, copy to clipboard.
+
+Main failure causes, from the step logs:
+
+- **Picks outside the candidate list (most Broccoli, clipboard and timer failures).** The model picks a TAP or LONG_PRESS index that the code did not offer, gets "not a candidate", picks it again, and the step is replanned or ends. Long-press candidates are capped at 8 per screen and taps at 30, so on long lists the row the model wants can be left out.
+- **Multi-line text editing (Markor edit / add header).** The agent alternates "clear field" and "type text" until the step budget runs out; the typed text contains line breaks.
+- **Repeated long-press on a list row (Markor delete).** The agent long-presses the right row, the selection mode appears, and it long-presses again instead of choosing the delete action; loop detection then ends the step.
+- **Sliders (brightness max / min).** The "open display settings" shortcut did not land on the expected page, and the brightness row on the page it reached was not exposed as a slider, so SET_SLIDER was never offered.
+- **Timer entry.** The agent taps the number pad but the entered digits do not register as a change, so it repeats digits and backspace until the step limit.
+
+Earlier runs on the same day with seed 30, before two fixes in `ed6116b`, passed 9/25 and 10/25. The fixes: icon buttons with no text (only a resource-id, e.g. Expense's add button) were left out of the tap candidates, so the model picked them from the element list and got "not a candidate"; and an "open this settings page" shortcut kept being offered after it had already succeeded without changing the screen. The adapter also started granting Markor's storage permission before runs, since remote-origin goals never tap permission buttons. The 9/25 → 12.3/25 change mixes these three effects with seed-to-seed noise (11–14 across seeds).
+
+How to read this:
+
+- It is a subset, not the full benchmark. The full 116 tasks include information retrieval and SMS sending; remote-origin safety rules (messages are typed, never sent) make the sending tasks fail by design.
+- Goals are English. Habitat's rule-based intent parser is Chinese, so this measures the planner + executor path only.
+- Text-only agents on the full AndroidWorld set, for scale: T3A (GPT-4 Turbo, accessibility tree) 30.6% in the [AndroidWorld paper](https://arxiv.org/abs/2405.14573); human 80.0%. Those numbers are over all 116 tasks and are not directly comparable with a 25-task subset.
+
+Raw data: [`eval/androidworld/`](eval/androidworld/) (task, seed, goal, score, end phase, Habitat's final detail, seconds). Step logs are not published (they contain screen text).
+
 ## What the raw files contain
 
 Each file has `commit`, `note`, `summary` and one record per run: task, executor, planner on/off, run number, pass/fail, end status, seconds, steps, and whether Jev returned HTTP 451. Step logs and agent answers are **not** published: they contain screen text (chat lists, contact and group names, notifications). They are exported from the local `selftest_results/` with [`scripts/agent_eval_export.mjs`](../scripts/agent_eval_export.mjs).

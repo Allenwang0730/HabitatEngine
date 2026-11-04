@@ -39,3 +39,7 @@ openvpn_config_backup/
 
 # 本地 IDE/助手配置（含本机路径）
 .codemoss/
+
+# Python
+__pycache__/
+*.pyc

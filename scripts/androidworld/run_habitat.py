@@ -212,6 +212,7 @@ def main() -> None:
     ap.add_argument("--timeout", type=int, default=600, help="seconds per task")
     ap.add_argument("--forwarder_port", type=int, default=18080)
     ap.add_argument("--out", default="habitat_androidworld.jsonl")
+    ap.add_argument("--start_index", type=int, default=0, help="resume an interrupted run: skip the first N tasks (seeds stay seed+i)")
     a = ap.parse_args()
 
     key = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -242,6 +243,8 @@ def main() -> None:
     passed = 0
     with open(a.out, "a", encoding="utf-8") as out:
         for i, name in enumerate(names):
+            if i < a.start_index:
+                continue
             random.seed(a.seed + i)
             task_type = aw[name]
             task = task_type(task_type.generate_random_params())
