@@ -149,6 +149,11 @@ data class ActionCatalog(
      * 硬模式下为空（走 [without] 直接删）。
      */
     val penalties: Map<String, Double> = emptyMap(),
+    /**
+     * 控件一览里不在候选中的元素 → 屏幕上包含它的那个候选（序号）。模型常照着一览选卡片里的标题文字（它本身不可点），
+     * 这时改点包着它的那一行/卡片（[decisionFromChoice]）。被包含的候选都已过安全闸，不会绕开任何限制。
+     */
+    val containerOf: Map<String, String> = emptyMap(),
 ) {
     /** (操作, 目标) 的惩罚分；没有对应候选或没受罚为 0。 */
     fun penaltyOf(operation: String, target: String?): Double =

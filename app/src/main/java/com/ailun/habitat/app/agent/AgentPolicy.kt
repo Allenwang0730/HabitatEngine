@@ -249,9 +249,20 @@ fun decisionFromChoice(
         target
     }
     val action = catalog.resolve(operation, effectiveTarget)
+        ?: containerFallback(catalog, operation, effectiveTarget)?.let { (container, a) ->
+            val status = if (operation == "WAIT") "wait" else "action"
+            return Decision(status, operation, container, a, confidence, "$detail（${effectiveTarget} 不可点，改点包住它的 $container）")
+        }
         ?: return Decision("error", operation, target, confidence = confidence, detail = "候选里没有 $operation/$target")
     val status = if (operation == "WAIT") "wait" else "action"
     return Decision(status, operation, effectiveTarget, action, confidence, detail)
+}
+
+/** TAP / LONG_PRESS 选了不在候选里的元素：改用屏幕上包住它的候选（[ActionCatalog.containerOf]）。 */
+private fun containerFallback(catalog: ActionCatalog, operation: String, target: String?): Pair<String, CatalogAction>? {
+    if (operation != "TAP" && operation != "LONG_PRESS") return null
+    val container = target?.let { catalog.containerOf[it] } ?: return null
+    return catalog.resolve(operation, container)?.let { container to it }
 }
 
 fun actionDecision(action: CatalogAction, detail: String) = Decision(

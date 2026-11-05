@@ -331,8 +331,33 @@ object Catalogs {
             actions, operations, tapTargets, textValues, appTargets, longPressTargets, guard,
             toolTargets = toolTargets, sliderTargets = sliderTargets,
             submitReady = typed && taps.firstOrNull()?.let { el -> SUBMIT_WORDS.any { el.text.trim() == it } } == true,
+            containerOf = containersFor(observation, taps),
         )
     }
+
+    /**
+     * 不在候选里的元素 → 屏幕上包住它的最小候选（不含整页大小的容器）。AndroidWorld 基线里失败的任务平均每个有 3 次
+     * 「候选里没有」：模型照着控件一览选了卡片里的标题、行里的副标题，它们自己不可点，可点的是外面那一行。
+     */
+    internal fun containersFor(observation: ScreenObservation, taps: List<ScreenElement>): Map<String, String> {
+        val w = observation.screenWidth.coerceAtLeast(1)
+        val h = observation.screenHeight.coerceAtLeast(1)
+        val offered = taps.filter { it.bounds != null && !isPageSizedBounds(it.bounds!!, w, h) }
+        if (offered.isEmpty()) return emptyMap()
+        val offeredIds = taps.map { it.index }.toSet()
+        val out = mutableMapOf<String, String>()
+        observation.elements.forEach { el ->
+            val b = el.bounds ?: return@forEach
+            if (el.index in offeredIds || el.system) return@forEach
+            offered.filter { it.bounds!!.contains(b) && it.index != el.index }
+                .minByOrNull { it.bounds!!.width.toLong() * it.bounds!!.height }
+                ?.let { out[el.index] = it.index }
+        }
+        return out
+    }
+
+    private fun isPageSizedBounds(b: ElementBounds, w: Int, h: Int): Boolean =
+        b.width.toLong() * b.height > 0.35 * w * h
 
     /** 从滑块当前位置拖到目标位置；拖过头一点（两端各留 1%）保证到头。 */
     private fun sliderAction(el: ScreenElement, pos: String, key: String, label: String): CatalogAction {
@@ -402,10 +427,12 @@ object Catalogs {
      */
     fun iconLabel(el: ScreenElement, width: Int = 1080, height: Int = 2400): String? {
         if (el.text.isNotBlank() || !el.clickable || el.editable) return null
+        val b = el.bounds
+        // 整页大小的可点容器（RecyclerView、WebView 外壳）不是按钮，哪怕它有 viewId
+        if (b != null && b.width.toLong() * b.height > 0.35 * width * height) return null
         val name = shortViewId(el.viewId).removePrefix("id/").replace('_', ' ').trim()
         val where = positionWord(el, width, height)
         if (name.isNotEmpty()) return "图标按钮 $name（$where）"
-        val b = el.bounds
         val small = b == null || ((b.right - b.left) <= width / 4 && (b.bottom - b.top) <= height / 8)
         val edge = el.centerY < height * 0.14 || el.centerY > height * 0.80
         return if (small && edge) "无文字图标按钮（$where）" else null

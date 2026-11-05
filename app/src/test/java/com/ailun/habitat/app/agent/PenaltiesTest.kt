@@ -124,4 +124,32 @@ class PenaltiesTest {
         assertFalse("3" in catalog.tapTargets)
         assertTrue("3" in catalog.longPressTargets)
     }
+
+    @Test
+    fun pickingTextInsideACardTapsTheCard() {
+        // 卡片整块可点（无文字，有 viewId），标题文字是另一个不可点的元素，坐标落在卡片里
+        val card = ScreenElement("1", "", 540, 700, clickable = true, editable = false, focused = false,
+            viewId = "com.flauschcode.broccoli:id/card_view", bounds = ElementBounds(40, 500, 1040, 900))
+        val title = ScreenElement("2", "Eggplant Parmesan", 400, 600, clickable = false, editable = false, focused = false,
+            bounds = ElementBounds(80, 560, 720, 640))
+        val o = obs.copy(packageName = "com.flauschcode.broccoli", elements = listOf(card, title), visibleText = "Eggplant Parmesan")
+        val catalog = Catalogs.build("Delete the recipe Eggplant Parmesan", o, emptyList())
+        assertTrue("1" in catalog.tapTargets)
+        assertEquals("1", catalog.containerOf["2"])
+        val d = decisionFromChoice(catalog, "TAP", "2", 1.0, "DeepSeek 选择 TAP")
+        assertEquals("action", d.status)
+        assertEquals("1", d.target)
+        assertTrue(d.detail.contains("改点包住它的 1"))
+        // 不在任何候选里的选择照旧报错
+        assertEquals("error", decisionFromChoice(catalog, "TAP", "9", 1.0, "").status)
+    }
+
+    @Test
+    fun pageSizedContainerIsNotAnIconButton() {
+        val list = ScreenElement("1", "", 540, 1200, clickable = true, editable = false, focused = false,
+            viewId = "com.flauschcode.broccoli:id/recycler_view", bounds = ElementBounds(0, 300, 1080, 2300))
+        assertEquals(null, Catalogs.iconLabel(list, 1080, 2400))
+        val o = obs.copy(elements = listOf(list))
+        assertFalse("1" in Catalogs.build("Delete a recipe", o, emptyList()).tapTargets)
+    }
 }
