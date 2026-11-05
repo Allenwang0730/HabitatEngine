@@ -435,7 +435,7 @@ class AgentLoop(
             val reviewer = planner ?: return LoopResult("done", run.used, withFacts("完成", run))
             run.observation = ScreenObserver.observe(context)
             val review = runCatching {
-                reviewer.review(goal, run.observation, run.completed, run.facts)
+                reviewer.review(goal, run.observation, run.completed, reviewFacts(run))
             }.getOrNull()
             if (review == null) {
                 onStep("复核不可用，按执行器判断结束")
@@ -456,6 +456,18 @@ class AgentLoop(
             plan = makePlan(run, replanContext(run, "复核", review.reason), onStep)
                 ?: return LoopResult("blocked", run.used, "复核未通过：${review.reason}")
         }
+    }
+
+    /**
+     * 给复核员的事实：读到的、记下的，再加上本次成功输入过的文字（typed_N，逐字）。
+     * 最后一屏常常显示不全（长正文、合并后的笔记），AndroidWorld MarkorMergeNotes 里内容全对，复核员因为看不到第三段判了三次未通过。
+     */
+    private fun reviewFacts(run: Run): Map<String, String> {
+        val typed = run.history.filter { it.operation == "TYPE_TEXT" && it.error.isEmpty() }
+            .mapNotNull { it.label.removePrefix("输入「").removeSuffix("」").takeIf { t -> t != it.label && t.isNotBlank() } }
+            .distinct().takeLast(MAX_NOTES)
+        if (typed.isEmpty()) return run.facts
+        return run.facts + typed.mapIndexed { i, t -> "typed_${i + 1}" to t.take(600) }
     }
 
     /** 本次任务里成功执行过「输入 X」。 */
@@ -492,7 +504,7 @@ class AgentLoop(
         val reason = "达到步数上限 $maxSteps"
         val reviewer = planner ?: return LoopResult("blocked", run.used, reason)
         run.observation = ScreenObserver.observe(context)
-        val review = runCatching { reviewer.review(run.goal, run.observation, run.completed, run.facts) }.getOrNull()
+        val review = runCatching { reviewer.review(run.goal, run.observation, run.completed, reviewFacts(run)) }.getOrNull()
         val answer = AnswerFormat.normalize(run.goal, review?.answer.orEmpty())
         // 复核员按屏幕证据判定已完成：就是在最后一步做完了，照常报完成（调用方的步数预算里已经给这一步留了位）
         if (review?.done == true) {
