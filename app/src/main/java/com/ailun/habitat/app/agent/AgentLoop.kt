@@ -449,7 +449,13 @@ class AgentLoop(
             }
             onStep("复核未通过：${review.reason}")
             if (run.replans >= maxReplans || run.used >= maxSteps) {
-                return LoopResult("blocked", run.used, "复核未通过：${review.reason}", answer = AnswerFormat.normalize(goal, review.answer))
+                val answer = AnswerFormat.normalize(goal, review.answer)
+                // 提问类目标、复核员手上有答案、也没机会再试了：作答（同 [outOfSteps]）
+                if (answer.isNotBlank() && AnswerFormat.isQuestion(goal)) {
+                    onStep("没有机会再试了，按读到的答案作答（未完全确认）：$answer")
+                    return LoopResult("done", run.used, "$answer — 未完全确认：${review.reason}".take(500), answer = answer)
+                }
+                return LoopResult("blocked", run.used, "复核未通过：${review.reason}", answer = answer)
             }
             run.replans++
             reflectOnFailure(run, "复核", review.reason, onStep)
@@ -498,7 +504,9 @@ class AgentLoop(
     /**
      * 步数用完：结束前让复核员看一眼当前屏幕（只是一次模型调用，不点任何东西，不算步数）。
      * 提问类目标常常是答案已经在屏幕上、只差最后一步"作答"——不问就白白交空卷。
-     * 状态仍是 blocked（没确认完成），答案放在 [LoopResult.answer]，交给调用方决定用不用。
+     * 提问类目标有答案就作答（报完成，详情里注明"未完全确认"）：步数到了，交出手上最好的答案，和人一样。
+     * AndroidWorld NotesTodoItemCount：答案「3」是对的，复核员想再往下翻确认，步数用完报 blocked，官方口径记 0 分。
+     * 其余情况状态仍是 blocked（没确认完成），答案放在 [LoopResult.answer]。
      */
     private suspend fun outOfSteps(run: Run, onStep: (String) -> Unit): LoopResult {
         val reason = "达到步数上限 $maxSteps"
@@ -511,6 +519,10 @@ class AgentLoop(
             val detail = listOf(answer, review.reason).filter { it.isNotBlank() }.joinToString(" — ").ifBlank { "完成" }
             onStep("步数用完时复核通过：$detail")
             return LoopResult("done", run.used, detail, answer = answer)
+        }
+        if (answer.isNotBlank() && AnswerFormat.isQuestion(run.goal)) {
+            onStep("步数用完，按屏幕上读到的答案作答（未完全确认）：$answer")
+            return LoopResult("done", run.used, "$answer — 步数用完时的答案，未完全确认：${review?.reason.orEmpty()}".take(500), answer = answer)
         }
         if (answer.isNotBlank()) onStep("步数用完，屏幕上读到的答案（未确认完成）：$answer")
         return LoopResult("blocked", run.used, if (answer.isBlank()) reason else "$reason；屏幕上的答案（未确认）：$answer", answer = answer)
