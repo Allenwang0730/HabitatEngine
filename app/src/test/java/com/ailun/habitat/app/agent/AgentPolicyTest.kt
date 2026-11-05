@@ -520,4 +520,59 @@ class AgentPolicyTest {
         // 没退回来：这条路还在走，不算死路
         assertFalse(enter.signature in LoopPolicy.deadEnds(listOf(enter, scroll)))
     }
+
+    // ---- 英文界面的敏感按钮闸（AndroidWorld 实测：只认中文时，远程目标点到了「Delete」，Simple SMS 写着「SMS」的发送键也没拦住）
+
+    private fun smsScreen(): ScreenObservation {
+        val input = ScreenElement("1", "Type a message…", 480, 2200, clickable = true, editable = true, focused = true,
+            bounds = ElementBounds(140, 2150, 860, 2250))
+        val send = ScreenElement("2", "SMS", 960, 2200, clickable = true, editable = false, focused = false,
+            viewId = "com.simplemobiletools.smsmessenger:id/thread_send_message", bounds = ElementBounds(900, 2150, 1020, 2250))
+        val attach = ScreenElement("3", "Attachment", 70, 2200, clickable = true, editable = false, focused = false,
+            bounds = ElementBounds(20, 2150, 120, 2250))
+        val row = ScreenElement("4", "Sender: Adam Ibrahim", 540, 600, clickable = true, editable = false, focused = false,
+            viewId = "com.simplemobiletools.smsmessenger:id/sender_name", bounds = ElementBounds(0, 540, 1080, 660))
+        val els = listOf(input, send, attach, row)
+        return ScreenObservation("com.simplemobiletools.smsmessenger", 1080, 2400, els, els.joinToString("\n") { it.text }, "a11y", focusedIndex = "1")
+    }
+
+    @Test
+    fun smsSendButtonIsGatedWhateverItsLabelSays() {
+        val obs = smsScreen()
+        val goal = "Reply to +13573669236 with message: The pen is mightier than the sword."
+        assertTrue(Catalogs.isSendControl(obs.elements[1], obs))
+        assertFalse("左边的附件按钮不是发送", Catalogs.isSendControl(obs.elements[2], obs))
+        assertFalse("sender_name 不是 send", Catalogs.isSendControl(obs.elements[3], obs))
+        val remote = Catalogs.build(goal, obs, emptyList(), allowGoalUnlock = false)
+        assertFalse("远程目标不能点发送", "2" in remote.tapTargets)
+        assertFalse("远程目标也不能用回车绕过发送键", "PRESS_ENTER" in remote.operations)
+        assertTrue("3" in remote.tapTargets)
+        // 本机发起、目标写了 reply：放行
+        val local = Catalogs.build(goal, obs, emptyList(), allowGoalUnlock = true)
+        assertTrue("2" in local.tapTargets)
+        // 本机发起但目标没说要发（只是看看）：不放行
+        assertFalse("2" in Catalogs.build("Open the conversation with Adam Ibrahim", obs, emptyList(), allowGoalUnlock = true).tapTargets)
+    }
+
+    @Test
+    fun englishSensitiveButtonsFollowTheChineseRules() {
+        assertFalse(Catalogs.allowedTap("Delete the event", "Delete", allowGoalUnlock = false))
+        assertTrue(Catalogs.allowedTap("Delete the event on 2023-10-17", "Delete", allowGoalUnlock = true))
+        assertFalse(Catalogs.allowedTap("Open the event", "Delete", allowGoalUnlock = true))
+        assertFalse(Catalogs.allowedTap("Install the app", "Allow", allowGoalUnlock = false))
+        assertFalse(Catalogs.allowedTap("Buy milk on the list", "Pay now", allowGoalUnlock = false))
+        // 不是对应说法的不拦
+        assertTrue(Catalogs.allowedTap("Open settings", "Remove from favourites", allowGoalUnlock = false))
+        assertTrue(Catalogs.allowedTap("Open settings", "Sender", allowGoalUnlock = false))
+        assertTrue(Catalogs.allowedTap("Open settings", "Clear search", allowGoalUnlock = false))
+        // 「Text the address to Mila」是发消息；「Copy the following text」不是
+        assertTrue(Catalogs.allowedTap("Text the address of the event to Mila Zhang", "Send", allowGoalUnlock = true))
+        assertFalse(Catalogs.allowedTap("Copy the following text to the clipboard: x", "Send", allowGoalUnlock = true))
+    }
+
+    @Test
+    fun englishCredentialScreenIsLocked() {
+        val obs = listScreen().copy(visibleText = "Enter your PIN\n1 2 3")
+        assertTrue(Catalogs.build("Open settings", obs, emptyList()).guard != null)
+    }
 }

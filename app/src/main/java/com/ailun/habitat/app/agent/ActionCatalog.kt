@@ -24,16 +24,41 @@ object Catalogs {
 
     /**
      * 敏感词的同义说法：目标写了其中之一也算"点名"了这个敏感动作。
-     * 「给我的电脑发消息说你好」里没有「发送」两个字，但显然是要发。
+     * 「给我的电脑发消息说你好」里没有「发送」两个字，但显然是要发。英文目标同理（本机发起时才有用，远程永远不解锁）。
      */
     private val unlockAliases: Map<String, Regex> = mapOf(
-        "发送" to Regex("发送|发(?:个|一个|一条|条)?(?:消息|信息|短信|微信)|发给|回复"),
+        "发送" to Regex("发送|发(?:个|一个|一条|条)?(?:消息|信息|短信|微信)|发给|回复|(?i)\\b(?:send|resend|reply)\\b|^\\s*text\\b"),
+    )
+
+    /**
+     * 英文界面上的同一批敏感按钮（规范到中文词，放行规则和中文完全一样）。
+     * 之前只认中文，AndroidWorld（英文界面）实测远程目标点到了「Delete」，模型把日历事件、记账条目删了。
+     * 只收和中文表一一对应的说法：「Remove from favourites」「Clear search」这类不算。
+     */
+    private val englishSensitive: List<Pair<Regex, String>> = listOf(
+        Regex("(?i)\\b(?:re)?send\\b") to "发送",
+        Regex("(?i)\\b(?:pay|pay now|transfer|purchase|buy now|place order|checkout|top up|withdraw)\\b") to "支付",
+        Regex("(?i)\\bdelete\\b") to "删除",
+        Regex("(?i)\\b(?:clear all|clear data|clear storage|erase)\\b") to "清空",
+        Regex("(?i)\\buninstall\\b") to "卸载",
+        Regex("(?i)\\b(?:factory reset|reset phone|reset device)\\b") to "恢复出厂",
+        Regex("(?i)\\b(?:sign out|log out|logout|delete account)\\b") to "退出登录",
+        Regex("(?i)\\b(?:allow|grant|agree|while using the app|only this time)\\b") to "允许",
+    )
+
+    /** 发送按钮：文字或 viewId 是「发送 / send」，或者聊天类应用里紧挨着底部输入框右边的那个按钮（Simple SMS 的发送键只写着「SMS」）。 */
+    private val SEND_ID = Regex("(?i)(?:^|[/_:])send(?:$|[_]|_?(?:button|btn|icon|message|sms))")
+    private val MESSAGING_PACKAGE = Regex(
+        "(?i)(sms|mms|messag|com\\.tencent\\.(mm|mobileqq)|whatsapp|telegram|signal|viber|\\.line\\.|kakao|discord|slack)",
     )
 
     /** 输入完之后要点的提交类按钮。 */
     val SUBMIT_WORDS = listOf("发送", "搜索", "确定", "完成", "提交", "前往")
     /** 出现这些文字说明是验证/支付凭据页，模型不能碰任何控件。 */
     val lockedScreenWords = listOf("支付密码", "请输入6位", "验证指纹", "指纹支付", "面容支付", "人脸验证", "刷脸", "银行卡号")
+    private val lockedScreenEnglish = Regex(
+        "(?i)\\b(?:payment password|enter (?:your )?pin|cvv|cvc|card number|verify (?:your )?(?:fingerprint|face|identity))\\b",
+    )
     val guardedPackages = setOf(
         "com.android.permissioncontroller",
         "com.google.android.permissioncontroller",
@@ -251,8 +276,8 @@ object Catalogs {
 
         // 有输入框时才给"提交"和"清空"。两者都靠 lib 已有节点实现。
         if (input != null) {
-            // 聊天页里回车就是发送：屏幕上有「发送」而目标没解锁发送时，不给回车，否则能绕开发送按钮的闸
-            val sendVisible = observation.elements.any { it.text.trim() == "发送" }
+            // 聊天页里回车就是发送：屏幕上有发送按钮（不管写着什么）而目标没解锁发送时，不给回车，否则能绕开发送按钮的闸
+            val sendVisible = observation.elements.any { isSendControl(it, observation) }
             if (!sendVisible || allowedTap(goal, "发送", allowGoalUnlock)) {
                 operations["PRESS_ENTER"] = "在输入框里按回车，用于提交搜索或确认输入。提交后等待屏幕变化。"
                 actions.add(
@@ -413,7 +438,7 @@ object Catalogs {
             .filter { !it.system }
             // 已经有焦点的输入框再点也不会变（真机上模型反复点搜索框直到被判兜圈），该做的是 TYPE_TEXT
             .filter { !(it.editable && it.focused) }
-            .filter { allowedTap(goal, it.text, allowGoalUnlock) }
+            .filter { allowedElement(goal, it, observation, allowGoalUnlock) }
             // 先按"控件可信度"分层，再在层内按屏幕从上到下（模型看屏幕的习惯顺序）
             .sortedWith(compareBy({ tierOf(it) }, { it.centerY }, { it.centerX }))
             .take(MAX_TAPS)
@@ -505,15 +530,45 @@ object Catalogs {
     }
 
     fun allowedTap(goal: String, label: String, allowGoalUnlock: Boolean = true): Boolean {
-        val hit = sensitiveWords.firstOrNull { label.contains(it) } ?: return true
+        val hit = sensitiveWords.firstOrNull { label.contains(it) }
+            ?: englishSensitive.firstOrNull { (re, _) -> re.containsMatchIn(label) }?.second
+            ?: return true
         if (!allowGoalUnlock) return false
-        return goal.contains(hit) || unlockAliases[hit]?.containsMatchIn(goal) == true
+        return goal.contains(hit) || unlockAliases[hit]?.containsMatchIn(goal) == true || englishUnlock(goal, hit)
+    }
+
+    /** 本机英文目标点名了同一个敏感动作（「Delete the event…」解锁「Delete」）。远程发起走不到这里。 */
+    private fun englishUnlock(goal: String, canonical: String): Boolean =
+        englishSensitive.any { (re, c) -> c == canonical && re.containsMatchIn(goal) }
+
+    /** 带上控件本身的判断：发送按钮不管写着什么（「SMS」、纸飞机图标）都按「发送」放行。 */
+    fun allowedElement(goal: String, el: ScreenElement, observation: ScreenObservation, allowGoalUnlock: Boolean = true): Boolean {
+        if (isSendControl(el, observation)) return allowedTap(goal, "发送", allowGoalUnlock)
+        return allowedTap(goal, el.text, allowGoalUnlock)
+    }
+
+    /**
+     * 这是不是"发出消息"的按钮。文字 / viewId 明说了 send / 发送；或者在聊天类应用里，它和底部的输入框在同一行、在输入框右边。
+     * 只在聊天类应用里用位置判断：别的应用底部"输入框 + 按钮"多半是搜索或添加，不能一律当成发送拦下。
+     */
+    fun isSendControl(el: ScreenElement, observation: ScreenObservation): Boolean {
+        if (el.editable || !el.clickable) return false
+        if (el.text.trim().let { it == "发送" || it.equals("send", ignoreCase = true) }) return true
+        if (SEND_ID.containsMatchIn(shortViewId(el.viewId))) return true
+        if (!MESSAGING_PACKAGE.containsMatchIn(observation.packageName)) return false
+        val h = observation.screenHeight.coerceAtLeast(1)
+        val compose = observation.elements.firstOrNull { it.editable && !it.password && it.centerY > h * 0.6 } ?: return false
+        val cb = compose.bounds ?: return false
+        return el.centerX > cb.right - 8 && el.centerY in cb.top - 40..cb.bottom + 40
     }
 
     /** 当前屏幕需要整体收紧时返回原因，否则 null。 */
     fun guardOf(goal: String, observation: ScreenObservation, allowGoalUnlock: Boolean): String? {
         lockedScreenWords.firstOrNull { observation.visibleText.contains(it) }?.let {
             return "验证/支付凭据页（$it），不点击也不输入"
+        }
+        lockedScreenEnglish.find(observation.visibleText)?.let {
+            return "验证/支付凭据页（${it.value}），不点击也不输入"
         }
         if (observation.packageName in guardedPackages) {
             val unlocked = allowGoalUnlock && guardedUnlockWords.any { goal.contains(it) }
