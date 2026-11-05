@@ -109,7 +109,13 @@ class _Forwarder(http.server.BaseHTTPRequestHandler):
 
 def start_forwarder(port: int, keys: dict[str, str]) -> http.server.ThreadingHTTPServer:
     _Forwarder.keys = {k: v for k, v in keys.items() if v}
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), _Forwarder)
+
+    class Server(http.server.ThreadingHTTPServer):
+        # default listen backlog is 5: with the thinking planner, several slow calls can be in flight and a new
+        # connection was refused once ("Failed to connect to /10.0.2.2:18081")
+        request_queue_size = 64
+
+    server = Server(("127.0.0.1", port), _Forwarder)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
