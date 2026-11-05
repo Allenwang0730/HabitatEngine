@@ -688,6 +688,7 @@ class AgentLoop(
         var noChange = 0
         var recoveries = 0
         var invalidPicks = 0
+        var badReplies = 0
         var autoTaps = 0
         var redecides = 0
         var nextCheckAt = STEP_CHECK_EVERY
@@ -779,6 +780,12 @@ class AgentLoop(
                             changed = false, signature = "INVALID|${decision.operation}|${decision.target.orEmpty()}",
                             error = decision.detail, planStep = run.seq,
                         )
+                        continue
+                    }
+                    // 没拿到可用的决策（回复不是 JSON、网络失败）：同一屏再问一次，不为一次坏回复重规划
+                    if (decision.operation.isEmpty() && badReplies < MAX_BAD_REPLIES) {
+                        badReplies++
+                        onStep("决策没拿到（${decision.detail}），再问一次")
                         continue
                     }
                     return StepOutcome("error", decision.detail.ifBlank { "决策失败" })
@@ -1010,6 +1017,8 @@ class AgentLoop(
 
         /** 多步计划里，一步做了几个动作后复查一次完成条件（[stepChecks]）。 */
         const val STEP_CHECK_EVERY = 2
+        /** 一步里允许几次"没拿到可用决策"（回复不是 JSON、网络失败）再问。 */
+        const val MAX_BAD_REPLIES = 2
         /** 跨屏笔记最多留几条。 */
         const val MAX_NOTES = 6
         /** 一次任务里按 replan_after 接着规划的上限：防止每版计划都写 replan_after 来回规划。 */
