@@ -98,6 +98,9 @@ object MobilePriors {
             if (step.completed.isNotEmpty()) put("completed", step.completed)
         }
         if (step.facts.isNotEmpty()) put("facts", step.facts)
+        if (step.reflections.isNotEmpty()) {
+            put("reflections", step.reflections.map { mapOf("cause" to it.cause, "next" to it.next) })
+        }
         step.nav?.let { nav ->
             put("nav", buildMap {
                 put("path", nav.path)
@@ -275,4 +278,41 @@ fun parseModelDecision(raw: String, catalog: ActionCatalog): Decision {
         return Decision("error", operation, target, detail = "操作不在候选中: $operation")
     }
     return decisionFromChoice(catalog, operation, target, 1.0, "DeepSeek 选择 $operation")
+}
+
+/**
+ * 软惩罚模式下 DeepSeek 一次给出最多 3 个备选（各带概率）：
+ * `{"choices":[{"operation":"TAP","target":"3","p":0.6},…]}`。
+ * 先丢掉不在候选里的（这也顺带解决了"首选报候选里没有"——退到下一个备选），
+ * 再按 [Penalties.rerank] 降低受罚动作的分。拿不到 choices 时退回单选格式（[parseModelDecision]）。
+ */
+fun parseModelChoices(raw: String, catalog: ActionCatalog): Decision {
+    val start = raw.indexOf('{')
+    val end = raw.lastIndexOf('}')
+    val obj = if (start in 0 until end) {
+        runCatching { com.google.gson.JsonParser.parseString(raw.substring(start, end + 1)).asJsonObject }.getOrNull()
+    } else null
+    val list = obj?.get("choices")?.takeIf { it.isJsonArray }?.asJsonArray ?: return parseModelDecision(raw, catalog)
+    data class Option(val key: String, val operation: String, val target: String?, val p: Double)
+    val options = list.mapNotNull { el ->
+        val o = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        val op = o.get("operation").stringOrNull()?.trim().orEmpty()
+        if (op !in catalog.operations) return@mapNotNull null
+        val target = o.get("target").stringOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+        val decision = decisionFromChoice(catalog, op, target, 1.0, "")
+        if (decision.status == "error") return@mapNotNull null
+        val p = o.get("p")?.let { runCatching { it.asDouble }.getOrNull() }?.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
+        Option("$op|${decision.target.orEmpty()}", op, decision.target, p)
+    }.distinctBy { it.key }
+    if (options.isEmpty()) return parseModelDecision(raw, catalog)
+    // 模型没给概率（全 0）时按它列出的顺序给递减的分
+    val probs = if (options.all { it.p == 0.0 }) options.mapIndexed { i, o -> o.key to 1.0 / (i + 1) }.toMap()
+    else options.associate { it.key to it.p }
+    val byKey = options.associateBy { it.key }
+    val pick = Penalties.rerank(probs, byKey.keys) { k -> byKey.getValue(k).let { catalog.penaltyOf(it.operation, it.target) } }
+        ?: return parseModelDecision(raw, catalog)
+    val chosen = byKey.getValue(pick.choice)
+    val note = if (pick.flipped) "（惩罚后改选）" else ""
+    // 置信度保持 1.0（与单选格式一致）：DeepSeek 自报的概率没校准，拿它去碰低置信阈值会凭空多出"不确定"
+    return decisionFromChoice(catalog, chosen.operation, chosen.target, 1.0, "DeepSeek 选择 ${chosen.operation}$note")
 }

@@ -88,6 +88,9 @@ object DeviceTools {
 
     const val MAX_TOOL_TEXT = 2000
 
+    /** 写剪贴板的门控词。只收明确说剪贴板的：「复制文件」「复制一份笔记」不是要动剪贴板。 */
+    val CLIPBOARD_WORDS = listOf("剪贴板", "剪切板", "clipboard", "复制到剪", "拷贝到剪")
+
     /** 输出类工具：只把结果交给用户（小屏/工作区），不操作界面。 */
     val OUTPUT_TOOLS = setOf("show_on_screen", "save_note")
 
@@ -127,6 +130,10 @@ object DeviceTools {
         DeviceTool(
             "open_url", "用浏览器打开目标里写的网址（url 必须原样出现在目标里；之后页面里的操作照常在界面上做）", emptyMap(),
             textArgs = mapOf("url" to true),
+        ),
+        DeviceTool(
+            "copy_text", "把一段文字放进剪贴板（text 必须原样出现在目标里）", emptyMap(),
+            gate = CLIPBOARD_WORDS, textArgs = mapOf("text" to true),
         ),
     )
 
@@ -251,6 +258,15 @@ object DeviceTools {
                 val url = com.ailun.habitat.handlers.NodeOpenUrlHandler.normalize(args.getValue("url")) ?: return null
                 if (url !in urlsIn(goal)) return null
                 Invocation(tool, args, "ACTION_OPEN_URL", mapOf("url" to url), "用浏览器打开 $url", "open_url_success")
+            }
+            "copy_text" -> {
+                // 和输入文字同一条规矩：内容必须是目标原文的子串，规划器不能往剪贴板里塞别的东西
+                val text = args.getValue("text").trim()
+                if (!goal.contains(text)) return null
+                Invocation(
+                    tool, args, "ACTION_CLIPBOARD", mapOf("action" to "set", "text" to text),
+                    "复制「${text.take(30)}」到剪贴板", "clipboard_success",
+                )
             }
             "read_battery" -> Invocation(
                 tool, args, "ACTION_GET_BATTERY", emptyMap(), "读取电量", "battery_success",

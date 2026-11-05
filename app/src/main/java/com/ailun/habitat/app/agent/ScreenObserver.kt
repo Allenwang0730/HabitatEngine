@@ -29,6 +29,39 @@ object ScreenObserver {
     /** 无障碍树可用文字低于这个长度就考虑 OCR 兜底（微信仍优先走伪装服务）。 */
     private const val OCR_MIN_TEXT = 12
     private const val OCR_SETTLE_MS = 600L
+
+    /** OCR 参与程度：fallback=只在树几乎没字时兜底（旧行为）；hybrid=图片/画布多或字少时补读图片文字；always=每轮都补。 */
+    const val OCR_FALLBACK = "fallback"
+    const val OCR_HYBRID = "hybrid"
+    const val OCR_ALWAYS = "always"
+    private const val PREFS = "agent_loop_prefs"
+
+    /** hybrid：图片类控件占屏 ≥ 这个比例，或树里文字少于 [HYBRID_MIN_TEXT] 字，就补一次 OCR。 */
+    private const val HYBRID_IMAGE_FRACTION = 0.15
+    private const val HYBRID_MIN_TEXT = 40
+    /** 小于屏幕面积 2% 的图片（图标）不算。 */
+    private const val MIN_IMAGE_AREA = 0.02
+    private const val MAX_OCR_EXTRA = 20
+    /** 屏幕顶部这一条是状态栏（时间、信号），OCR 读到的不进观测。 */
+    private const val STATUS_BAR_FRACTION = 0.045
+    /** 开发者选项「指针位置」叠加层那一行读数，例如「P:0/1 dX:0.0 dY:0.0 Xv:0.0 Yv:0.0 Prs:1.0」。 */
+    private val POINTER_OVERLAY = Regex("""\b(P:\s*\d+\s*/\s*\d+|d[XY]:\s*-?\d|[XY]v:\s*-?\d|Prs:\s*\d|Size:\s*\d)""")
+    /** 同一屏（包名 + 树文字不变）几秒内复用上次 OCR 结果：一步里会读好几次屏，不必每次都截图识别。 */
+    private const val OCR_CACHE_MS = 4_000L
+    private val IMAGE_CLASS_HINTS = listOf("ImageView", "WebView", "SurfaceView", "TextureView", "VideoView", "Image")
+
+    fun getOcrMode(context: Context): String =
+        context.getSharedPreferences(PREFS, 0).getString("ocr_mode", OCR_FALLBACK) ?: OCR_FALLBACK
+
+    fun setOcrMode(context: Context, mode: String) {
+        if (mode in setOf(OCR_FALLBACK, OCR_HYBRID, OCR_ALWAYS)) context.getSharedPreferences(PREFS, 0).edit().putString("ocr_mode", mode).apply()
+    }
+
+    private data class OcrCache(val key: String, val at: Long, val blocks: List<OcrText>)
+    @Volatile private var ocrCache: OcrCache? = null
+
+    /** 与 Android 无关的 OCR 结果，便于单测合并逻辑。 */
+    data class OcrText(val text: String, val bounds: ElementBounds)
     private const val DESC_DEPTH = 3
     private const val DESC_MAX_PARTS = 3
     private const val DESC_MAX_LEN = 80
@@ -97,8 +130,78 @@ object ScreenObserver {
             val ocr = WeChatOcr.recognize(host, width, height, packageName = (again ?: named).packageName)
             return ocr ?: again ?: named
         }
-        return named
+        val mode = getOcrMode(context)
+        if (mode == OCR_FALLBACK) return named
+        val host = primary ?: reader ?: return named
+        return hybrid(host, named, mode, width, height)
     }
+
+    /**
+     * 混合读屏：树是好的，但图片 / WebView / 画布占了大块屏幕（或树里字很少）时，把 OCR 读到、树里没有的文字补进来。
+     * 补进来的元素标 [ScreenElement.ocr]，不参与"屏幕变没变"的判断（[LoopPolicy.sameScreen]），OCR 抖动不会骗过判重。
+     */
+    private suspend fun hybrid(host: AccessibilityService, tree: ScreenObservation, mode: String, width: Int, height: Int): ScreenObservation {
+        val wanted = mode == OCR_ALWAYS || tree.imageFraction >= HYBRID_IMAGE_FRACTION || textLen(tree) < HYBRID_MIN_TEXT
+        if (!wanted) return tree
+        val key = "${tree.packageName}|${tree.visibleText.hashCode()}|${tree.elements.size}"
+        val now = System.currentTimeMillis()
+        val cached = ocrCache?.takeIf { it.key == key && now - it.at < OCR_CACHE_MS }
+        val blocks = cached?.blocks ?: WeChatOcr.readScreenThrottled(host, width, height)
+            ?.map { OcrText(it.text, ElementBounds(it.box.left, it.box.top, it.box.right, it.box.bottom)) }
+            ?.also { ocrCache = OcrCache(key, now, it) }
+            ?: return tree
+        return mergeOcr(tree, blocks)
+    }
+
+    /**
+     * 把 OCR 块并进树的观测（纯逻辑，单测覆盖）：
+     * - 树里已经有的文字不重复加（互相包含即算有）；
+     * - 状态栏、输入法键盘、开发者选项「指针位置」那一行读数（P:0/1 dX:… Xv:…）是噪声，丢掉；
+     * - 落在可点控件里的才可点（点图片卡片），其余只给模型"看"；
+     * - 最多补 [MAX_OCR_EXTRA] 块，序号接在树元素后面。
+     */
+    internal fun mergeOcr(tree: ScreenObservation, blocks: List<OcrText>): ScreenObservation {
+        val h = tree.screenHeight.coerceAtLeast(1)
+        val ime = tree.windows.filter { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }.mapNotNull { it.bounds }
+        val treeTexts = tree.elements.map { fold(it.text) }.filter { it.isNotEmpty() }
+        val extra = blocks.asSequence()
+            .filter { it.bounds.centerY > h * STATUS_BAR_FRACTION }
+            .filter { b -> ime.none { it.contains(b.bounds) } }
+            .filterNot { POINTER_OVERLAY.containsMatchIn(it.text) }
+            .filter { b ->
+                val t = fold(b.text)
+                t.length >= 2 && treeTexts.none { it.contains(t) || (it.length >= 4 && t.contains(it)) }
+            }
+            .take(MAX_OCR_EXTRA)
+            .toList()
+        if (extra.isEmpty()) return tree
+        val start = tree.elements.size
+        val added = extra.mapIndexed { i, b ->
+            val inClickable = tree.elements.any { el ->
+                el.clickable && !el.system && el.bounds?.let { bb ->
+                    b.bounds.centerX in bb.left..bb.right && b.bounds.centerY in bb.top..bb.bottom
+                } == true
+            }
+            ScreenElement(
+                index = (start + i + 1).toString(),
+                text = b.text.take(80),
+                centerX = b.bounds.centerX,
+                centerY = b.bounds.centerY,
+                clickable = inClickable,
+                editable = false,
+                focused = false,
+                bounds = b.bounds,
+                ocr = true,
+            )
+        }
+        return tree.copy(
+            elements = tree.elements + added,
+            visibleText = tree.visibleText + "\n" + added.joinToString("\n") { it.text },
+            source = tree.source + "+ocr",
+        )
+    }
+
+    private fun fold(text: String): String = text.lowercase().filterNot { it.isWhitespace() }
 
     /** 树里文字太少、且没有任何可点控件，才值得 OCR；有可点控件说明树是好的，只是这页字少。 */
     internal fun needsOcr(obs: ScreenObservation): Boolean =
@@ -139,13 +242,14 @@ object ScreenObserver {
     internal fun walk(service: AccessibilityService, width: Int, height: Int, source: String): ScreenObservation {
         val raw = mutableListOf<RawNode>()
         val infos = mutableListOf<WindowInfo>()
+        val images = mutableListOf<ElementBounds>()
         val windows = runCatching { service.windows }.getOrNull().orEmpty()
         if (windows.isEmpty()) {
             val root = runCatching { service.rootInActiveWindow }.getOrNull()
             if (root != null) {
                 try {
                     val before = raw.size
-                    collect(root, raw, 0, intArrayOf(0), RANK_ACTIVE, ancestorClickable = false, screenW = width, screenH = height)
+                    collect(root, raw, 0, intArrayOf(0), RANK_ACTIVE, ancestorClickable = false, screenW = width, screenH = height, images = images)
                     infos.add(windowInfo(root, RANK_ACTIVE, active = true, type = AccessibilityWindowInfo.TYPE_APPLICATION, nodes = raw.size - before))
                 } finally {
                     runCatching { root.recycle() }
@@ -157,14 +261,31 @@ object ScreenObserver {
                 val rank = rankOf(window)
                 try {
                     val before = raw.size
-                    collect(root, raw, 0, intArrayOf(0), rank, ancestorClickable = false, screenW = width, screenH = height)
+                    collect(
+                        root, raw, 0, intArrayOf(0), rank, ancestorClickable = false, screenW = width, screenH = height,
+                        images = if (rank == RANK_ACTIVE || rank == RANK_APP) images else null,
+                    )
                     infos.add(windowInfo(root, rank, window.isActive, window.type, raw.size - before, window.isFocused))
                 } finally {
                     runCatching { root.recycle() }
                 }
             }
         }
-        return select(raw, width, height, source).copy(windows = infos.filter { it.packageName != SELF })
+        return select(raw, width, height, source).copy(
+            windows = infos.filter { it.packageName != SELF },
+            imageFraction = imageFraction(images, width, height),
+        )
+    }
+
+    /** 图片类控件（去掉重叠前）占屏幕面积的比例，封顶 1。 */
+    internal fun imageFraction(images: List<ElementBounds>, width: Int, height: Int): Double {
+        if (width <= 0 || height <= 0 || images.isEmpty()) return 0.0
+        val area = images.sumOf { b ->
+            val w = (minOf(b.right, width) - maxOf(b.left, 0)).coerceAtLeast(0)
+            val h = (minOf(b.bottom, height) - maxOf(b.top, 0)).coerceAtLeast(0)
+            w.toLong() * h
+        }
+        return (area.toDouble() / (width.toLong() * height)).coerceAtMost(1.0)
     }
 
     private fun windowInfo(
@@ -182,6 +303,8 @@ object ScreenObserver {
         focused = focused,
         nodeCount = nodes,
         text = collectText(root).joinToString("\n").take(4000),
+        bounds = Rect().also { root.getBoundsInScreen(it) }.takeIf { it.width() > 0 && it.height() > 0 }
+            ?.let { ElementBounds(it.left, it.top, it.right, it.bottom) },
     )
 
     /** 窗口内的可见文字，用于 debug 快照对比"文字实际在哪个窗口"。 */
@@ -314,6 +437,8 @@ object ScreenObserver {
         ancestorClickable: Boolean,
         screenW: Int,
         screenH: Int,
+        /** 非空时收集图片/WebView/画布类控件的范围（混合 OCR 的触发依据）。 */
+        images: MutableList<ElementBounds>? = null,
     ) {
         if (depth > 25 || visited[0] > 400) return
         visited[0]++
@@ -322,6 +447,15 @@ object ScreenObserver {
             Rect().also { node.getBoundsInScreen(it) }.let { ElementBounds(it.left, it.top, it.right, it.bottom) },
             screenW, screenH,
         )
+        if (images != null && node.isVisibleToUser) {
+            val cls = node.className?.toString().orEmpty()
+            if (IMAGE_CLASS_HINTS.any { cls.contains(it) }) {
+                val r = Rect().also { node.getBoundsInScreen(it) }
+                if (r.width().toLong() * r.height() >= MIN_IMAGE_AREA * screenW * screenH) {
+                    images.add(ElementBounds(r.left, r.top, r.right, r.bottom))
+                }
+            }
+        }
         if (node.isVisibleToUser) {
             val text = node.text?.toString()?.trim().orEmpty()
             val desc = node.contentDescription?.toString()?.trim().orEmpty()
@@ -383,7 +517,7 @@ object ScreenObserver {
                 collect(
                     child, out, depth + 1, visited, rank,
                     ancestorClickable = ancestorClickable || (clickable && !pageSizedNode),
-                    screenW = screenW, screenH = screenH,
+                    screenW = screenW, screenH = screenH, images = images,
                 )
             } finally {
                 runCatching { child.recycle() }

@@ -46,7 +46,7 @@ object Catalogs {
     private const val SELF_PACKAGE = "com.ailun.habitat"
 
     private const val MAX_TAPS = 30
-    private const val MAX_LONG_PRESS = 8
+    private const val MAX_LONG_PRESS = 12
     private const val MAX_APPS = 8
     private const val MAX_TEXTS = 6
     private const val TEXT_PREVIEW = 40
@@ -152,7 +152,8 @@ object Catalogs {
                         params = mapOf("target" to "${el.centerX},${el.centerY}"),
                         centerX = el.centerX,
                         centerY = el.centerY,
-                        matchText = el.text,
+                        // OCR 文字不保证每次读屏都在（OCR 限频、缓存过期），不拿它做"目标还在原位"的复查
+                        matchText = el.text.takeUnless { el.ocr },
                         viewId = el.viewId,
                     ),
                 )
@@ -222,9 +223,12 @@ object Catalogs {
 
         // 长按：少数行要长按才出菜单。候选目标与 TAP 相同（同一批控件）。
         // 只在确实有候选控件时出现，避免空页面里给模型一堆无效动作。
-        if (guard == null && taps.isNotEmpty()) {
-            operations["LONG_PRESS"] = "长按一个控件，用于唤出长按菜单（重命名、删除、更多选项）。"
-            taps.take(MAX_LONG_PRESS).forEach { el ->
+        // 有焦点的输入框不进 TAP（再点也没变化），但长按它才能弹出「全选/复制/粘贴」——AndroidWorld 复制到剪贴板的任务就卡在这里。
+        val focusedInput = input?.takeIf { it.focused && taps.none { t -> t.index == it.index } && allowedTap(goal, it.text, allowGoalUnlock) }
+        val longTargets = (listOfNotNull(focusedInput) + taps).take(MAX_LONG_PRESS)
+        if (guard == null && longTargets.isNotEmpty()) {
+            operations["LONG_PRESS"] = "长按一个控件，用于唤出长按菜单（重命名、删除、更多选项），或在输入框里唤出全选/复制/粘贴。"
+            longTargets.forEach { el ->
                 val key = el.index
                 val type = typeOf(el)
                 longPressTargets[key] = describeTarget(el, type)
@@ -438,6 +442,7 @@ object Catalogs {
     fun typeOf(el: ScreenElement): String {
         val id = el.viewId.lowercase()
         return when {
+            el.ocr -> if (el.clickable) "图片文字·可点" else "图片文字"
             el.editable -> "输入框"
             el.rangeFraction != null -> "滑块"
             el.checkable && el.selectable -> "开关行"

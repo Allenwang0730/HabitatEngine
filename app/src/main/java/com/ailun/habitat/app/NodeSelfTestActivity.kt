@@ -53,6 +53,10 @@ class NodeSelfTestActivity : Activity() {
         i.getStringExtra("deepseek_key")?.let { com.ailun.habitat.app.ai.WorkflowAIClient.setApiKey(this, it) }
         i.getStringExtra("deepseek_url")?.let { com.ailun.habitat.app.ai.WorkflowAIClient.setBaseUrl(this, it) }
         i.getStringExtra("provider")?.let { com.ailun.habitat.app.agent.AgentLoopController.setProvider(this, it) }
+        i.getStringExtra("jev_key")?.let { com.ailun.habitat.app.agent.AgentLoopController.setJevKey(this, it) }
+        i.getStringExtra("jev_url")?.let { com.ailun.habitat.app.agent.AgentLoopController.setJevUrl(this, it) }
+        i.getStringExtra("penalty_mode")?.let { com.ailun.habitat.app.agent.AgentLoopController.setPenaltyMode(this, it) }
+        i.getStringExtra("ocr_mode")?.let { com.ailun.habitat.app.agent.ScreenObserver.setOcrMode(this, it) }
     }
 
     private lateinit var statusView: TextView

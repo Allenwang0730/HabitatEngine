@@ -260,4 +260,32 @@ class PlannerTest {
         val known = Catalogs.build("现在电量是多少？", screen("com.bbk.launcher2"), apps, knownFacts = setOf("battery_level"))
         assertTrue(known.toolTargets.values.none { it.contains("电量") })
     }
+
+    @Test
+    fun reflectionParsesAndCapsAvoidList() {
+        val r = PlanPrompts.parseReflection(
+            """好的 {"cause":"长按后出现选择模式，应点删除图标","next":"点工具栏的删除","avoid":["长按「a.md」","长按「b.md」","x","y","z","w"]}""",
+        )!!
+        assertTrue(r.cause.contains("选择模式"))
+        assertEquals("点工具栏的删除", r.next)
+        assertEquals(5, r.avoid.size)
+        // 原因和下一步都空：不算反思
+        assertEquals(null, PlanPrompts.parseReflection("""{"cause":"","next":"","avoid":[]}"""))
+        assertEquals(null, PlanPrompts.parseReflection("not json"))
+    }
+
+    @Test
+    fun reviewPromptAsksForBareAnswer() {
+        assertTrue(PlanPrompts.SYSTEM_REVIEW.contains("answer 只写答案本身"))
+        val review = PlanPrompts.parseReview("""{"done":true,"reason":"屏幕上有 3 条待办","answer":"3"}""")!!
+        assertEquals("3", review.answer)
+    }
+
+    @Test
+    fun replanPromptCarriesReflections() {
+        val ctx = ReplanContext("删除笔记", "兜圈", emptyList(), reflections = listOf(Reflection("一直长按", "点删除图标")))
+        val text = PlanPrompts.planUser("Delete the note", screen("net.gsantner.markor"), apps, ctx)
+        assertTrue(text.contains("失败后的反思"))
+        assertTrue(text.contains("点删除图标"))
+    }
 }

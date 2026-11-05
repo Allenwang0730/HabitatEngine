@@ -66,6 +66,18 @@ object WeChatOcr {
     /** 识别出的一段文字，坐标已换算到屏幕像素。 */
     data class Block(val text: String, val box: Rect)
 
+    /** 与 [recognize] 同一套限频和退避（系统截图接口约 1 秒一次），返回原始文字块；被限频时返回 null。 */
+    suspend fun readScreenThrottled(service: AccessibilityService, screenWidth: Int, screenHeight: Int): List<Block>? {
+        if (System.currentTimeMillis() < nextAllowedAt) return null
+        val blocks = readScreen(service, screenWidth, screenHeight) ?: run {
+            backoff()
+            return null
+        }
+        backoffMs = 1_000L
+        nextAllowedAt = System.currentTimeMillis() + 1_000L
+        return blocks
+    }
+
     /**
      * 截屏并识别，不限频（ACTION_OCR 节点用；Agent 读屏走 [recognize]，带限频和退避）。
      * 截图或识别失败返回 null；屏幕上没有字返回空列表。需要 Android 11+。

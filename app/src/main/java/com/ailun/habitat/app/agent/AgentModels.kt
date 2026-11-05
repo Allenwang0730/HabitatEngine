@@ -30,6 +30,8 @@ data class ScreenElement(
     val rangeFraction: Double? = null,
     /** 来自非活动的系统窗口（状态栏、灵动岛、导航栏）。 */
     val system: Boolean = false,
+    /** 混合读屏时由 OCR 补进来的图片文字（无障碍树里没有）。只用来"看"，判断屏幕是否变化时不算。 */
+    val ocr: Boolean = false,
 )
 
 data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom: Int) {
@@ -54,6 +56,8 @@ data class WindowInfo(
     val focused: Boolean,
     val nodeCount: Int,
     val text: String,
+    /** 窗口根节点在屏幕上的范围（输入法窗口用它把键盘区域的 OCR 文字排除掉）。 */
+    val bounds: ElementBounds? = null,
 )
 
 data class ScreenObservation(
@@ -68,6 +72,8 @@ data class ScreenObservation(
     val locked: Boolean = false,
     /** 本次读屏遍历到的窗口（已排掉本 App 自己的）。 */
     val windows: List<WindowInfo> = emptyList(),
+    /** 图片 / WebView / 画布类控件占屏幕面积的比例（0~1），混合 OCR 据此决定要不要补读图片文字。 */
+    val imageFraction: Double = 0.0,
 ) {
     companion object {
         fun empty(width: Int, height: Int) = ScreenObservation(
@@ -138,7 +144,20 @@ data class ActionCatalog(
     val sliderTargets: Map<String, String> = emptyMap(),
     /** 输入框里已经是要输入的文字，第一个 TAP 候选就是「发送/搜索/确定」。 */
     val submitReady: Boolean = false,
+    /**
+     * 软惩罚（[Penalties]）：动作 id → 惩罚分。本次任务里做过却没用的动作不删掉，只降低被选中的概率；
+     * 硬模式下为空（走 [without] 直接删）。
+     */
+    val penalties: Map<String, Double> = emptyMap(),
 ) {
+    /** (操作, 目标) 的惩罚分；没有对应候选或没受罚为 0。 */
+    fun penaltyOf(operation: String, target: String?): Double =
+        resolve(operation, target)?.let { penalties[it.id] } ?: 0.0
+
+    /** 某个操作下最轻的惩罚：只要还有一个没受罚的目标，这个操作本身就不该被压低。 */
+    fun operationPenalty(operation: String): Double =
+        actions.filter { it.operation == operation }.minOfOrNull { penalties[it.id] ?: 0.0 } ?: 0.0
+
     fun resolve(operation: String, target: String?): CatalogAction? = when (operation) {
         "TAP" -> actions.find { it.operation == "TAP" && it.target == target }
         "TYPE_TEXT" -> actions.find { it.operation == "TYPE_TEXT" && it.target == target }
@@ -320,6 +339,14 @@ data class StepContext(
     val facts: Map<String, String> = emptyMap(),
     /** 导航栈与本页已试过的入口（[NavigationState.snapshot]）。 */
     val nav: NavSnapshot? = null,
+    /** 本次任务里前几次失败后的反思（最近的在后），提醒执行器别再走同样的路。 */
+    val reflections: List<Reflection> = emptyList(),
 ) {
     val multiStep: Boolean get() = total > 1
 }
+
+/**
+ * 一次失败后的反思（Reflexion 式，只在本次任务内有效）：为什么没成、下一次换什么做法、哪些动作别再选。
+ * [avoid] 里的文字会给匹配的候选加惩罚（[Penalties.fromReflections]），不会把它们删掉。
+ */
+data class Reflection(val cause: String, val next: String, val avoid: List<String> = emptyList())
