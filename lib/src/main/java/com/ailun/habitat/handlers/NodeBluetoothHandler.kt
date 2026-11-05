@@ -40,11 +40,12 @@ class NodeBluetoothHandler(
 
         try {
             when (action) {
-                "on" -> success = setEnabled(bluetoothAdapter, true) || settlesTo(bluetoothAdapter, true)
-                "off" -> success = setEnabled(bluetoothAdapter, false) || settlesTo(bluetoothAdapter, false)
+                // 以最终状态为准：调用返回成功、状态没变（模拟器上 disable() 返回 true，bluetooth_on 还是 1）也算没做到
+                "on" -> success = setEnabled(bluetoothAdapter, true).let { settlesTo(bluetoothAdapter, true, context) }
+                "off" -> success = setEnabled(bluetoothAdapter, false).let { settlesTo(bluetoothAdapter, false, context) }
                 "toggle" -> {
                     val want = !isEnabled(bluetoothAdapter)
-                    success = setEnabled(bluetoothAdapter, want) || settlesTo(bluetoothAdapter, want)
+                    success = setEnabled(bluetoothAdapter, want).let { settlesTo(bluetoothAdapter, want, context) }
                 }
                 "status" -> {
                     val enabled = isEnabled(bluetoothAdapter)
@@ -78,14 +79,25 @@ class NodeBluetoothHandler(
     /**
      * 调用报失败、但开关其实在变：最多等 [SETTLE_MS] 看最终状态。AndroidWorld（API 33、无 Shizuku）：
      * BluetoothAdapter.enable() 返回 false，蓝牙却开了；节点报失败，Agent 又去设置页里找开关，把 9 步耗光。
+     * "开了没有"同时看系统设置 `bluetooth_on`（状态栏、设置页、AndroidWorld 判分读的都是它）：
+     * 模拟器上 adapter.isEnabled 一直不变，这个值已经变了。
      */
-    private suspend fun settlesTo(adapter: BluetoothAdapter, enabled: Boolean): Boolean {
+    private suspend fun settlesTo(adapter: BluetoothAdapter, enabled: Boolean, context: WorkflowContext): Boolean {
+        val app = try { context.appContext } catch (_: Exception) { null }
+        // 读得到 bluetooth_on 就以它为准（两者不一致时，用户和判分看到的都是它）；读不到才看 adapter
+        fun reached(): Boolean = (app?.let { globalOn(it) } ?: isEnabled(adapter)) == enabled
         val deadline = System.currentTimeMillis() + SETTLE_MS
         while (System.currentTimeMillis() < deadline) {
-            if (isEnabled(adapter) == enabled) return true
+            if (reached()) return true
             kotlinx.coroutines.delay(300)
         }
-        return isEnabled(adapter) == enabled
+        return reached()
+    }
+
+    private fun globalOn(context: android.content.Context): Boolean? = try {
+        android.provider.Settings.Global.getInt(context.contentResolver, "bluetooth_on") == 1
+    } catch (_: Exception) {
+        null
     }
 
     @Suppress("DEPRECATION", "MissingPermission")
