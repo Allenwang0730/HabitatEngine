@@ -916,7 +916,7 @@ class AgentLoop(
 
             onStep(action.label)
             // 这个应用里注入的点击手势被证明不起作用（下面的回退点开过）：坐标点击直接走节点 ACTION_CLICK
-            val viaNode = action.tool == "ACTION_CLICK" && observation.packageName in run.nodeClickPkgs &&
+            val viaNode = NODE_CLICK_FALLBACK && action.tool == "ACTION_CLICK" && observation.packageName in run.nodeClickPkgs &&
                 action.params["target"]?.toString()?.contains(',') == true
             val toRun = if (viaNode) action.copy(params = action.params + ("mode" to "node")) else action
             var result = runNode(toRun.tool ?: return StepOutcome("error", "动作缺少节点"), toRun.params, toRun.successFlag, toRun.outputs)
@@ -960,7 +960,7 @@ class AgentLoop(
             // 点击手势派发成功、屏幕却没变：同一个点改用节点 ACTION_CLICK 再点一次（花一步）。
             // AndroidWorld 文件管理器（DocumentsUI）：注入的点击手势点列表里的文件夹、文件都不打开，截图证实还停在原处，
             // 执行器只能换别的地方点，Files×2、Browser×3 全卡在这里。回退点开过一次，这个应用后面的坐标点击都直接走节点
-            if (result.ok && !changed && !viaNode && executed.tool == "ACTION_CLICK" &&
+            if (NODE_CLICK_FALLBACK && result.ok && !changed && !viaNode && executed.tool == "ACTION_CLICK" &&
                 observation.packageName !in run.nodeClickPkgs && executed.params["target"]?.toString()?.contains(',') == true &&
                 (run.nodeRetryMisses[observation.packageName] ?: 0) < MAX_NODE_RETRY_MISSES &&
                 run.used < maxSteps && run.used - start < budget
@@ -1106,6 +1106,12 @@ class AgentLoop(
         const val MAX_NODE_FAILURES = 3
         /** 一个应用里节点点击回退几次都没用，就不再回退。 */
         const val MAX_NODE_RETRY_MISSES = 2
+        /**
+         * 点击手势没让屏幕变化时改用节点 ACTION_CLICK 再点（[NodeClickHandler] mode=node）。先关着：
+         * AndroidWorld v15 MarkorMergeNotes 里点对话框的输入框（屏幕本来就不变），回退的节点点击把对话框关了，
+         * 之后整个 Markor 都走节点点击，任务在"新建 → OK"里绕圈。要只对列表行回退、不升级整个应用，验证过再开。
+         */
+        const val NODE_CLICK_FALLBACK = false
         /** 复核员看到这个事实（值 "true"）就知道这是最后一次复核。 */
         const val LAST_CHANCE = "last_chance"
         /** 给复核员看的最近几个起了作用的动作。 */
