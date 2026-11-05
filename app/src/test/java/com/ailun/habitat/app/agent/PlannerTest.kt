@@ -65,7 +65,7 @@ class PlannerTest {
         assertNull(PlanPrompts.parsePlan("没有 JSON", "x", apps))
         assertNull(PlanPrompts.parsePlan("""{"steps":"no"}""", "x", apps))
         assertNull(PlanPrompts.parsePlan("""{"steps":[{"instruction":"","done_when":""}]}""", "x", apps))
-        val many = (1..10).joinToString(",") { """{"type":"ui","instruction":"第${it}步","done_when":"好了"}""" }
+        val many = (1..PlanPrompts.MAX_STEPS + 4).joinToString(",") { """{"type":"ui","instruction":"第${it}步","done_when":"好了"}""" }
         assertEquals(PlanPrompts.MAX_STEPS, PlanPrompts.parsePlan("""{"steps":[$many]}""", "x", apps)!!.steps.size)
     }
 

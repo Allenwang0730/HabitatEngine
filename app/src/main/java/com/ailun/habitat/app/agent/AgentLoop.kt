@@ -1041,8 +1041,8 @@ class AgentLoop(
         const val MAX_NODE_FAILURES = 3
         /** 跨屏笔记最多留几条。 */
         const val MAX_NOTES = 6
-        /** 一次任务里按 replan_after 接着规划的上限：防止每版计划都写 replan_after 来回规划。 */
-        const val MAX_REFRESHES = 2
+        /** 一次任务里按 replan_after 接着规划的上限：防止每版计划都写 replan_after 来回规划（录入很多条时要接着规划好几次）。 */
+        const val MAX_REFRESHES = 4
 
         /** 技能步里代码自己点名字对得上的那一行，最多几次。 */
         const val MAX_AUTO_TAPS = 2
