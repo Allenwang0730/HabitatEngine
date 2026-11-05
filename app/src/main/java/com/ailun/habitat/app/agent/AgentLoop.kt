@@ -299,10 +299,6 @@ class AgentLoop(
         var noteCount = 0
         /** 按规划器的 replan_after 读到内容后接着规划的次数（[MAX_REFRESHES]）。 */
         var refreshes = 0
-        /** 注入的点击手势不起作用、节点 ACTION_CLICK 起作用的应用（包名）：之后坐标点击直接走节点。 */
-        val nodeClickPkgs = mutableSetOf<String>()
-        /** 节点点击回退也没用的次数（按包名）：到 [MAX_NODE_RETRY_MISSES] 次就不在这个应用里回退了（点了没反应是真的没反应）。 */
-        val nodeRetryMisses = mutableMapOf<String, Int>()
         /** 本次任务里执行失败过的工具调用（权限不足等），重规划后不再尝试。 */
         val failedTools = mutableSetOf<String>()
         /** 失败后的反思（最多留 [MAX_REFLECTIONS] 条），进重规划和执行器提示词。 */
@@ -911,11 +907,7 @@ class AgentLoop(
             }
 
             onStep(action.label)
-            // 这个应用里注入的点击手势被证明不起作用（下面的回退点开过）：坐标点击直接走节点 ACTION_CLICK
-            val viaNode = NODE_CLICK_FALLBACK && action.tool == "ACTION_CLICK" && observation.packageName in run.nodeClickPkgs &&
-                action.params["target"]?.toString()?.contains(',') == true
-            val toRun = if (viaNode) action.copy(params = action.params + ("mode" to "node")) else action
-            var result = runNode(toRun.tool ?: return StepOutcome("error", "动作缺少节点"), toRun.params, toRun.successFlag, toRun.outputs)
+            var result = runNode(action.tool ?: return StepOutcome("error", "动作缺少节点"), action.params, action.successFlag, action.outputs)
             run.used++
             // 执行器选的工具快捷方式失败（多半是缺权限）：本次任务不再提供它
             if (!result.ok && action.operation == "USE_TOOL") action.toolKey?.let { run.failedTools += it }
@@ -952,29 +944,6 @@ class AgentLoop(
             if (!result.ok) {
                 nodeFailures++
                 if (nodeFailures >= MAX_NODE_FAILURES) return StepOutcome("error", "「${executed.label}」失败: ${result.detail}")
-            }
-            // 点击手势派发成功、屏幕却没变：同一个点改用节点 ACTION_CLICK 再点一次（花一步）。
-            // AndroidWorld 文件管理器（DocumentsUI）：注入的点击手势点列表里的文件夹、文件都不打开，截图证实还停在原处，
-            // 执行器只能换别的地方点，Files×2、Browser×3 全卡在这里。回退点开过一次，这个应用后面的坐标点击都直接走节点
-            if (NODE_CLICK_FALLBACK && result.ok && !changed && !viaNode && executed.tool == "ACTION_CLICK" &&
-                observation.packageName !in run.nodeClickPkgs && executed.params["target"]?.toString()?.contains(',') == true &&
-                (run.nodeRetryMisses[observation.packageName] ?: 0) < MAX_NODE_RETRY_MISSES &&
-                run.used < maxSteps && run.used - start < budget
-            ) {
-                val retry = executed.copy(id = executed.id + "_node", label = executed.label + "（改用节点点击）", params = executed.params + ("mode" to "node"))
-                onStep(retry.label)
-                val second = runNode("ACTION_CLICK", retry.params, retry.successFlag, retry.outputs)
-                run.used++
-                delay(700)
-                val after2 = ScreenObserver.observe(context)
-                val changed2 = second.ok && !LoopPolicy.sameScreen(after2, observation)
-                record(run, retry, observation, after2, changed2, second.ok, if (second.ok) "" else second.detail)
-                if (changed2) {
-                    run.nodeClickPkgs += observation.packageName
-                    noChange = 0
-                    continue
-                }
-                run.nodeRetryMisses.merge(observation.packageName, 1, Int::plus)
             }
             noChange = if (changed) 0 else noChange + 1
             if (!changed) onStep("屏幕没有变化（连续 $noChange 次）")
@@ -1100,14 +1069,6 @@ class AgentLoop(
         const val MAX_BAD_REPLIES = 2
         /** 一步里动作执行失败（节点返回失败）几次才算这一步走不通。 */
         const val MAX_NODE_FAILURES = 3
-        /** 一个应用里节点点击回退几次都没用，就不再回退。 */
-        const val MAX_NODE_RETRY_MISSES = 2
-        /**
-         * 点击手势没让屏幕变化时改用节点 ACTION_CLICK 再点（[NodeClickHandler] mode=node）。先关着：
-         * AndroidWorld v15 MarkorMergeNotes 里点对话框的输入框（屏幕本来就不变），回退的节点点击把对话框关了，
-         * 之后整个 Markor 都走节点点击，任务在"新建 → OK"里绕圈。要只对列表行回退、不升级整个应用，验证过再开。
-         */
-        const val NODE_CLICK_FALLBACK = false
         /** 复核员看到这个事实（值 "true"）就知道这是最后一次复核。 */
         const val LAST_CHANCE = "last_chance"
         /** 跨屏笔记最多留几条。 */

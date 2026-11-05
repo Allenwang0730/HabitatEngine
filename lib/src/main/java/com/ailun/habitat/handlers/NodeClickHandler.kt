@@ -19,7 +19,6 @@ import com.ailun.habitat.paramInt
  *   "top"/"bottom"/"left"/"right"/"center" 或 归一化 "x1,y1,x2,y2"（0-1 相对屏幕，如 0,0.5,1,1 = 下半屏）
  * - `occurrence`（可选，默认 0，仅文本匹配）：在 region 过滤后，取第几个匹配（按屏幕从上到下排序，0 起）；
  *   越界（≥ 匹配数或为负）直接失败，不再静默点第一个
- * - `mode`（可选，仅坐标）："node" = 对包含该点的最小可点节点做 ACTION_CLICK，不派发手势
  * 输出：click_success（进入时先置 false）
  */
 class NodeClickHandler(
@@ -46,7 +45,6 @@ class NodeClickHandler(
         // 点击坐标偏移（相对目标中心，屏幕 Y 向下为正；offset_y 为负表示向上偏移）
         val offsetX = paramInt(node, context, "offset_x", 0)
         val offsetY = paramInt(node, context, "offset_y", 0)
-        val mode = context.interpolate(node.params?.get("mode")?.toString()?.trim().orEmpty()).lowercase()
         val selfPackage = context.appContext.packageName
         Log.d(TAG, "Attempting to click target: '$target' region='$regionSpec' occurrence=$occurrence offset=($offsetX,$offsetY)")
 
@@ -55,13 +53,8 @@ class NodeClickHandler(
             val x = parts[0].trim().toIntOrNull()
             val y = parts[1].trim().toIntOrNull()
             if (x != null && y != null) {
-                if (mode == MODE_NODE) {
-                    Log.d(TAG, "Clicking node at: ($x, $y)")
-                    clickNodeAt(service, x, y, selfPackage)
-                } else {
-                    Log.d(TAG, "Clicking coordinate: ($x, $y)")
-                    HabitatAccessibility.dispatchTap(service, x, y)
-                }
+                Log.d(TAG, "Clicking coordinate: ($x, $y)")
+                HabitatAccessibility.dispatchTap(service, x, y)
             } else {
                 // 含逗号但非坐标 → 按文本（region/occurrence 不适用坐标，文本用）
                 performA11yClick(service, target, selfPackage, resolveRegionSpec(service, regionSpec), occurrence, offsetX, offsetY)
@@ -157,48 +150,6 @@ class NodeClickHandler(
     }
 
     // ── region 辅助（与 NodeFindElementHandler 同语义）──
-
-    /**
-     * `mode: "node"`：不派发手势，对包含 (x,y) 的最小可点节点做无障碍 ACTION_CLICK。
-     * 有的应用把注入的手势当成别的输入（文件管理器的列表项点了不打开），节点点击走的是 View 自己的 click 路径。
-     */
-    private fun clickNodeAt(service: android.accessibilityservice.AccessibilityService, x: Int, y: Int, selfPackage: String): Boolean {
-        val roots = try {
-            service.windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
-                .mapNotNull { it.root }.ifEmpty { listOfNotNull(service.rootInActiveWindow) }
-        } catch (_: Exception) {
-            listOfNotNull(service.rootInActiveWindow)
-        }
-        val found = mutableListOf<AccessibilityNodeInfo>()
-        try {
-            roots.forEach { collectClickableAt(it, x, y, selfPackage, found, 0) }
-            val r = Rect()
-            val best = found.minByOrNull { it.getBoundsInScreen(r); r.width().toLong() * r.height() } ?: return false
-            return best.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        } finally {
-            @Suppress("DEPRECATION")
-            (found + roots).forEach { runCatching { it.recycle() } }
-        }
-    }
-
-    private fun collectClickableAt(
-        node: AccessibilityNodeInfo, x: Int, y: Int, selfPackage: String, out: MutableList<AccessibilityNodeInfo>, depth: Int,
-    ) {
-        if (depth > 30 || out.size >= 40 || !node.isVisibleToUser) return
-        val r = Rect()
-        node.getBoundsInScreen(r)
-        if (!r.contains(x, y)) return
-        if (node.isClickable && node.isEnabled && node.packageName?.toString() != selfPackage) out.add(AccessibilityNodeInfo.obtain(node))
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            try {
-                collectClickableAt(child, x, y, selfPackage, out, depth + 1)
-            } finally {
-                @Suppress("DEPRECATION")
-                runCatching { child.recycle() }
-            }
-        }
-    }
 
     private fun resolveRegionSpec(service: android.accessibilityservice.AccessibilityService, spec: String): Rect? {
         if (spec.isBlank()) return null
@@ -326,7 +277,5 @@ class NodeClickHandler(
         private const val TAG = "HabitatClick"
         private const val VIEW_ID_PREFIX = "id:"
         private const val VIEW_ID_PREFIX_CN = "#id:"
-        /** 坐标点击改走节点的 ACTION_CLICK（不派发手势）。 */
-        const val MODE_NODE = "node"
     }
 }
