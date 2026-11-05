@@ -90,6 +90,9 @@ Raw data: [`eval/2026-10-09.json`](eval/2026-10-09.json).
 |---|:---:|
 | Reported done **and** device state correct (AndroidWorld's own rule) | **83/116 (71.6%)** |
 | Device state correct (ignoring whether it reported done) | 88/116 (75.9%) |
+| Same build, 3× step budget (at least 30), AndroidWorld's rule | 87/116 (75.0%) |
+
+The 3× run is not comparable with official-budget numbers; it is there because many leaderboard entries use 150 steps or no limit. Three of its tasks failed in AndroidWorld's own setup (Pro Expense onboarding: `Target text "NEXT" not found`) and count as failures.
 
 An earlier build the same night (`fcade18`) scored 75/116 (64.7%) / 83/116 on the same tasks and seeds. The changes in between: the executor writes straight into the input box a step names instead of tapping it first; the final review, when no retry is left, passes unless it sees evidence of a miss; the reviewer sees the text that was typed; and a regression where Markor files were saved as `a.md.md` was fixed.
 
@@ -102,7 +105,7 @@ Failures (33), by how the run ended: out of steps 20 (the three browser tasks, f
 
 For scale (official step budget, pass@1, from the respective papers / the [leaderboard](https://docs.google.com/spreadsheets/d/1cchzP9dlTZ3WXQTfYNhh3avxoLipqHN75v1Tb86uhHo), which is self-reported): T3A (GPT-4 Turbo, accessibility tree) 30.6%; AndroidGen 46.8%; V-Droid 59.5%; Agent S3 (GPT-5, screenshots) 68.1%. Habitat's own baseline on the 116 task templates a day earlier (DeepSeek, no screenshots, remote-origin rules, older per-position seeding) was 17/116.
 
-Raw data: [`eval/androidworld/2026-11-06-full116-v14-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v14-official-s30.jsonl) and the earlier build's [`…-v12-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v12-official-s30.jsonl) (task, seed, goal, both scores, end phase, final detail and answer, seconds, step budget).
+Raw data: [`eval/androidworld/2026-11-06-full116-v14-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v14-official-s30.jsonl), the 3× budget run [`…-v14-lenient-s30.jsonl`](eval/androidworld/2026-11-06-full116-v14-lenient-s30.jsonl), and the earlier build's [`…-v12-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v12-official-s30.jsonl) (task, seed, goal, both scores, end phase, final detail and answer, seconds, step budget).
 
 ### 2026-11-04 — branch `feat/ocr-open-url` at `ed6116b`, 25-task subset, 3 seeds
 
