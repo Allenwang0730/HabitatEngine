@@ -82,7 +82,25 @@ Raw data: [`eval/2026-10-09.json`](eval/2026-10-09.json).
 
 ## AndroidWorld (public benchmark, emulator)
 
-[AndroidWorld](https://github.com/google-research/android_world) (Google, Apache-2.0): 116 task templates over 20 apps on an Android 13 emulator. Each task's own code sets up the device and checks the end state, so the agent's DONE counts for nothing. Habitat runs as a black box through [`scripts/androidworld/run_habitat.py`](../scripts/androidworld/README.md): AndroidWorld gives the goal, the adapter starts it over MCP, AndroidWorld scores the device state.
+[AndroidWorld](https://github.com/google-research/android_world) (Google, Apache-2.0): 116 task templates over 20 apps on an Android 13 emulator. Each task's own code sets up the device and checks the end state; the agent saying "done" proves nothing, but under AndroidWorld's rule a task only counts if the agent also reported done. Habitat runs as a black box through [`scripts/androidworld/run_habitat.py`](../scripts/androidworld/README.md): AndroidWorld gives the goal, the adapter starts it over MCP, AndroidWorld scores the device state.
+
+### 2026-11-06 — full 116 tasks, official step budget, `fcade18`
+
+| Metric | Result |
+|---|:---:|
+| Reported done **and** device state correct (AndroidWorld's own rule) | **75/116 (64.7%)** |
+| Device state correct (ignoring whether it reported done) | 83/116 (71.6%) |
+
+Setup: seed 30 with AndroidWorld's per-task seeding (`sha256("30_<task>_0")`, same goals as `create_suite(seed=30)`), pass@1, step budget `int(10 × complexity)` as in AndroidWorld's runner (one step kept for the final answer). Three read-only emulators, each running a third of the tasks.
+Models, through a gateway: executor `claude-sonnet-5-5` (fallback `qwen3.8-max`); planner / reviewer / reflection / step check `claude-opus-5-5` (fallback `claude-sonnet-5-5`). Screenshots go to every model call (`vision=all`); the accessibility tree is the main input and the executor still picks from code-built candidates (plus `TAP_POINT` / `SWIPE_POINT` on screenshot coordinates, gated the same way).
+
+**Eval mode, not the default product behavior.** AndroidWorld's goals arrive over MCP, which Habitat treats as remote-origin: remote goals never delete, send or grant. This run turns on the eval switch (debug build, adb only, time-limited), under which a remote goal is treated like one the user typed on the phone, and text typed into an app may come from the screen (needed for cross-app tasks). Installed apps keep the remote-origin rules. The adapter also grants all-files access to Markor, Simple Gallery and VLC before the run, as a user would on first launch.
+
+Failures (41), by how the run ended: out of steps 29 (multi-item recipe entry, the three browser tasks, file manager, several Markor edits, two OsmAnd tasks); reported done but the check failed 8 (e.g. Markor saved `a.md` as `a.md.md`, since fixed in `f1033a0`); reviewer rejected a correct end state 3; executor gave up 1. By app (official rule): Simple Calendar 16/17, Simple SMS 6/6, OpenTracks 5/6, brightness and Wi-Fi 8/8, Bluetooth 1/4, Broccoli delete 4/8, Broccoli add 1/5, Markor create 0/4, OsmAnd 1/3.
+
+For scale (official step budget, pass@1, from the respective papers / the [leaderboard](https://docs.google.com/spreadsheets/d/1cchzP9dlTZ3WXQTfYNhh3avxoLipqHN75v1Tb86uhHo), which is self-reported): T3A (GPT-4 Turbo, accessibility tree) 30.6%; AndroidGen 46.8%; V-Droid 59.5%; Agent S3 (GPT-5, screenshots) 68.1%. Habitat's own baseline on the same 116 tasks a day earlier (DeepSeek, no screenshots, remote-origin rules) was 17/116.
+
+Raw data: [`eval/androidworld/2026-11-06-full116-v12-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v12-official-s30.jsonl) (task, seed, goal, both scores, end phase, final detail and answer, seconds, step budget).
 
 ### 2026-11-04 — branch `feat/ocr-open-url` at `ed6116b`, 25-task subset, 3 seeds
 
