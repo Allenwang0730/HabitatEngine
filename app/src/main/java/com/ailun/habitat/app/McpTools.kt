@@ -87,9 +87,9 @@ object McpTools {
                         )
                         add(
                             "max_steps",
-                            prop("integer", "最多执行多少步，超出范围会被截到 1–40（默认 20）").apply {
+                            prop("integer", "最多执行多少步，超出范围会被截到 1–120（默认 20）").apply {
                                 addProperty("minimum", 1)
-                                addProperty("maximum", 40)
+                                addProperty("maximum", 120)
                             },
                         )
                         add("planner", prop("boolean", "true：用 DeepSeek 先拆步骤、最后复核；false：不规划。不填跟随手机设置。没配 DeepSeek key 时不规划"))

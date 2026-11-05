@@ -87,12 +87,13 @@ object AgentLoopController {
     fun plannerActive(context: Context): Boolean =
         isPlannerEnabled(context) && !WorkflowAIClient.getApiKey(context).isNullOrBlank()
 
-    private fun plannerFor(context: Context, force: Boolean = false): Planner? {
+    private fun plannerFor(context: Context, force: Boolean = false, anyText: Boolean = false): Planner? {
         if (!force && !isPlannerEnabled(context)) return null
         val key = WorkflowAIClient.getApiKey(context)?.takeIf { it.isNotBlank() } ?: return null
         return DeepSeekPlanner(
             key, WorkflowAIClient.getBaseUrl(context), getPlannerModel(context).ifBlank { null },
             screenshot = screenshotSupplier.takeIf { getVisionMode(context) != VISION_OFF },
+            anyInputText = anyText,
         )
     }
 
@@ -107,7 +108,7 @@ object AgentLoopController {
     }
 
     const val DEFAULT_STEPS = 20
-    const val MAX_STEPS = 40
+    const val MAX_STEPS = 120
 
     fun getJevModel(context: Context): String =
         context.getSharedPreferences(PREFS, 0).getString("jev_model", "jev-latest") ?: "jev-latest"
@@ -249,9 +250,9 @@ object AgentLoopController {
             else -> return "未知决策器: $providerName"
         }
         val steps = (maxSteps ?: DEFAULT_STEPS).coerceIn(1, MAX_STEPS)
-        val planner = if (usePlanner == false) null else plannerFor(context, force = usePlanner == true)
-        // 评测开关（[evalLocalOriginActive]，仅 debug + adb + 限时）：远程目标按本机发起放行敏感动作
+        // 评测开关（[evalLocalOriginActive]，仅 debug + adb + 限时）：远程目标按本机发起放行敏感动作，输入文字也可以来自屏幕
         val evalLocal = origin == ORIGIN_REMOTE && evalLocalOriginActive(context)
+        val planner = if (usePlanner == false) null else plannerFor(context, force = usePlanner == true, anyText = evalLocal)
         val agent = AgentLoop(
             context.applicationContext,
             provider,

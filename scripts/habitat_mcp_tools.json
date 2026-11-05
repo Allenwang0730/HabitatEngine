@@ -86,9 +86,9 @@
           },
           "max_steps": {
             "type": "integer",
-            "description": "最多执行多少步，超出范围会被截到 1–40（默认 20）",
+            "description": "最多执行多少步，超出范围会被截到 1–120（默认 20）",
             "minimum": 1,
-            "maximum": 40
+            "maximum": 120
           },
           "planner": {
             "type": "boolean",

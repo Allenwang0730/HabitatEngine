@@ -282,6 +282,15 @@ class PlannerTest {
     }
 
     @Test
+    fun evalModeAcceptsTextReadFromTheScreen() {
+        val raw = """{"steps":[{"type":"ui","instruction":"在金额框输入 47.25","done_when":"金额框里是 47.25","text":"47.25"}]}"""
+        // 默认：47.25 不在目标里，输入文字被丢掉（防屏幕上的内容让 Agent 打别的字）
+        assertEquals(null, PlanPrompts.parsePlan(raw, "Add the expense from the receipt", apps)!!.steps.single().text)
+        // 评测模式：可以输入从屏幕读到的内容
+        assertEquals("47.25", PlanPrompts.parsePlan(raw, "Add the expense from the receipt", apps, anyText = true)!!.steps.single().text)
+    }
+
+    @Test
     fun stepCheckParses() {
         assertEquals(true, PlanPrompts.parseStepCheck("""好的 {"done":true,"reason":"已在 Health 列表页"}"""))
         assertEquals(false, PlanPrompts.parseStepCheck("""{"done":false,"reason":"还在侧边栏"}"""))

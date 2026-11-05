@@ -36,6 +36,7 @@ A11Y_SERVICE = f"{PKG}/{PKG}.app.HabitatAccessibilityService"
 SELFTEST = f"{PKG}/.app.NodeSelfTestActivity"
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
+TRUESOTA_URL = "https://true-sota.com/v1/chat/completions"
 # forwarder path -> (key name, upstream URL). The app is pointed at http://10.0.2.2:<port><path>.
 ROUTES = {"/chat/completions": ("deepseek", DEEPSEEK_URL), "/v1/systemone": ("jev", JEV_URL)}
 
@@ -43,6 +44,12 @@ ROUTES = {"/chat/completions": ("deepseek", DEEPSEEK_URL), "/v1/systemone": ("je
 # --------------------------------------------------------------------------- model forwarder
 class _Forwarder(http.server.BaseHTTPRequestHandler):
     keys: dict[str, str] = {}
+    # Optional: send DeepSeek-route calls to another OpenAI-compatible gateway and swap model names there.
+    # The app asks for "deepseek-chat" (executor) or its planner_model (planner/reviewer/reflection);
+    # model_map turns those into the real model names, so the APK does not change.
+    upstream_url: str = ""
+    upstream_key_name: str = "deepseek"
+    model_map: dict[str, str] = {}
     network_errors = 0  # requests that still failed after retries; reported per task
     usage = {"deepseek_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cache_hit_tokens": 0, "jev_calls": 0}
     lock = threading.Lock()
@@ -54,10 +61,24 @@ class _Forwarder(http.server.BaseHTTPRequestHandler):
             return
         name, url = route
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        key_name = name
+        if name == "deepseek" and self.upstream_url:
+            url, key_name = self.upstream_url, self.upstream_key_name
+            if self.model_map:
+                try:
+                    req_json = json.loads(body)
+                    asked = req_json.get("model", "")
+                    if asked in self.model_map:
+                        req_json["model"] = self.model_map[asked]
+                        # thinking models reject a low temperature on some gateways; let the gateway default it
+                        req_json.pop("temperature", None)
+                        body = json.dumps(req_json).encode()
+                except ValueError:
+                    pass
         req = urllib.request.Request(
             url,
             data=body,
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.keys[name]}"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.keys[key_name]}"},
             method="POST",
         )
         # Network errors through a local proxy (TLS EOF, resets) are transient: retry them here so a flaky
@@ -270,15 +291,21 @@ def step_budget(complexity: float, mode: str) -> tuple[int, int]:
     """(AndroidWorld steps, device actions Habitat may take).
 
     'official' = AndroidWorld's runner, int(10 * complexity); 'official15' = 1.5x (DroidRun's public harness default,
-    ceil(15 * complexity)). In both, one step is kept for the final answer/status, which the reference agents spend
-    as an action; Habitat does it as its review, so its device actions are capped at budget - 1. Habitat caps a run at 40.
+    ceil(15 * complexity)); 'lenient' = 3x official, at least 30 (most top leaderboard entries run with 150 steps or no
+    limit). In all three, one step is kept for the final answer/status, which the reference agents spend as an action;
+    Habitat does it as its review, so its device actions are capped at budget - 1. Habitat caps a run at 120.
     A plain number is a fixed budget with no reserved step (the 25-task subset runs).
     """
     import math
 
-    if mode in ("official", "official15"):
-        total = int(10 * complexity) if mode == "official" else math.ceil(15 * complexity)
-        total = max(5, min(40, total))
+    if mode in ("official", "official15", "lenient"):
+        if mode == "official":
+            total = int(10 * complexity)
+        elif mode == "official15":
+            total = math.ceil(15 * complexity)
+        else:
+            total = max(30, int(30 * complexity))
+        total = max(5, min(120, total))
         return total, total - 1
     return int(mode), int(mode)
 
@@ -305,6 +332,12 @@ def main() -> None:
     ap.add_argument("--provider", default="deepseek", choices=["deepseek", "jev", "local"])
     ap.add_argument("--planner", default="on", choices=["on", "off"])
     ap.add_argument("--planner_model", default="", help="DeepSeek model for planner/reviewer/reflection (e.g. deepseek-flash = thinking); empty = deepseek-chat")
+    ap.add_argument("--upstream", default="deepseek", choices=["deepseek", "truesota"],
+                    help="where the app's DeepSeek-route calls go; truesota = true-sota.com (any model, key in TS_API_KEY)")
+    ap.add_argument("--exec_model", default="", help="with --upstream truesota: real model for the per-step executor (app asks for deepseek-chat)")
+    ap.add_argument("--plan_model", default="", help="with --upstream truesota: real model for planner/reviewer/reflection")
+    ap.add_argument("--vision", default="off", choices=["off", "plan", "all"],
+                    help="attach screenshots: plan = planner/reviewer/reflection, all = every executor step too (needs multimodal models)")
     ap.add_argument("--budget", default="30", help="steps per task: a number, 'official' = AndroidWorld's int(10*complexity), 'official15' = 1.5x; Habitat caps at 40")
     ap.add_argument("--forwarder_port", type=int, default=18080)
     ap.add_argument("--grpc_port", type=int, default=8554)
@@ -317,7 +350,14 @@ def main() -> None:
     ap.add_argument("--start_index", type=int, default=0, help="resume an interrupted run: skip the first N tasks (seeds stay seed+i)")
     a = ap.parse_args()
 
-    keys = {"deepseek": os.environ.get("DEEPSEEK_API_KEY", ""), "jev": os.environ.get("JEV_API_KEY", "")}
+    keys = {"deepseek": os.environ.get("DEEPSEEK_API_KEY", ""), "jev": os.environ.get("JEV_API_KEY", ""),
+            "truesota": os.environ.get("TS_API_KEY", "")}
+    if a.upstream == "truesota":
+        if not keys["truesota"]:
+            raise SystemExit("set TS_API_KEY (stays on the host)")
+        _Forwarder.upstream_url, _Forwarder.upstream_key_name = TRUESOTA_URL, "truesota"
+        _Forwarder.model_map = {k: v for k, v in (("deepseek-chat", a.exec_model), (a.planner_model or "deepseek-flash", a.plan_model)) if v}
+        keys["deepseek"] = keys["deepseek"] or "unused"  # the app still needs the DeepSeek route switched on
     if (a.provider == "deepseek" or a.planner == "on") and not keys["deepseek"]:
         raise SystemExit("set DEEPSEEK_API_KEY (stays on the host; the emulator only sees a placeholder)")
     if a.provider == "jev" and not keys["jev"]:
@@ -337,7 +377,7 @@ def main() -> None:
     adb = Adb(a.adb, f"emulator-{a.console_port}")
     token = secrets.token_urlsafe(24)
     extras = {"ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode, "planner_model": a.planner_model or "-",
-              "eval_local_hours": "12" if a.eval_local else "0"}
+              "vision": a.vision, "eval_local_hours": "12" if a.eval_local else "0"}
     setup_habitat(adb, a.apk, token, a.forwarder_port, a.provider, a.mcp_port, extras)
     mcp = Mcp(token, f"http://127.0.0.1:{a.mcp_port}/mcp")
     mcp.wait_ready()
@@ -373,7 +413,7 @@ def main() -> None:
                     raise SystemExit("emulator is not reachable any more; stopping")
                 continue
             budget, device_steps = step_budget(task.complexity, a.budget)
-            timeout = max(300, min(2400, 35 * budget))
+            timeout = max(300, min(5400, 40 * budget))
             a11y = ensure_a11y(adb, mcp)
             t0 = time.time()
             net_before = _Forwarder.network_errors
@@ -423,6 +463,7 @@ def main() -> None:
         "tasks": len(names), "seed": a.seed, "provider": a.provider, "planner": a.planner, "planner_model": a.planner_model,
         "budget": a.budget,
         "ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode, "eval_local": a.eval_local, "apk": a.apk, "usage": _Forwarder.usage,
+        "upstream": a.upstream, "exec_model": a.exec_model, "plan_model": a.plan_model,
         "network_errors": _Forwarder.network_errors,
     }
     with open(os.path.splitext(a.out)[0] + ".summary.json", "w", encoding="utf-8") as f:

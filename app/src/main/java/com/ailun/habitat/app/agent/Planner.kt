@@ -166,7 +166,7 @@ avoid 写下一次不该再选的动作（用最近动作里的原文），没�
      * 解析并校验计划。不合法的工具步退回成界面步（有说明就还能做），
      * 不是目标子串的输入文字直接丢掉。一步都不剩返回 null，由调用方退回单步模式。
      */
-    fun parsePlan(raw: String, goal: String, apps: List<AppEntry>, scope: ToolScope = ToolScope()): Plan? {
+    fun parsePlan(raw: String, goal: String, apps: List<AppEntry>, scope: ToolScope = ToolScope(), anyText: Boolean = false): Plan? {
         val obj = extractJson(raw) ?: return null
         val steps = obj.get("steps")?.takeIf { it.isJsonArray }?.asJsonArray ?: return null
         val normalizedGoal = normalize(goal)
@@ -178,8 +178,9 @@ avoid 写下一次不该再选的动作（用最近动作里的原文），没�
             val instruction = step.get("instruction").stringOrNull()?.trim()?.take(MAX_FIELD).orEmpty()
             val doneWhen = step.get("done_when").stringOrNull()?.trim()?.take(MAX_FIELD).orEmpty()
             if (instruction.isEmpty() || doneWhen.isEmpty()) continue
+            // 默认只收目标原文的子串（防屏幕上的文字让 Agent 打出别的内容）；评测模式放开，可以输入从屏幕读到的内容
             val text = step.get("text").stringOrNull()?.trim()?.take(MAX_TEXT)
-                ?.takeIf { it.isNotEmpty() && normalizedGoal.contains(normalize(it)) }
+                ?.takeIf { it.isNotEmpty() && (anyText || normalizedGoal.contains(normalize(it))) }
             val type = step.get("type").stringOrNull()?.trim()?.lowercase()
             val tool = step.get("tool").stringOrNull()?.trim()
             val args = step.get("args")?.takeIf { it.isJsonObject }?.asJsonObject?.entrySet()
@@ -230,6 +231,8 @@ class DeepSeekPlanner(
     private val model: String? = null,
     /** 非空时规划/复核/反思都附上当前截图（需要多模态模型，见 [AgentLoopController.getVisionMode]）。 */
     private val screenshot: (suspend () -> String?)? = null,
+    /** 评测模式：输入文字可以来自屏幕（从别的应用读来的内容），不限于目标原文。 */
+    private val anyInputText: Boolean = false,
 ) : Planner {
     private suspend fun shot(): String? = screenshot?.invoke()
 
@@ -240,10 +243,11 @@ class DeepSeekPlanner(
         goal: String, observation: ScreenObservation, apps: List<AppEntry>, replan: ReplanContext?, scope: ToolScope,
     ): Plan? {
         val img = shot()
+        val note = if (anyInputText) "\n评测模式：text 可以是从屏幕上读到的内容（比如另一个应用里看到的数字、地址、标题），照屏幕原样写。" else ""
         val raw = WorkflowAIClient.chat(
-            apiKey, PlanPrompts.SYSTEM_PLAN, withShotNote(PlanPrompts.planUser(goal, observation, apps, replan, scope), img), baseUrl, model, img,
+            apiKey, PlanPrompts.SYSTEM_PLAN, withShotNote(PlanPrompts.planUser(goal, observation, apps, replan, scope), img) + note, baseUrl, model, img,
         ).getOrNull() ?: return null
-        return PlanPrompts.parsePlan(raw, goal, apps, scope)
+        return PlanPrompts.parsePlan(raw, goal, apps, scope, anyText = anyInputText)
     }
 
     override suspend fun review(goal: String, observation: ScreenObservation, completed: List<String>, facts: Map<String, String>): Review? {

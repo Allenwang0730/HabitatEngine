@@ -239,6 +239,12 @@ class AgentLoop(
 ) {
     @Volatile var stopRequested: Boolean = false
 
+    /**
+     * 重规划次数：默认 [MAX_REPLANS]；步数预算放宽时按比例多给（每 20 步多一次，最多 6 次）——
+     * 步数多了，卡住后换一种做法的机会也该多，否则多出来的步数用不上。
+     */
+    private val maxReplans: Int = (maxSteps / 20).coerceIn(MAX_REPLANS, 6)
+
     /** 本次任务每轮决策看到的屏幕来自哪里（a11y / ocr / a11y+ocr …）→ 次数。评测里算 OCR 参与比例。 */
     val obsSources: Map<String, Int> get() = obsCounts.toMap()
     private val obsCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -372,7 +378,7 @@ class AgentLoop(
                         // 卡住时先看终点：远程任务卡在被挡住的发送按钮上，其实消息已经填好了
                         finished()?.let { return it }
                         if (run.used >= maxSteps) return outOfSteps(run, onStep)
-                        if (planner == null || run.replans >= MAX_REPLANS) {
+                        if (planner == null || run.replans >= maxReplans) {
                             return LoopResult(if (outcome.status == "error") "error" else "blocked", run.used, outcome.detail)
                         }
                         run.replans++
@@ -411,7 +417,7 @@ class AgentLoop(
                 return LoopResult("done", run.used, detail, answer = answer)
             }
             onStep("复核未通过：${review.reason}")
-            if (run.replans >= MAX_REPLANS || run.used >= maxSteps) {
+            if (run.replans >= maxReplans || run.used >= maxSteps) {
                 return LoopResult("blocked", run.used, "复核未通过：${review.reason}", answer = AnswerFormat.normalize(goal, review.answer))
             }
             run.replans++
@@ -552,7 +558,7 @@ class AgentLoop(
     /** 每步的步数上限：单步拿全部剩余，多步时一步不超过 [STEP_BUDGET]，给后面的步骤留余量。 */
     private fun budgetFor(run: Run, plan: Plan): Int {
         val left = maxSteps - run.used
-        return if (plan.steps.size <= 1) left else minOf(left, STEP_BUDGET)
+        return if (plan.steps.size <= 1) left else minOf(left, maxOf(STEP_BUDGET, maxSteps / 4))
     }
 
     private fun stepContext(run: Run, step: PlanStep, index: Int, total: Int) = StepContext(
