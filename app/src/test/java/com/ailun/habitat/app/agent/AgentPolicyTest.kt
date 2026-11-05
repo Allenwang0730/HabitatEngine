@@ -391,6 +391,13 @@ class AgentPolicyTest {
         assertTrue("前台包变了就是变了", !LoopPolicy.sameScreen(a, a.copy(packageName = "com.tencent.mm")))
         assertTrue("控件数变了就是变了", !LoopPolicy.sameScreen(a, a.copy(elements = a.elements.take(2))))
         assertTrue("焦点变了就是变了", !LoopPolicy.sameScreen(a, a.copy(focusedIndex = "2")))
+        // 文字和控件数都没变、只是挪了位置（迷宫里的「X」走了一格）也是变了；同一格里的小抖动不算
+        val first = a.elements.first()
+        val moved = a.copy(elements = listOf(first.copy(centerX = first.centerX + 110)) + a.elements.drop(1))
+        assertTrue("挪了位置就是变了", !LoopPolicy.sameScreen(a, moved))
+        val nudged = a.copy(elements = listOf(first.copy(centerX = first.centerX - first.centerX % 48 + 1)) + a.elements.drop(1))
+        val nudged2 = a.copy(elements = listOf(first.copy(centerX = first.centerX - first.centerX % 48 + 5)) + a.elements.drop(1))
+        assertTrue("同一格里的抖动不算", LoopPolicy.sameScreen(nudged, nudged2))
     }
 
     @Test

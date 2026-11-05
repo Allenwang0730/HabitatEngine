@@ -64,8 +64,18 @@ object LoopPolicy {
             a.packageName == b.packageName &&
             a.elements.count { !it.ocr } == b.elements.count { !it.ocr } &&
             a.focusedIndex == b.focusedIndex &&
-            controlState(a) == controlState(b)
+            controlState(a) == controlState(b) &&
+            layout(a) == layout(b)
     }
+
+    /**
+     * 每段文字在哪一格（[LAYOUT_CELL] 像素）。文字不变、只是挪了位置也算变化：
+     * AndroidWorld BrowserMaze 里「X」从一格走到另一格，文字和控件数一模一样，旧判定说"没变化"，于是去换招、按返回，把页面关了。
+     */
+    private fun layout(o: ScreenObservation): List<String> =
+        o.elements.filter { !it.ocr && it.text.isNotBlank() }.map { "${it.text}@${it.centerX / LAYOUT_CELL},${it.centerY / LAYOUT_CELL}" }
+
+    private const val LAYOUT_CELL = 48
 
     /** 去掉 OCR 补进来的那一段（[ScreenObserver.mergeOcr] 在树文字后面接「\n + OCR 文字」）。 */
     private fun treeText(o: ScreenObservation): String {
@@ -689,6 +699,7 @@ class AgentLoop(
         var recoveries = 0
         var invalidPicks = 0
         var badReplies = 0
+        var nodeFailures = 0
         var autoTaps = 0
         var redecides = 0
         var nextCheckAt = STEP_CHECK_EVERY
@@ -883,7 +894,11 @@ class AgentLoop(
                 val retry = LoopPolicy.retryCandidate(catalog, action, run.goal, run.history)
                 if (retry == null) {
                     record(run, action, observation, observation, changed = false, ok = false, error = result.detail)
-                    return StepOutcome("error", "${action.tool} 失败: ${result.detail}")
+                    // 一个动作失败不等于这一步走不通：记下失败（软惩罚会压低它），让执行器换一个；同一步里失败多次才结束
+                    nodeFailures++
+                    if (nodeFailures >= MAX_NODE_FAILURES) return StepOutcome("error", "${action.tool} 失败: ${result.detail}")
+                    noChange++
+                    continue
                 }
                 onStep("改用「${retry.label}」重试")
                 result = runNode(retry.tool ?: return StepOutcome("error", "重试动作缺少节点"), retry.params, retry.successFlag, retry.outputs)
@@ -896,7 +911,10 @@ class AgentLoop(
             // 读数工具不改屏幕：读到了值就是进展，不能算"无变化"（否则会被反复调用直到判兜圈）
             val changed = !LoopPolicy.sameScreen(after, observation) || (result.ok && result.outputs.isNotEmpty())
             record(run, executed, observation, after, changed, result.ok, if (result.ok) "" else result.detail)
-            if (!result.ok) return StepOutcome("error", "「${executed.label}」失败: ${result.detail}")
+            if (!result.ok) {
+                nodeFailures++
+                if (nodeFailures >= MAX_NODE_FAILURES) return StepOutcome("error", "「${executed.label}」失败: ${result.detail}")
+            }
             noChange = if (changed) 0 else noChange + 1
             if (!changed) onStep("屏幕没有变化（连续 $noChange 次）")
         }
@@ -1019,6 +1037,8 @@ class AgentLoop(
         const val STEP_CHECK_EVERY = 2
         /** 一步里允许几次"没拿到可用决策"（回复不是 JSON、网络失败）再问。 */
         const val MAX_BAD_REPLIES = 2
+        /** 一步里动作执行失败（节点返回失败）几次才算这一步走不通。 */
+        const val MAX_NODE_FAILURES = 3
         /** 跨屏笔记最多留几条。 */
         const val MAX_NOTES = 6
         /** 一次任务里按 replan_after 接着规划的上限：防止每版计划都写 replan_after 来回规划。 */
