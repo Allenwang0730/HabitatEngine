@@ -55,9 +55,9 @@ object PlanPrompts {
     // 步骤说明里常带具体做法（"点卡片中央，不要点左下角的小图标"）：80 字时后半句被截掉，执行器只看到半条建议
     private const val MAX_FIELD = 200
     // 要输入的正文（笔记内容、菜谱说明）常常超过一句话：40 字时 AndroidWorld 的 MarkorCreateNote 把正文截在半个词上
-    private const val MAX_TEXT = 500
-    /** 跨屏笔记：一个文件里的几条账目/菜谱要整段记下来。 */
-    private const val MAX_NOTE = 1200
+    private const val MAX_TEXT = 1500
+    /** 跨屏笔记：一张图里的三份菜谱（名称、份量、时间、配料、步骤）要整段记下来，1200 字时记不全，执行器只好反复回去看图。 */
+    private const val MAX_NOTE = 4000
 
     val SYSTEM_PLAN = """
 你是安卓手机自动化的规划器。把用户目标拆成很少几步，交给一个只会"在当前屏幕的候选里选一个"的执行器去做。

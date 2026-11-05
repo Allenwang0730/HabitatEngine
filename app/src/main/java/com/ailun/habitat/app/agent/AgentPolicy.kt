@@ -83,6 +83,12 @@ object MobilePriors {
         "nav.path 是当前位置；要回上一层用 BACK（会回到 nav.parent），不要用 HOME 从头再找。",
     )
 
+    /**
+     * 执行器每一步提示词里每条事实最多带多少字：长笔记（整张图里的三份菜谱）每一步都整段带上太费，
+     * 要输入的内容由规划器写进 text，执行器只需要知道"有这回事"。规划器、复核员拿到的是全文。
+     */
+    private const val EXEC_FACT_CHARS = 300
+
     /** operation 题干开头：有规划时强调"只做当前一步"。 */
     fun operationLead(step: StepContext?): String = if (step != null && step.multiStep) {
         "只推进当前这一步（task.current），完成条件是 task.done_when。"
@@ -98,7 +104,7 @@ object MobilePriors {
             put("done_when", step.doneWhen)
             if (step.completed.isNotEmpty()) put("completed", step.completed)
         }
-        if (step.facts.isNotEmpty()) put("facts", step.facts)
+        if (step.facts.isNotEmpty()) put("facts", step.facts.mapValues { it.value.take(EXEC_FACT_CHARS) })
         if (step.reflections.isNotEmpty()) {
             put("reflections", step.reflections.map { mapOf("cause" to it.cause, "next" to it.next) })
         }
@@ -120,7 +126,7 @@ object MobilePriors {
             add("这一步的完成条件: ${step.doneWhen}（屏幕上看到它就选 DONE）")
             if (step.completed.isNotEmpty()) add("已完成: ${step.completed.joinToString("；")}")
         }
-        if (step.facts.isNotEmpty()) add("已知事实: " + step.facts.entries.joinToString("；") { "${it.key}=${it.value}" })
+        if (step.facts.isNotEmpty()) add("已知事实: " + step.facts.entries.joinToString("；") { "${it.key}=${it.value.take(EXEC_FACT_CHARS)}" })
         step.nav?.let { nav ->
             add("当前位置: ${nav.path}（第 ${nav.depth} 层${nav.parent?.let { "，BACK 回到「$it」" } ?: ""}）")
             if (nav.triedHere.isNotEmpty()) add("本页已试过: ${nav.triedHere.joinToString("；")}")
