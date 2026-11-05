@@ -25,6 +25,9 @@ object ScreenObserver {
     private const val MIN_RANK_QUOTA = 6
     private const val MAX_SYSTEM_ELEMENTS = 6
     private const val PAGE_AREA_RATIO = 0.35
+    /** 横排最高占屏高的比例：类别芯片行、标签栏都很扁；更高的横向容器多半是整屏翻页。 */
+    private const val HSCROLL_MAX_HEIGHT = 0.2
+    private const val MAX_HSCROLL_ROWS = 3
 
     /** 无障碍树可用文字低于这个长度就考虑 OCR 兜底（微信仍优先走伪装服务）。 */
     private const val OCR_MIN_TEXT = 12
@@ -243,13 +246,17 @@ object ScreenObserver {
         val raw = mutableListOf<RawNode>()
         val infos = mutableListOf<WindowInfo>()
         val images = mutableListOf<ElementBounds>()
+        val hScrolls = mutableListOf<ScrollRow>()
         val windows = runCatching { service.windows }.getOrNull().orEmpty()
         if (windows.isEmpty()) {
             val root = runCatching { service.rootInActiveWindow }.getOrNull()
             if (root != null) {
                 try {
                     val before = raw.size
-                    collect(root, raw, 0, intArrayOf(0), RANK_ACTIVE, ancestorClickable = false, screenW = width, screenH = height, images = images)
+                    collect(
+                        root, raw, 0, intArrayOf(0), RANK_ACTIVE, ancestorClickable = false, screenW = width, screenH = height,
+                        images = images, hScrolls = hScrolls,
+                    )
                     infos.add(windowInfo(root, RANK_ACTIVE, active = true, type = AccessibilityWindowInfo.TYPE_APPLICATION, nodes = raw.size - before))
                 } finally {
                     runCatching { root.recycle() }
@@ -261,9 +268,10 @@ object ScreenObserver {
                 val rank = rankOf(window)
                 try {
                     val before = raw.size
+                    val page = rank == RANK_ACTIVE || rank == RANK_APP
                     collect(
                         root, raw, 0, intArrayOf(0), rank, ancestorClickable = false, screenW = width, screenH = height,
-                        images = if (rank == RANK_ACTIVE || rank == RANK_APP) images else null,
+                        images = if (page) images else null, hScrolls = if (page) hScrolls else null,
                     )
                     infos.add(windowInfo(root, rank, window.isActive, window.type, raw.size - before, window.isFocused))
                 } finally {
@@ -274,6 +282,7 @@ object ScreenObserver {
         return select(raw, width, height, source).copy(
             windows = infos.filter { it.packageName != SELF },
             imageFraction = imageFraction(images, width, height),
+            hScrolls = hScrolls.distinctBy { it.bounds }.take(MAX_HSCROLL_ROWS),
         )
     }
 
@@ -437,6 +446,19 @@ object ScreenObserver {
         }
     }
 
+    /**
+     * 能横向滚动的一排：HorizontalScrollView，或者只有一行、多列的集合（横向 RecyclerView），或者又宽又扁的滚动容器。
+     * 太高的（横向翻页的整屏 ViewPager）不算：那是换页，不是一排里还有项没露出来。
+     */
+    internal fun isHorizontalScroller(className: String, b: ElementBounds, rows: Int, columns: Int, width: Int, height: Int): Boolean {
+        if (b.width <= 0 || b.height <= 0 || b.height > height * HSCROLL_MAX_HEIGHT) return false
+        if (className.contains("HorizontalScrollView")) return true
+        // 竖着滚的：ScrollView / ListView，或者多行一列的集合
+        if (className.endsWith("ScrollView") || className.endsWith("ListView") || (rows > 1 && columns <= 1)) return false
+        if (columns > 1 && rows in 0..1) return true
+        return b.width >= b.height * 3 && b.width >= width / 2
+    }
+
     /** 容器里（不含与它同大小的自身包装层）有 ≥2 个可点、非开关、非输入框的子控件；而且容器像一条横栏，或者按钮 ≥3 个。 */
     internal fun isButtonGroup(c: RawNode, nodes: List<RawNode>, width: Int, height: Int): Boolean {
         val cb = c.bounds ?: return false
@@ -459,6 +481,8 @@ object ScreenObserver {
         screenH: Int,
         /** 非空时收集图片/WebView/画布类控件的范围（混合 OCR 的触发依据）。 */
         images: MutableList<ElementBounds>? = null,
+        /** 非空时收集能横向滚动的一排控件。 */
+        hScrolls: MutableList<ScrollRow>? = null,
     ) {
         if (depth > 25 || visited[0] > 400) return
         visited[0]++
@@ -467,6 +491,14 @@ object ScreenObserver {
             Rect().also { node.getBoundsInScreen(it) }.let { ElementBounds(it.left, it.top, it.right, it.bottom) },
             screenW, screenH,
         )
+        if (hScrolls != null && node.isScrollable && node.isVisibleToUser) {
+            val r = Rect().also { node.getBoundsInScreen(it) }
+            val b = ElementBounds(r.left, r.top, r.right, r.bottom)
+            val info = node.collectionInfo
+            if (isHorizontalScroller(node.className?.toString().orEmpty(), b, info?.rowCount ?: -1, info?.columnCount ?: -1, screenW, screenH)) {
+                hScrolls.add(ScrollRow(b, aggregatedText(node)))
+            }
+        }
         if (images != null && node.isVisibleToUser) {
             val cls = node.className?.toString().orEmpty()
             if (IMAGE_CLASS_HINTS.any { cls.contains(it) }) {
@@ -537,7 +569,7 @@ object ScreenObserver {
                 collect(
                     child, out, depth + 1, visited, rank,
                     ancestorClickable = ancestorClickable || (clickable && !pageSizedNode),
-                    screenW = screenW, screenH = screenH, images = images,
+                    screenW = screenW, screenH = screenH, images = images, hScrolls = hScrolls,
                 )
             } finally {
                 runCatching { child.recycle() }

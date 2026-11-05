@@ -161,6 +161,20 @@ class PlannerTest {
     }
 
     @Test
+    fun englishPageTitleIsNotSplitOnSpaces() {
+        // 文件管理器：左上是汉堡菜单（描述「Show roots」），标题「Files in Downloads」整段才是页面名
+        val files = screen(
+            "com.google.android.documentsui",
+            ScreenElement("1", "Show roots", 80, 230, clickable = true, editable = false, focused = false),
+            el("2", "Files in Downloads", 240, clickable = false),
+        )
+        assertEquals("Files in Downloads", MobilePriors.pageTitle(files))
+        // 只整段相等才当工具栏按钮跳过：「Backup」不是「Back」
+        val backup = screen("com.android.settings", el("1", "Backup", 240, clickable = false))
+        assertEquals("Backup", MobilePriors.pageTitle(backup))
+    }
+
+    @Test
     fun taskStateCarriesNavEvenInSingleStepMode() {
         val nav = NavSnapshot("设置 > 蓝牙", 2, "设置", listOf("WLAN 无变化"), atBottom = true)
         val single = MobilePriors.taskState(StepContext("打开蓝牙", "打开蓝牙", "完成", 0, 1, nav = nav))
@@ -292,8 +306,9 @@ class PlannerTest {
 
     @Test
     fun stepCheckParses() {
-        assertEquals(true, PlanPrompts.parseStepCheck("""好的 {"done":true,"reason":"已在 Health 列表页"}"""))
-        assertEquals(false, PlanPrompts.parseStepCheck("""{"done":false,"reason":"还在侧边栏"}"""))
+        assertEquals(true, PlanPrompts.parseStepCheck("""好的 {"done":true,"reason":"已在 Health 列表页"}""")!!.done)
+        assertEquals(false, PlanPrompts.parseStepCheck("""{"done":false,"reason":"还在侧边栏"}""")!!.done)
+        assertEquals("3 个待办", PlanPrompts.parseStepCheck("""{"done":true,"note":"3 个待办","reason":"x"}""")!!.note)
         assertEquals(null, PlanPrompts.parseStepCheck("""{"done":"maybe"}"""))
         assertEquals(null, PlanPrompts.parseStepCheck("no json"))
     }
@@ -304,5 +319,66 @@ class PlannerTest {
         val text = PlanPrompts.planUser("Delete the note", screen("net.gsantner.markor"), apps, ctx)
         assertTrue(text.contains("失败后的反思"))
         assertTrue(text.contains("点删除图标"))
+    }
+
+    @Test
+    fun longInputTextIsKeptWhole() {
+        // 40 字上限把 MarkorCreateNote 的正文截在 "without break" 上
+        val goal = "Create a new note in Markor named fair_apple_V9Ao.txt with the following text: You can't make an omelette without breaking a few eggs."
+        val body = "You can't make an omelette without breaking a few eggs."
+        val raw = """{"steps":[{"type":"ui","instruction":"在正文输入","done_when":"正文是那句话","text":"$body"}]}"""
+        assertEquals(body, PlanPrompts.parsePlan(raw, goal, apps)!!.steps[0].text)
+    }
+
+    @Test
+    fun horizontalScrollerDetection() {
+        val w = 1080
+        val h = 2400
+        val chips = ElementBounds(0, 420, 1080, 540)
+        assertTrue(ScreenObserver.isHorizontalScroller("android.widget.HorizontalScrollView", chips, -1, -1, w, h))
+        assertTrue(ScreenObserver.isHorizontalScroller("androidx.recyclerview.widget.RecyclerView", chips, 1, 8, w, h))
+        // 又宽又扁、没有集合信息
+        assertTrue(ScreenObserver.isHorizontalScroller("android.view.View", chips, -1, -1, w, h))
+        // 竖着滚的列表、整屏翻页都不算
+        assertFalse(ScreenObserver.isHorizontalScroller("androidx.recyclerview.widget.RecyclerView", ElementBounds(0, 300, 1080, 2200), 20, 1, w, h))
+        assertFalse(ScreenObserver.isHorizontalScroller("android.widget.ScrollView", chips, -1, -1, w, h))
+        assertFalse(ScreenObserver.isHorizontalScroller("androidx.viewpager.widget.ViewPager", ElementBounds(0, 200, 1080, 2300), -1, -1, w, h))
+    }
+
+    @Test
+    fun horizontalRowGetsLeftAndRightScroll() {
+        val row = ScrollRow(ElementBounds(0, 420, 1080, 540), "Food Income Housing")
+        val obs = screen("com.arduia.expense", el("1", "Food", 480)).copy(screenWidth = 1080, screenHeight = 2400, hScrolls = listOf(row))
+        val catalog = Catalogs.build("Add an Education expense", obs, apps)
+        val right = catalog.resolve("SCROLL_RIGHT", "h1")!!
+        // 露出右边的项：手指从右往左滑，只在这一排的高度上
+        assertTrue((right.params["x1"] as Int) > (right.params["x2"] as Int))
+        assertEquals(480, right.params["y1"])
+        assertEquals(480, right.params["y2"])
+        val left = catalog.resolve("SCROLL_LEFT", "h1")!!
+        assertTrue((left.params["x1"] as Int) < (left.params["x2"] as Int))
+        // 只有一排时，模型没写 target 也落到这一排
+        assertEquals(right, decisionFromChoice(catalog, "SCROLL_RIGHT", null, 1.0, "").action)
+        // 没有横排就不提供横向滚动
+        assertNull(Catalogs.build("Add an Education expense", obs.copy(hScrolls = emptyList()), apps).operations["SCROLL_RIGHT"])
+    }
+
+    @Test
+    fun replanAfterEndsThePlanAtThatStep() {
+        val raw = """{"steps":[
+            {"type":"ui","instruction":"打开 my_expenses.txt","done_when":"能看到文件内容","replan_after":true},
+            {"type":"ui","instruction":"在 Pro Expense 里加一笔","done_when":"列表里有它"}]}"""
+        val plan = PlanPrompts.parsePlan(raw, "Log the reimbursable transactions from my_expenses.txt in pro expense", apps)!!
+        assertEquals(1, plan.steps.size)
+        assertTrue(plan.steps[0].replanAfter)
+        // 不写就是 false；写成字符串的不认
+        val plain = PlanPrompts.parsePlan("""{"steps":[{"type":"ui","instruction":"a","done_when":"b","replan_after":"yes"}]}""", "x", apps)!!
+        assertFalse(plain.steps[0].replanAfter)
+        // 接着规划时告诉规划器"不是卡住了"，并带上记下的事实
+        val ctx = ReplanContext("打开 my_expenses.txt", "", emptyList(), facts = mapOf("note_1" to "Tuition Fees 160.28 Education"), refresh = true)
+        val text = PlanPrompts.planUser("Log the reimbursable transactions", screen("com.arduia.expense"), apps, ctx)
+        assertTrue(text.contains("replan_after"))
+        assertTrue(text.contains("Tuition Fees 160.28 Education"))
+        assertFalse(text.contains("卡住了"))
     }
 }

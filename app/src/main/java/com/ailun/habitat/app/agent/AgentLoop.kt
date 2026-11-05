@@ -283,6 +283,10 @@ class AgentLoop(
         var used = 0
         var seq = 0
         var replans = 0
+        /** 复查员记下的跨屏笔记总数（facts 里只留最近几条，键号一直往上加）。 */
+        var noteCount = 0
+        /** 按规划器的 replan_after 读到内容后接着规划的次数（[MAX_REFRESHES]）。 */
+        var refreshes = 0
         /** 本次任务里执行失败过的工具调用（权限不足等），重规划后不再尝试。 */
         val failedTools = mutableSetOf<String>()
         /** 失败后的反思（最多留 [MAX_REFLECTIONS] 条），进重规划和执行器提示词。 */
@@ -369,6 +373,21 @@ class AgentLoop(
                     "done" -> {
                         run.completed += step.instruction
                         planListener?.onStepStatus(index, PlanStatus.DONE)
+                        // 跨屏记忆：要离开这一屏了，先把屏幕上之后用得到的信息记下来（读了文件内容、看到数字再去别的应用填）。
+                        // 周期复查每两步才一次，读文件这种一两步就做完的步骤常常一次都轮不上
+                        val refresh = step.replanAfter && planner != null && run.refreshes < MAX_REFRESHES
+                        if (step.tool == null && (refresh || index + 1 < plan.steps.size)) noteScreen(run, step, onStep)
+                        if (refresh) {
+                            // 规划器说过"看到这份内容再接着规划"：带着记下的事实规划剩下的部分（不算一次卡住）
+                            run.refreshes++
+                            onStep("已经看到需要的内容，接着规划剩下的部分")
+                            val next = makePlan(run, replanContext(run, step.instruction, "").copy(refresh = true), onStep)
+                            if (next != null) {
+                                plan = next
+                                replanned = true
+                                break
+                            }
+                        }
                         index++
                     }
                     "stopped" -> return LoopResult("stopped", run.used, outcome.detail)
@@ -430,6 +449,27 @@ class AgentLoop(
     /** 本次任务里成功执行过「输入 X」。 */
     private fun typedInRun(run: Run, text: String): Boolean =
         run.history.any { it.operation == "TYPE_TEXT" && it.error.isEmpty() && it.label.contains("「$text」") }
+
+    /**
+     * 跨屏记忆：屏幕上和目标有关的信息记成事实，后面的执行器和复核员都看得到（问答、跨应用填写要用）。
+     * 只留最近 [MAX_NOTES] 条：每条都进每一次执行器/复核员的提示词。
+     */
+    private fun saveNote(run: Run, note: String, onStep: (String) -> Unit) {
+        if (note.isBlank() || note in run.facts.values) return
+        val notes = run.facts.keys.filter { it.startsWith("note_") }
+        if (notes.size >= MAX_NOTES) run.facts.remove(notes.first())
+        run.noteCount++
+        run.facts["note_${run.noteCount}"] = note
+        onStep("记下：$note")
+    }
+
+    /** 一步做完、要离开这一屏之前，让复查员看一眼当前屏幕，只为了记笔记（不改变步骤结果，不算步数）。 */
+    private suspend fun noteScreen(run: Run, step: PlanStep, onStep: (String) -> Unit) {
+        val checker = planner ?: return
+        if (!stepChecks || stopRequested) return
+        val check = runCatching { checker.checkStep(run.goal, step.instruction, step.doneWhen, run.observation) }.getOrNull()
+        check?.note?.let { saveNote(run, it, onStep) }
+    }
 
     /**
      * 步数用完：结束前让复核员看一眼当前屏幕（只是一次模型调用，不点任何东西，不算步数）。
@@ -513,6 +553,7 @@ class AgentLoop(
         path = run.nav.snapshot().path,
         explored = run.nav.explored(),
         reflections = run.reflections.toList(),
+        facts = run.facts.toMap(),
     )
 
     /**
@@ -668,8 +709,9 @@ class AgentLoop(
             val checker = planner
             if (stepChecks && checker != null && total > 1 && run.used - start >= nextCheckAt) {
                 nextCheckAt = run.used - start + STEP_CHECK_EVERY
-                val done = runCatching { checker.checkStep(run.goal, step.instruction, step.doneWhen, observation) }.getOrNull()
-                if (done == true) {
+                val check = runCatching { checker.checkStep(run.goal, step.instruction, step.doneWhen, observation) }.getOrNull()
+                check?.note?.let { saveNote(run, it, onStep) }
+                if (check?.done == true) {
                     onStep("复查：这一步的完成条件已经成立（${step.doneWhen}）")
                     return StepOutcome("done", step.doneWhen)
                 }
@@ -964,6 +1006,10 @@ class AgentLoop(
 
         /** 多步计划里，一步做了几个动作后复查一次完成条件（[stepChecks]）。 */
         const val STEP_CHECK_EVERY = 2
+        /** 跨屏笔记最多留几条。 */
+        const val MAX_NOTES = 6
+        /** 一次任务里按 replan_after 接着规划的上限：防止每版计划都写 replan_after 来回规划。 */
+        const val MAX_REFRESHES = 2
 
         /** 技能步里代码自己点名字对得上的那一行，最多几次。 */
         const val MAX_AUTO_TAPS = 2

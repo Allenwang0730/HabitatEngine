@@ -112,6 +112,9 @@ class JevDecisionProvider(
         if (catalog.sliderTargets.isNotEmpty()) {
             questions.add("slider_target", choiceQuestion("假设下一步是 SET_SLIDER，选择要拖的滑块和位置。", catalog.sliderTargets))
         }
+        if (catalog.hScrollTargets.isNotEmpty()) {
+            questions.add("hscroll_target", choiceQuestion("假设下一步是 SCROLL_RIGHT / SCROLL_LEFT，选择要横着滑的那一排。", catalog.hScrollTargets))
+        }
         // 同一次请求里顺带问"当前步骤做完没有"：步骤推进由代码根据它决定，不靠模型自己选 DONE（不加延迟）
         if (step != null && step.multiStep) {
             questions.add("step_status", choiceQuestion(
@@ -234,6 +237,7 @@ fun parseJevAnswer(text: String, catalog: ActionCatalog): Decision {
         "LONG_PRESS" -> "long_press_target"
         "USE_TOOL" -> "tool_target"
         "SET_SLIDER" -> "slider_target"
+        "SCROLL_RIGHT", "SCROLL_LEFT" -> "hscroll_target"
         else -> null
     }
     val target = if (head == null) {
@@ -245,6 +249,7 @@ fun parseJevAnswer(text: String, catalog: ActionCatalog): Decision {
             "long_press_target" -> catalog.longPressTargets.keys
             "tool_target" -> catalog.toolTargets.keys
             "slider_target" -> catalog.sliderTargets.keys
+            "hscroll_target" -> catalog.hScrollTargets.keys
             else -> catalog.apps.keys
         }
         parseChoice(answers.objectOrNull(head), allowed)
@@ -360,6 +365,7 @@ class DeepSeekDecisionProvider(
             if (catalog.apps.isNotEmpty()) appendLine("OPEN_APP: ${catalog.apps}")
             if (catalog.toolTargets.isNotEmpty()) appendLine("USE_TOOL 目标: ${catalog.toolTargets}")
             if (catalog.sliderTargets.isNotEmpty()) appendLine("SET_SLIDER 目标: ${catalog.sliderTargets}")
+            if (catalog.hScrollTargets.isNotEmpty()) appendLine("SCROLL_RIGHT / SCROLL_LEFT 目标（横排）: ${catalog.hScrollTargets}")
             appendLine("最近动作:")
             MobilePriors.recentActions(history, limit = 6).forEach { note ->
                 val flag = when {

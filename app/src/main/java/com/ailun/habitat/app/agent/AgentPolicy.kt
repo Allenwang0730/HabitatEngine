@@ -64,6 +64,7 @@ object MobilePriors {
         "同一个文字可能在多处出现。候选里 ⟪id/xxx⟫ 是这个控件的稳定标识，按语义选最匹配的那个。",
         "点击、输入之后屏幕通常会变（进下一级、出现新内容）。不要因为上一步文字还在就以为没生效。",
         "SCROLL_DOWN/UP 用来露出当前屏幕上没有的内容。要找的东西可能是对不上的词，先滚动再判断。",
+        "要找的项在一横排（类别芯片、标签栏）里却看不见时，用 SCROLL_RIGHT / SCROLL_LEFT 横着滑那一排；上下滚动带不动横排。",
         "进入二级页面后要回上一层，用 BACK；只有需要离开整个应用时才用 HOME。",
         "要找的入口不在当前屏幕时，先在当前列表里 SCROLL_DOWN 翻到底，确认没有再去猜它在哪个子菜单里；进过又退出来的子菜单不要再进。",
         "recentActions 里 marked (无变化)/(失败) 的动作不要再原样重复；连续两次没效果就换一个思路。",
@@ -151,15 +152,21 @@ object MobilePriors {
         return observation.elements
             .asSequence()
             .filter { it.centerY in STATUS_BAR_PX..limit && !it.editable && !it.system }
-            .flatMap { it.text.trim().split(' ').asSequence() }
+            // 只拆中文的聚合行；英文标题里本来就有空格（「Files in Downloads」拆开只剩「Files」）
+            .flatMap { el -> el.text.trim().let { t -> if (CJK.containsMatchIn(t)) t.split(' ') else listOf(t) }.asSequence() }
             .map { it.trim() }
             .firstOrNull { t ->
-                t.length in 2..30 && TITLE_SKIP.none { t.startsWith(it) } && !t.contains("未读") &&
-                    !t.contains("通知：") && !CLOCK.matches(t)
+                t.length in 2..30 && TITLE_SKIP.none { t.startsWith(it) } && TITLE_SKIP_EN.none { t.equals(it, ignoreCase = true) } &&
+                    !t.contains("未读") && !t.contains("通知：") && !CLOCK.matches(t)
             }
     }
 
     private val TITLE_SKIP = listOf("返回", "取消", "搜索", "更多", "关闭", "完成")
+    // 英文工具栏按钮的无障碍描述，整段相等才跳过（「Backup」不是「Back」）。AndroidWorld：文件管理器的标题被读成了汉堡菜单的「Show roots」
+    private val TITLE_SKIP_EN = listOf(
+        "Navigate up", "Show roots", "Open navigation drawer", "More options", "Search", "Back", "Cancel", "Close", "Menu",
+    )
+    private val CJK = Regex("[\\u4e00-\\u9fff]")
 
     /** 状态栏高度下限：真机状态栏文字在 y≈75，页面标题在 y≈260。 */
     private const val STATUS_BAR_PX = 150
@@ -242,9 +249,11 @@ fun decisionFromChoice(
     if (operation == "BLOCKED") {
         return Decision("blocked", "BLOCKED", action = catalog.resolve("BLOCKED", null), confidence = confidence, detail = detail)
     }
-    // TYPE_TEXT 只有一个原文候选时，target 编号不重要：模型常把输入框的元素序号当成原文序号
+    // TYPE_TEXT 只有一个原文候选时，target 编号不重要：模型常把输入框的元素序号当成原文序号。横排只有一排时同理
     val effectiveTarget = if (operation == "TYPE_TEXT" && catalog.textValues.size == 1 && target !in catalog.textValues) {
         catalog.textValues.keys.first()
+    } else if ((operation == "SCROLL_RIGHT" || operation == "SCROLL_LEFT") && catalog.hScrollTargets.size == 1 && target !in catalog.hScrollTargets) {
+        catalog.hScrollTargets.keys.first()
     } else {
         target
     }

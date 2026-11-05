@@ -72,6 +72,7 @@ object Catalogs {
 
     private const val MAX_TAPS = 30
     private const val MAX_LONG_PRESS = 12
+    private const val MAX_HSCROLLS = 3
     private const val MAX_APPS = 8
     private const val MAX_TEXTS = 6
     private const val TEXT_PREVIEW = 40
@@ -352,9 +353,25 @@ object Catalogs {
             }
         }
 
+        // 横向滚动的一排（类别芯片、标签栏）：整屏上下滚动带不动它，右边被挡住的项只能横着滑出来。
+        // AndroidWorld 实测：Pro Expense 的类别 Education 在芯片行右侧屏幕外，执行器只有上下滚动，三个记账任务卡死在这里
+        val hScrollTargets = linkedMapOf<String, String>()
+        if (guard == null) {
+            observation.hScrolls.take(MAX_HSCROLLS).forEachIndexed { i, row ->
+                val key = "h${i + 1}"
+                hScrollTargets[key] = "横排「${row.label.take(TEXT_PREVIEW)}」（y≈${row.bounds.centerY}）"
+                actions.add(hScrollAction(row, key, right = true))
+                actions.add(hScrollAction(row, key, right = false))
+            }
+            if (hScrollTargets.isNotEmpty()) {
+                operations["SCROLL_RIGHT"] = "在某一横排（标签栏、类别芯片行）上向左滑，露出这一排右边被挡住的项。整屏上下滚动带不动横排。"
+                operations["SCROLL_LEFT"] = "在某一横排上向右滑，露出这一排左边被挡住的项。"
+            }
+        }
+
         return ActionCatalog(
             actions, operations, tapTargets, textValues, appTargets, longPressTargets, guard,
-            toolTargets = toolTargets, sliderTargets = sliderTargets,
+            toolTargets = toolTargets, sliderTargets = sliderTargets, hScrollTargets = hScrollTargets,
             submitReady = typed && taps.firstOrNull()?.let { el -> SUBMIT_WORDS.any { el.text.trim() == it } } == true,
             containerOf = containersFor(observation, taps),
         )
@@ -575,6 +592,29 @@ object Catalogs {
             if (!unlocked) return "系统权限/安装界面，目标未要求授权，不点击"
         }
         return null
+    }
+
+    /**
+     * 横排里横着滑：手指从一侧的 80% 处拖到 20% 处（只在这一排的高度上，不碰上下的内容）。
+     * [right] = 露出右边的项（手指向左滑）。慢一点拖，避免甩出去滑过头。
+     */
+    private fun hScrollAction(row: ScrollRow, key: String, right: Boolean): CatalogAction {
+        val b = row.bounds
+        val y = b.centerY
+        val near = b.left + (b.width * 0.2).toInt()
+        val far = b.left + (b.width * 0.8).toInt()
+        val op = if (right) "SCROLL_RIGHT" else "SCROLL_LEFT"
+        val name = row.label.take(TEXT_PREVIEW)
+        return CatalogAction(
+            id = "${op.lowercase()}_$key",
+            operation = op,
+            target = key,
+            label = if (right) "横排「$name」向右翻" else "横排「$name」向左翻",
+            tool = "ACTION_SWIPE",
+            params = mapOf("x1" to if (right) far else near, "y1" to y, "x2" to if (right) near else far, "y2" to y, "duration" to 500),
+            // 判重按"哪一排"：同一排滑过几次都没变化就说明到头了
+            matchText = "h@${b.top}",
+        )
     }
 
     private fun scrollAction(observation: ScreenObservation, down: Boolean): CatalogAction {

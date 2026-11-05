@@ -74,6 +74,8 @@ data class ScreenObservation(
     val windows: List<WindowInfo> = emptyList(),
     /** 图片 / WebView / 画布类控件占屏幕面积的比例（0~1），混合 OCR 据此决定要不要补读图片文字。 */
     val imageFraction: Double = 0.0,
+    /** 能横向滚动的一排控件（标签栏、类别芯片行）：竖着滚动带不动它们，屏幕外的项要横着滑才露出来。 */
+    val hScrolls: List<ScrollRow> = emptyList(),
 ) {
     companion object {
         fun empty(width: Int, height: Int) = ScreenObservation(
@@ -99,6 +101,9 @@ data class ScreenObservation(
 }
 
 data class AppEntry(val label: String, val packageName: String)
+
+/** 一排能横向滚动的控件。[label]：这一排当前看得见的几项文字（让模型认出是哪一排）。 */
+data class ScrollRow(val bounds: ElementBounds, val label: String)
 
 /**
  * 代码拥有的一个可执行候选。决策模型只能选 operation/target，不能发明参数。
@@ -142,6 +147,8 @@ data class ActionCatalog(
     val toolTargets: Map<String, String> = emptyMap(),
     /** SET_SLIDER 的候选：`序号:max|min|mid` → 说明。 */
     val sliderTargets: Map<String, String> = emptyMap(),
+    /** SCROLL_LEFT / SCROLL_RIGHT 的候选：横向滚动的那一排（`h1`…）→ 说明。两个方向共用同一组键。 */
+    val hScrollTargets: Map<String, String> = emptyMap(),
     /** 输入框里已经是要输入的文字，第一个 TAP 候选就是「发送/搜索/确定」。 */
     val submitReady: Boolean = false,
     /**
@@ -170,6 +177,7 @@ data class ActionCatalog(
         "LONG_PRESS" -> actions.find { it.operation == "LONG_PRESS" && it.target == target }
         "USE_TOOL" -> actions.find { it.operation == "USE_TOOL" && it.target == target }
         "SET_SLIDER" -> actions.find { it.operation == "SET_SLIDER" && it.target == target }
+        "SCROLL_LEFT", "SCROLL_RIGHT" -> actions.find { it.operation == operation && it.target == target }
         "SCROLL_DOWN", "SCROLL_UP", "BACK", "HOME", "WAIT", "DONE", "BLOCKED",
         "PRESS_ENTER", "CLEAR_TEXT",
         -> actions.find { it.operation == operation }
@@ -198,6 +206,7 @@ data class ActionCatalog(
             longPressTargets = keptTargets("LONG_PRESS", longPressTargets),
             toolTargets = keptTargets("USE_TOOL", toolTargets),
             sliderTargets = keptTargets("SET_SLIDER", sliderTargets),
+            hScrollTargets = keptTargets("SCROLL_LEFT", hScrollTargets) + keptTargets("SCROLL_RIGHT", hScrollTargets),
         )
     }
 
@@ -277,6 +286,11 @@ data class PlanStep(
      * 点不到或点错了再交给执行器。真机上模型在 QQ 消息列表里反复按返回，几步就耗光了预算。
      */
     val autoTap: String? = null,
+    /**
+     * 做完这一步就带着读到的内容重新规划剩下的部分（规划器写 replan_after）。后面要输入的内容在别的屏幕上、
+     * 规划时还没看到（文件里的账目、图片里的字）时用：第一版计划写不出 text，执行器只能干着急。
+     */
+    val replanAfter: Boolean = false,
 )
 
 data class Plan(
