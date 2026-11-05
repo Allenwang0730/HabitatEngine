@@ -21,6 +21,7 @@ Usage (inside WSL, with the AndroidWorld emulator running and set up once with
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.server
 import json
 import os
@@ -317,6 +318,11 @@ def run_goal(mcp: Mcp, goal: str, provider: str, planner: bool, max_steps: int, 
     return status
 
 
+def instance_seed(seed: int, name: str) -> int:
+    """AndroidWorld's create_suite seed for the first instance of a task (suite_utils._get_instance_seed(name, 0))."""
+    return int(hashlib.sha256(f"{seed}_{name}_0".encode()).hexdigest(), 16) % (2**32)
+
+
 def step_budget(complexity: float, mode: str) -> tuple[int, int]:
     """(AndroidWorld steps, device actions Habitat may take).
 
@@ -359,6 +365,9 @@ def main() -> None:
     ap.add_argument("--console_port", type=int, default=5554)
     ap.add_argument("--tasks", required=True, help="comma-separated AndroidWorld task names, or @file with one per line")
     ap.add_argument("--seed", type=int, default=30)
+    ap.add_argument("--seed_mode", default="official", choices=["official", "positional"],
+                    help="official = AndroidWorld's per-task seed (same params as the reference runner, independent of list order); "
+                         "positional = seed + index in --tasks (runs before 2026-11-05 21:10)")
     ap.add_argument("--provider", default="deepseek", choices=["deepseek", "jev", "local"])
     ap.add_argument("--planner", default="on", choices=["on", "off"])
     ap.add_argument("--planner_model", default="", help="DeepSeek model for planner/reviewer/reflection (e.g. deepseek-flash = thinking); empty = deepseek-chat")
@@ -426,17 +435,24 @@ def main() -> None:
         for i, name in enumerate(names):
             if i < a.start_index:
                 continue
-            random.seed(a.seed + i)
             task_type = aw[name]
+            # official: AndroidWorld's create_suite seeding (sha256 of "<seed>_<name>_0"), so a task gets the same
+            # parameters as in the reference runner no matter where it sits in our list or which emulator runs it.
+            # positional: the old seed+i, only to reproduce runs from before 2026-11-05 21:10 (v8 and earlier).
+            seed = instance_seed(a.seed, name) if a.seed_mode == "official" else a.seed + i
+            random.seed(seed)
             goal, complexity = "", None
             try:
-                task = task_type(task_type.generate_random_params())
+                task_type.set_device_time(env)
+                params = task_type.generate_random_params()
+                params["seed"] = seed
+                task = task_type(params)
                 goal, complexity = task.goal, task.complexity
                 env.reset(go_home=True)
                 enable_habitat_a11y(adb)  # AndroidWorld resets can drop extra services
                 task.initialize_task(env)
             except Exception as e:  # one broken task setup must not end a 116-task run
-                row = {"task": name, "seed": a.seed + i, "goal": goal, "score": 0.0, "phase": "init_error",
+                row = {"task": name, "seed": seed, "goal": goal, "score": 0.0, "phase": "init_error",
                        "detail": repr(e)[:300], "complexity": complexity}
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
                 out.flush()
@@ -478,7 +494,7 @@ def main() -> None:
             passed_official += score_official == 1.0
             done += 1
             row = {
-                "task": name, "seed": a.seed + i, "goal": task.goal, "score": score, "score_official": score_official,
+                "task": name, "seed": seed, "goal": task.goal, "score": score, "score_official": score_official,
                 "phase": status.get("phase"), "detail": status.get("detail", "")[:500], "answer": answer[:200],
                 "seconds": seconds, "provider": a.provider, "planner": a.planner == "on", "planner_model": a.planner_model,
                 "complexity": task.complexity, "budget": budget, "device_steps": device_steps, "check_error": status.get("check_error"),
