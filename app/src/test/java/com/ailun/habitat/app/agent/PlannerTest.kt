@@ -381,4 +381,28 @@ class PlannerTest {
         assertTrue(text.contains("Tuition Fees 160.28 Education"))
         assertFalse(text.contains("卡住了"))
     }
+
+    @Test
+    fun tapPointScalesScreenshotCoordinatesAndRespectsGates() {
+        val pay = el("1", "Pay now", 1800).copy(bounds = ElementBounds(100, 1700, 980, 1900))
+        val obs = screen("com.example.shop", el("2", "Notes", 300), pay).copy(screenWidth = 1080, screenHeight = 2400)
+        val catalog = Catalogs.build("Open the search", obs, apps, pointTaps = true)
+        val p = catalog.pointTap!!
+        // 1080 宽的屏截图缩到 720 宽：截图坐标 ×1.5 才是屏幕坐标
+        assertEquals(720, p.imageWidth)
+        assertEquals(1600, p.imageHeight)
+        val tap = catalog.resolve("TAP_POINT", "600,80")!!
+        assertEquals("900,120", tap.params["target"])
+        // 落在目标没放行的「Pay now」上：不执行
+        assertNull(catalog.resolve("TAP_POINT", "360,1200"))
+        assertEquals("error", decisionFromChoice(catalog, "TAP_POINT", "360,1200", 1.0, "").status)
+        // 截图外、格式不对
+        assertNull(catalog.resolve("TAP_POINT", "800,80"))
+        assertNull(catalog.resolve("TAP_POINT", "abc"))
+        // 远程发起（不能解锁）、没开截图：不给 TAP_POINT
+        assertNull(Catalogs.build("Open the search", obs, apps, allowGoalUnlock = false, pointTaps = true).pointTap)
+        assertNull(Catalogs.build("Open the search", obs, apps).operations["TAP_POINT"])
+        // 去掉死路时 TAP_POINT 留着
+        assertNotNull(catalog.without(setOf("x")) { it.id }.operations["TAP_POINT"])
+    }
 }

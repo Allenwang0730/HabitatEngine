@@ -261,6 +261,8 @@ object AgentLoopController {
             planner = planner,
             softPenalties = getPenaltyMode(context) == PENALTY_SOFT,
             stepChecks = getVisionMode(context) != VISION_OFF,
+            // 按截图坐标点要求执行器每一步都看截图；Jev 只能从选项里选，给不出坐标
+            pointTaps = providerName == PROVIDER_DEEPSEEK && getVisionMode(context) == VISION_ALL,
         )
         synchronized(this) {
             if (_state.value.running) return "自主模式已在运行"

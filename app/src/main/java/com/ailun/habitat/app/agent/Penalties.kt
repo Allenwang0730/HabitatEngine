@@ -63,6 +63,12 @@ object Penalties {
             }
             if (p > 0.0) out[action.id] = p
         }
+        // 按坐标点的动作是选中后现做的，不在 actions 里：按历史里点过的格子算（同一格子没效果就压低）
+        if (catalog.pointTap != null) {
+            history.filter { it.operation == "TAP_POINT" }.forEach { note ->
+                bySig[note.signature]?.takeIf { it > 0.0 }?.let { out[note.actionId] = it }
+            }
+        }
         return out
     }
 

@@ -236,6 +236,8 @@ class AgentLoop(
     private val softPenalties: Boolean = false,
     /** true：多步计划里每做 [STEP_CHECK_EVERY] 步让规划模型复查一次这一步完成没有（[Planner.checkStep]）。 */
     private val stepChecks: Boolean = false,
+    /** true：执行器每一步看得到截图，可以按截图坐标点（TAP_POINT）。只在本机发起时生效（[Catalogs.build]）。 */
+    private val pointTaps: Boolean = false,
 ) {
     @Volatile var stopRequested: Boolean = false
 
@@ -740,6 +742,7 @@ class AgentLoop(
                     val sig = "TAP|${el.viewId.ifEmpty { el.text }}|${observation.packageName}"
                     stepHistory.any { it.signature == sig }
                 },
+                pointTaps = pointTaps,
             )
             // 软惩罚：死路和做过没用的动作留在候选里、按分数降权；硬模式（旧行为）：死路直接删掉
             val scored = if (softPenalties) {
@@ -783,7 +786,8 @@ class AgentLoop(
                 "wait" -> {
                     waits++
                     if (waits >= LoopPolicy.MAX_WAITS) {
-                        return StepOutcome("blocked", "连续等待 ${LoopPolicy.MAX_WAITS} 次，屏幕没有加载出来")
+                        // 屏幕多半早就加载好了：执行器连着选等待，是因为在候选里找不到要点的东西。原因写清楚，反思和重规划才不会去"等它加载"
+                        return StepOutcome("blocked", "执行器连续 ${LoopPolicy.MAX_WAITS} 次选择等待（多半是候选里找不到要点的控件）")
                     }
                     onStep("等待")
                     delay(800)

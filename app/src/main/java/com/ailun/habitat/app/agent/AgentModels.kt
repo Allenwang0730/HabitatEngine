@@ -106,6 +106,29 @@ data class AppEntry(val label: String, val packageName: String)
 data class ScrollRow(val bounds: ElementBounds, val label: String)
 
 /**
+ * TAP_POINT：按截图坐标点（控件一览里没有、截图上看得见的图标）。模型给的是截图像素 [imageWidth]×[imageHeight]，
+ * 换算成屏幕坐标再点。[blocked]：安全闸挡住的控件范围（敏感按钮、目标没放行的发送键），点到里面一律不执行。
+ */
+data class PointTap(
+    val imageWidth: Int,
+    val imageHeight: Int,
+    val screenWidth: Int,
+    val screenHeight: Int,
+    val blocked: List<ElementBounds> = emptyList(),
+) {
+    /** "x,y"（截图像素）→ 屏幕坐标；格式不对或在截图外返回 null。 */
+    fun toScreen(target: String?): Pair<Int, Int>? {
+        val parts = target?.split(',')?.map { it.trim().toDoubleOrNull() } ?: return null
+        if (parts.size != 2 || parts.any { it == null }) return null
+        val (x, y) = parts[0]!! to parts[1]!!
+        if (x < 0 || y < 0 || x > imageWidth || y > imageHeight) return null
+        return (x * screenWidth / imageWidth).toInt() to (y * screenHeight / imageHeight).toInt()
+    }
+
+    fun isBlocked(x: Int, y: Int): Boolean = blocked.any { x in it.left..it.right && y in it.top..it.bottom }
+}
+
+/**
  * 代码拥有的一个可执行候选。决策模型只能选 operation/target，不能发明参数。
  * [tool] 为空表示 WAIT / DONE / BLOCKED，不调用节点。
  */
@@ -149,6 +172,8 @@ data class ActionCatalog(
     val sliderTargets: Map<String, String> = emptyMap(),
     /** SCROLL_LEFT / SCROLL_RIGHT 的候选：横向滚动的那一排（`h1`…）→ 说明。两个方向共用同一组键。 */
     val hScrollTargets: Map<String, String> = emptyMap(),
+    /** 非空表示这一步可以按截图坐标点（TAP_POINT），动作在选中后按坐标现做（[decisionFromChoice]）。 */
+    val pointTap: PointTap? = null,
     /** 输入框里已经是要输入的文字，第一个 TAP 候选就是「发送/搜索/确定」。 */
     val submitReady: Boolean = false,
     /**
@@ -178,10 +203,32 @@ data class ActionCatalog(
         "USE_TOOL" -> actions.find { it.operation == "USE_TOOL" && it.target == target }
         "SET_SLIDER" -> actions.find { it.operation == "SET_SLIDER" && it.target == target }
         "SCROLL_LEFT", "SCROLL_RIGHT" -> actions.find { it.operation == operation && it.target == target }
+        "TAP_POINT" -> pointAction(target)
         "SCROLL_DOWN", "SCROLL_UP", "BACK", "HOME", "WAIT", "DONE", "BLOCKED",
         "PRESS_ENTER", "CLEAR_TEXT",
         -> actions.find { it.operation == operation }
         else -> null
+    }
+
+    /**
+     * 按截图坐标现做一个点击。坐标不合法、落在安全闸挡住的控件里，返回 null（调用方报"候选里没有"，模型重选）。
+     * 判重锚点按 40 像素分格：在同一个地方反复点，和反复点同一个控件一样会被判兜圈。
+     */
+    fun pointAction(target: String?): CatalogAction? {
+        val p = pointTap ?: return null
+        val (x, y) = p.toScreen(target) ?: return null
+        if (p.isBlocked(x, y)) return null
+        return CatalogAction(
+            id = "point_${x / POINT_CELL}_${y / POINT_CELL}",
+            operation = "TAP_POINT",
+            target = target,
+            label = "点截图位置（$target）",
+            tool = "ACTION_CLICK",
+            params = mapOf("target" to "$x,$y"),
+            centerX = x,
+            centerY = y,
+            matchText = "pt@${x / POINT_CELL}/${y / POINT_CELL}",
+        )
     }
 
     /**
@@ -196,7 +243,7 @@ data class ActionCatalog(
             val ids = keep.filter { it.operation == op }.mapNotNull { it.target }.toSet()
             map.filterKeys { it in ids }
         }
-        val ops = operations.filterKeys { op -> op in ALWAYS_KEEP || keep.any { it.operation == op } }
+        val ops = operations.filterKeys { op -> op in ALWAYS_KEEP || op == "TAP_POINT" || keep.any { it.operation == op } }
         return copy(
             actions = keep,
             operations = ops,
@@ -220,6 +267,7 @@ data class ActionCatalog(
 
     companion object {
         val ALWAYS_KEEP = setOf("DONE", "BLOCKED", "WAIT", "BACK", "HOME")
+        private const val POINT_CELL = 40
     }
 
     /** 目标原文与候选文字的重合度；容器行文字是拼接的，用 contains 双向匹配。 */

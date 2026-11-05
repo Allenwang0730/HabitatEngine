@@ -131,6 +131,11 @@ object Catalogs {
         scope: ToolScope = ToolScope(),
         /** 这一步里是否已经点过这个控件（按判重签名）；null 表示不知道，按没点过算。 */
         tappedBefore: ((ScreenElement) -> Boolean)? = null,
+        /**
+         * true：决策器看得到截图，可以按截图坐标点（TAP_POINT）。只在本机发起（或评测放行）时给：
+         * 坐标点不经过控件候选，安全闸只能靠 [PointTap.blocked] 兜。
+         */
+        pointTaps: Boolean = false,
     ): ActionCatalog {
         val actions = mutableListOf<CatalogAction>()
         val operations = linkedMapOf<String, String>()
@@ -234,7 +239,7 @@ object Catalogs {
 
         operations["BACK"] = "返回上一屏。从二级页面回列表时用它，不要用 HOME。"
         operations["HOME"] = "回到桌面。只在需要离开当前应用时用。"
-        operations["WAIT"] = "屏幕还在加载时短暂等待。不确定该做什么时选它，不要选 DONE。"
+        operations["WAIT"] = "屏幕还在加载、转场时短暂等待。不是用来\"不知道点哪里\"的：那时选最可能推进的动作。"
         operations["DONE"] = if (step != null && step.multiStep) {
             "当前这一步已完成：屏幕上已经能看到「${step.doneWhen}」。只判断这一步，不用管整个目标。"
         } else {
@@ -369,9 +374,19 @@ object Catalogs {
             }
         }
 
+        // 按截图坐标点：控件一览里没有、截图上看得见的图标（Joplin 右上角的放大镜在无障碍树里读不出来）。
+        // 落在安全闸挡住的控件里的点不执行；验证/支付页（guard）整个不给
+        val pointTap = if (pointTaps && guard == null && allowGoalUnlock && observation.screenWidth > 0 && observation.screenHeight > 0) {
+            val iw = minOf(observation.screenWidth, ScreenCapture.MAX_WIDTH)
+            val ih = (observation.screenHeight.toLong() * iw / observation.screenWidth).toInt()
+            operations["TAP_POINT"] = "按截图坐标点一下（target 写截图上的像素坐标 \"x,y\"，截图 ${iw}×${ih}）。" +
+                "只在要点的东西不在控件一览里、但截图上看得见时用；控件一览里有的用 TAP。"
+            PointTap(iw, ih, observation.screenWidth, observation.screenHeight, blockedAreas(goal, observation, allowGoalUnlock))
+        } else null
+
         return ActionCatalog(
             actions, operations, tapTargets, textValues, appTargets, longPressTargets, guard,
-            toolTargets = toolTargets, sliderTargets = sliderTargets, hScrollTargets = hScrollTargets,
+            toolTargets = toolTargets, sliderTargets = sliderTargets, hScrollTargets = hScrollTargets, pointTap = pointTap,
             submitReady = typed && taps.firstOrNull()?.let { el -> SUBMIT_WORDS.any { el.text.trim() == it } } == true,
             containerOf = containersFor(observation, taps),
         )
@@ -592,6 +607,20 @@ object Catalogs {
             if (!unlocked) return "系统权限/安装界面，目标未要求授权，不点击"
         }
         return null
+    }
+
+    /**
+     * 按坐标点时不能点的范围：安全闸不放行的控件（敏感按钮、目标没解锁的发送键）。
+     * 没有文字的图标按钮按生成的名字（含 viewId，如「btn pay」）判。
+     */
+    internal fun blockedAreas(goal: String, observation: ScreenObservation, allowGoalUnlock: Boolean): List<ElementBounds> {
+        val w = observation.screenWidth.takeIf { it > 0 } ?: 1080
+        val h = observation.screenHeight.takeIf { it > 0 } ?: 2400
+        return observation.elements.mapNotNull { el ->
+            val b = el.bounds ?: return@mapNotNull null
+            val named = if (el.text.isBlank()) el.copy(text = iconLabel(el, w, h) ?: shortViewId(el.viewId).replace('_', ' ')) else el
+            b.takeUnless { allowedElement(goal, named, observation, allowGoalUnlock) }
+        }
     }
 
     /**

@@ -70,7 +70,7 @@ object MobilePriors {
         "recentActions 里 marked (无变化)/(失败) 的动作不要再原样重复；连续两次没效果就换一个思路。",
         "DONE 只有在屏幕上确实出现了目标完成的状态（目标页面已打开、开关已按要求处于该状态）才能选。",
         "目标是「进入/打开某个页面」时：pageTitle（页面顶部标题）或 activity 已经是那个页面，就选 DONE，不要再去点页面里同名的标题行。",
-        "拿不准目标是否已经完成时，选 WAIT，不要选 DONE。",
+        "拿不准目标是否已经完成时不要选 DONE。WAIT 只在屏幕确实还在加载/转场时用；不知道下一步点哪里时，选最可能推进的动作（滚动找、点像入口的控件），不要原地等。",
         "TYPE_TEXT 只能从给出的原文里选，不要自己编造要输入的内容。",
         "输入框已经有焦点时，ACTION_SET_TEXT 是整框替换；想清空就选 CLEAR_TEXT。",
         "输入完要提交或搜索，选 PRESS_ENTER，然后等屏幕响应。",
@@ -262,7 +262,10 @@ fun decisionFromChoice(
             val status = if (operation == "WAIT") "wait" else "action"
             return Decision(status, operation, container, a, confidence, "$detail（${effectiveTarget} 不可点，改点包住它的 $container）")
         }
-        ?: return Decision("error", operation, target, confidence = confidence, detail = "候选里没有 $operation/$target")
+        ?: return Decision(
+            "error", operation, target, confidence = confidence,
+            detail = if (operation == "TAP_POINT") "坐标 $target 不在截图里，或落在不能点的控件上" else "候选里没有 $operation/$target",
+        )
     val status = if (operation == "WAIT") "wait" else "action"
     return Decision(status, operation, effectiveTarget, action, confidence, detail)
 }

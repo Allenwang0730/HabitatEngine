@@ -13,7 +13,7 @@ import java.io.ByteArrayOutputStream
  * 失败时等一下再试一次；还不行返回 null，调用方照常只发文字。需要 Android 11+ 和无障碍服务。
  */
 object ScreenCapture {
-    private const val MAX_WIDTH = 720
+    internal const val MAX_WIDTH = 720
     private const val QUALITY = 60
 
     suspend fun jpegBase64(): String? {
