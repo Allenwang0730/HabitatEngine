@@ -298,7 +298,6 @@ def main() -> None:
         raise SystemExit(f"unknown tasks: {unknown}")
 
     passed = done = 0
-    init_failures = 0
     with open(a.out, "a", encoding="utf-8") as out:
         for i, name in enumerate(names):
             if i < a.start_index:
@@ -312,16 +311,15 @@ def main() -> None:
                 env.reset(go_home=True)
                 enable_habitat_a11y(adb)  # AndroidWorld resets can drop extra services
                 task.initialize_task(env)
-                init_failures = 0
             except Exception as e:  # one broken task setup must not end a 116-task run
-                init_failures += 1
                 row = {"task": name, "seed": a.seed + i, "goal": goal, "score": 0.0, "phase": "init_error",
                        "detail": repr(e)[:300], "complexity": complexity}
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
                 out.flush()
                 print(f"[{i + 1}/{len(names)}] INIT_ERROR {name}: {repr(e)[:200]}", flush=True)
-                if init_failures >= 3:
-                    raise SystemExit("3 task setups failed in a row; the emulator is probably gone")
+                # several tasks of one app can fail setup for the same reason (missing tool); only stop if the device is gone
+                if adb.run("get-state", check=False).strip() != "device":
+                    raise SystemExit("emulator is not reachable any more; stopping")
                 continue
             budget = step_budget(task.complexity, a.budget)
             timeout = max(300, min(1800, 25 * budget))

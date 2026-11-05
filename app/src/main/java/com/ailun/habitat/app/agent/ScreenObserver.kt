@@ -414,18 +414,38 @@ object ScreenObserver {
         // 真机（QQ 聊天页）：整条输入栏可点，标签借了子按钮的「发送」，中心却落在输入框上——点「发送」等于点输入框。
         val inputBars = rowSized.filter { c -> nodes.any { it !== c && it.editable && it.bounds != null && c.bounds!!.contains(it.bounds) } }
             .toSet()
-        val containers = rowSized.filter { it !in inputBars }
+        // 按钮组（工具栏、多选模式的操作栏）：一条容器里有 2 个以上各自可点的按钮。里面每个按钮都有用，不能被容器吞掉。
+        // AndroidWorld（Markor 多选模式）：顶部操作栏被聚合成一行「Favourite Rename Details」，点它的中心什么都没发生，
+        // 真正的「删除」按钮就在里面，模型却一直看不到。开关不算按钮（行里一个开关是"开关行"，由 singleCheckableDescendant 处理）。
+        val buttonGroups = rowSized.filter { c -> isButtonGroup(c, nodes, width, height) }.toSet()
+        val containers = rowSized.filter { it !in inputBars && it !in buttonGroups }
         val kept = nodes.filter { node ->
             val bounds = node.bounds
             val shadowed = bounds != null && containers.any { it !== node && it.bounds!!.contains(bounds) }
             // 滑块即使在可点的行里也要留下：它要用 SET_SLIDER 拖，不是点行
             !shadowed || node.editable || node.focused || node.rangeFraction != null
         }
-        // 输入栏的标签只是借来的子控件文字：子控件本身留下了，输入栏就不再重复出现
+        // 输入栏 / 按钮组的标签只是借来的子控件文字：子控件本身留下了，容器就不再重复出现
         return kept.filterNot { bar ->
-            bar in inputBars && bar.aggregated &&
-                kept.any { it !== bar && !it.editable && it.text == bar.text && it.bounds != null && bar.bounds!!.contains(it.bounds) }
+            if (!bar.aggregated) return@filterNot false
+            val children = kept.filter { it !== bar && !it.editable && it.bounds != null && bar.bounds!!.contains(it.bounds) }
+            when (bar) {
+                in inputBars -> children.any { it.text == bar.text }
+                in buttonGroups -> children.any { it.text.isNotEmpty() && bar.text.contains(it.text) }
+                else -> false
+            }
         }
+    }
+
+    /** 容器里（不含与它同大小的自身包装层）有 ≥2 个可点、非开关、非输入框的子控件；而且容器像一条横栏，或者按钮 ≥3 个。 */
+    internal fun isButtonGroup(c: RawNode, nodes: List<RawNode>, width: Int, height: Int): Boolean {
+        val cb = c.bounds ?: return false
+        val buttons = nodes.count { n ->
+            n !== c && n.clickable && !n.checkable && !n.editable && n.bounds != null && n.bounds != cb && cb.contains(n.bounds)
+        }
+        if (buttons < 2) return false
+        val bar = cb.width >= width * 0.6 && cb.height <= height * 0.12
+        return bar || buttons >= 3
     }
 
     private fun collect(

@@ -267,4 +267,25 @@ class ScreenObserverTest {
         assertTrue(ScreenObserver.isPageSized(ElementBounds(0, 0, 1440, 3200), 1440, 3200))
         assertFalse(ScreenObserver.isPageSized(ElementBounds(80, 200, 1359, 400), 1440, 3200))
     }
+
+    @Test
+    fun toolbarButtonsAreNotSwallowedByTheirBar() {
+        // Markor 多选模式的操作栏：整条可点，标签是子按钮拼出来的；里面三个按钮各自可点
+        val bar = node(
+            "Favourite Rename Details", 720, 200, clickable = true, bounds = ElementBounds(0, 140, 1440, 260),
+            className = "android.view.ViewGroup", aggregated = true,
+        )
+        fun button(t: String, x: Int) = node(t, x, 200, clickable = true, bounds = ElementBounds(x - 80, 150, x + 80, 250), className = "android.widget.Button")
+        val obs = ScreenObserver.select(listOf(bar, button("Favourite", 900), button("Rename", 1100), button("Details", 1300)), 1440, 3200, "a11y")
+        assertEquals(listOf("Favourite", "Rename", "Details"), obs.elements.map { it.text })
+    }
+
+    @Test
+    fun listRowWithOneClickableChildStillAggregates() {
+        // 普通列表行里只有一个可点子控件（或一个开关）：照旧只留整行
+        val r = row("蓝牙 已开启", 600)
+        val title = node("蓝牙", 500, 600, clickable = true, bounds = ElementBounds(140, 540, 900, 660))
+        val obs = ScreenObserver.select(listOf(r, title), 1440, 3200, "a11y")
+        assertEquals(listOf("蓝牙 已开启"), obs.elements.map { it.text })
+    }
 }
