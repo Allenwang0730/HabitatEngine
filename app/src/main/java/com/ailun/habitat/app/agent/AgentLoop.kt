@@ -479,12 +479,8 @@ class AgentLoop(
             .mapNotNull { it.label.removePrefix("输入「").removeSuffix("」").takeIf { t -> t != it.label && t.isNotBlank() } }
             .distinct().takeLast(MAX_NOTES)
         val withTyped = if (typed.isEmpty()) run.facts else run.facts + typed.mapIndexed { i, t -> "typed_${i + 1}" to t.take(600) }
-        // 最近几步起了作用的动作（屏幕变了的）：删除、确认这类做完以后屏幕上看不到"证据"的事，复核员靠它知道做过了
-        val acted = run.history.filter { it.changed == true && it.error.isEmpty() && it.operation !in setOf("WAIT", "DONE", "BLOCKED") }
-            .takeLast(RECENT_ACTIONS).joinToString(" → ") { it.label.take(60) }
-        val withActions = if (acted.isEmpty()) withTyped else withTyped + ("recent_actions" to acted)
         // 最后一次复核（没有重规划/步数再去补证据了）：告诉复核员，它按"没有反证"判，不再要求屏幕上的正面证据
-        return if (lastChance) withActions + (LAST_CHANCE to "true") else withActions
+        return if (lastChance) withTyped + (LAST_CHANCE to "true") else withTyped
     }
 
     /** 本次任务里成功执行过「输入 X」。 */
@@ -1114,8 +1110,6 @@ class AgentLoop(
         const val NODE_CLICK_FALLBACK = false
         /** 复核员看到这个事实（值 "true"）就知道这是最后一次复核。 */
         const val LAST_CHANCE = "last_chance"
-        /** 给复核员看的最近几个起了作用的动作。 */
-        const val RECENT_ACTIONS = 12
         /** 跨屏笔记最多留几条。 */
         const val MAX_NOTES = 6
         /** 一次任务里按 replan_after 接着规划的上限：防止每版计划都写 replan_after 来回规划（录入很多条时要接着规划好几次）。 */
