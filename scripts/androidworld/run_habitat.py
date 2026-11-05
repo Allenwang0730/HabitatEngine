@@ -175,6 +175,17 @@ class Adb:
         return self.run("shell", cmd, check=check)
 
 
+def save_screenshot(adb: Adb, path: str) -> None:
+    """PNG of the current screen (binary, so not through Adb.run). Best effort: a failure only loses the picture."""
+    try:
+        out = subprocess.run(adb.base + ["exec-out", "screencap", "-p"], capture_output=True, timeout=30)
+        if out.returncode == 0 and out.stdout:
+            with open(path, "wb") as f:
+                f.write(out.stdout)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def enable_habitat_a11y(adb: Adb) -> None:
     """Add Habitat's service next to AndroidWorld's a11y forwarder (do not replace it)."""
     current = adb.shell("settings get secure enabled_accessibility_services", check=False)
@@ -452,6 +463,10 @@ def main() -> None:
                 score = float(task.is_successful(env))
             except Exception as e:  # a crashing check counts as a failure, but keep the reason
                 score, status["check_error"] = 0.0, repr(e)[:300]
+            log_dir = os.path.splitext(a.out)[0] + "_logs"
+            os.makedirs(log_dir, exist_ok=True)
+            if score < 1.0:  # the end screen of a failed task, before tear_down resets the app (for failure analysis)
+                save_screenshot(adb, os.path.join(log_dir, f"{i:03d}_{name}.png"))
             try:
                 task.tear_down(env)
             except Exception as e:
@@ -473,8 +488,6 @@ def main() -> None:
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
             out.flush()
             # step log for failure analysis; contains screen text, so keep it next to the results, not in git
-            log_dir = os.path.splitext(a.out)[0] + "_logs"
-            os.makedirs(log_dir, exist_ok=True)
             with open(os.path.join(log_dir, f"{i:03d}_{name}.log"), "w", encoding="utf-8") as f:
                 f.write(f"goal: {task.goal}\nscore: {score}\nphase: {status.get('phase')}\ndetail: {status.get('detail', '')}\n\n")
                 f.write(status.get("log", ""))
