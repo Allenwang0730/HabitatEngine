@@ -199,8 +199,11 @@ def enable_habitat_a11y(adb: Adb) -> None:
 
 # AndroidWorld's own setup leaves some apps asking for storage access on first open. Remote-origin goals
 # never tap permission buttons (by design), so grant once here, as a user installing the app would.
+# Gallery without it lists "No media files" (the task images in DCIM are invisible); VLC opens on GRANT PERMISSION.
 APP_PERMISSIONS = {
     "net.gsantner.markor": ["MANAGE_EXTERNAL_STORAGE"],
+    "com.simplemobiletools.gallery.pro": ["MANAGE_EXTERNAL_STORAGE"],
+    "org.videolan.vlc": ["MANAGE_EXTERNAL_STORAGE"],
 }
 
 
@@ -261,9 +264,26 @@ def setup_habitat(
     args = " ".join(f"--es {k} {v}" for k, v in flags.items() if v)
     hours = int(extras.get("eval_local_hours") or 0)
     args += f" --ei eval_local_hours {hours}"  # always sent, so a run without the flag switches it off
-    adb.shell(f"am start -W -n {SELFTEST} --ez eval_setup true --ez start_agent true {args}")
+    _AGENT_START_ARGS[adb.base[-1]] = args
+    start_agent_service(adb, mcp_port)
+
+
+_AGENT_START_ARGS: dict[str, str] = {}  # serial -> extras for the self-test activity (kept so the service can be restarted)
+
+
+def start_agent_service(adb: Adb, mcp_port: int) -> None:
+    """Start Habitat's MCP server (AgentService) with the eval settings, and forward the host port to it."""
+    adb.shell(f"am start -W -n {SELFTEST} --ez eval_setup true --ez start_agent true {_AGENT_START_ARGS[adb.base[-1]]}")
     time.sleep(3)
     adb.run("forward", f"tcp:{mcp_port}", "tcp:8931")
+
+
+def revive_habitat(adb: Adb, mcp: "Mcp", mcp_port: int) -> None:
+    """The app process was killed (a task's setup force-stops apps / resets): rebind a11y, restart the MCP server."""
+    enable_habitat_a11y(adb)
+    time.sleep(3)
+    start_agent_service(adb, mcp_port)
+    mcp.wait_ready()
 
 
 # --------------------------------------------------------------------------- MCP client
@@ -484,11 +504,27 @@ def main() -> None:
                 continue
             budget, device_steps = step_budget(task.complexity, a.budget)
             timeout = max(300, min(5400, 40 * budget))
+            # the MCP server dies with the app process (some task setups force-stop apps); bring it back before the goal
+            try:
+                mcp.call("ping", timeout=10)
+            except OSError:
+                print(f"[{i + 1}/{len(names)}] Habitat not reachable before {name}; restarting its service", flush=True)
+                try:
+                    revive_habitat(adb, mcp, a.mcp_port)
+                except Exception as e:
+                    print(f"  restart failed: {e!r}"[:200], flush=True)
             a11y = ensure_a11y(adb, mcp)
             t0 = time.time()
             net_before = _Forwarder.network_errors
             usage_before = dict(_Forwarder.usage)
-            status = run_goal(mcp, task.goal, a.provider, a.planner == "on", device_steps, timeout)
+            try:
+                status = run_goal(mcp, task.goal, a.provider, a.planner == "on", device_steps, timeout)
+            except (OSError, ValueError) as e:  # harness lost the app mid-task: score what is on the device, go on
+                status = {"phase": "harness_error", "detail": f"MCP: {e!r}"[:300], "log": ""}
+                try:
+                    revive_habitat(adb, mcp, a.mcp_port)
+                except Exception:
+                    pass
             status["network_errors"] = _Forwarder.network_errors - net_before
             usage = {k: _Forwarder.usage[k] - usage_before[k] for k in usage_before}
             seconds = round(time.time() - t0)
