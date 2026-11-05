@@ -74,25 +74,59 @@ object WorkflowAIClient {
                     .addHeader("Authorization", "Bearer $apiKey")
                     .post(body.toString().toRequestBody(jsonType))
                     .build()
-                client.newCall(request).execute().use { resp ->
-                    if (!resp.isSuccessful) {
-                        return@withContext Result.failure(
-                            Exception("API ${resp.code}: ${resp.body?.string()?.take(200)}"),
-                        )
-                    }
-                    val text = resp.body?.string() ?: return@withContext Result.failure(Exception("空响应"))
-                    val obj = gson.fromJson(text, JsonObject::class.java)
-                    val content = obj.getAsJsonArray("choices")
-                        ?.firstOrNull()?.asJsonObject
-                        ?.getAsJsonObject("message")
-                        ?.get("content")?.asString
-                        ?: return@withContext Result.failure(Exception("响应缺少 choices[0].message.content"))
-                    Result.success(content)
+                repeat(MAX_RETRIES) { attempt ->
+                    val outcome = callOnce(request)
+                    if (!shouldRetry(outcome)) return@withContext outcome
+                    kotlinx.coroutines.delay(RETRY_DELAY_MS * (attempt + 1))
                 }
+                callOnce(request)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Result.failure(e)
             }
         }
+
+    // 连不上 / 网关忙（429、503）时再试两次：连接失败时请求还没发出去，重试不会让模型多算一遍。
+    // 502/504 不在这里重试：可能是网关那头读超时，再发一遍要再等两分钟（评测转发服务自己会重试）。
+    // 评测里实测：模拟器录音/录像时 10.0.2.2 偶尔连不上，一次失败就让整步卡住、重新规划（20 个任务里 3 个）
+    private const val MAX_RETRIES = 2
+    private const val RETRY_DELAY_MS = 1500L
+
+    private class BusyException(message: String) : Exception(message)
+
+    private fun callOnce(request: Request): Result<String> = try {
+        client.newCall(request).execute().use { resp -> parse(resp.code, resp.isSuccessful, resp.body?.string()) }
+    } catch (e: java.io.IOException) {
+        Result.failure(e)
+    }
+
+    private fun shouldRetry(outcome: Result<String>): Boolean = when (val e = outcome.exceptionOrNull()) {
+        null -> false
+        is BusyException -> true
+        is java.io.IOException -> retryable(e)
+        else -> false
+    }
+
+    /** 连接阶段的失败（还没发出请求）才重试；读超时说明对方已经在算了，不重发。 */
+    internal fun retryable(e: java.io.IOException): Boolean =
+        e is java.net.ConnectException || e is java.net.NoRouteToHostException || e is java.net.UnknownHostException ||
+            (e is java.net.SocketTimeoutException && e.message.orEmpty().contains("connect", ignoreCase = true))
+
+    private fun parse(code: Int, ok: Boolean, text: String?): Result<String> {
+        if (!ok) {
+            val msg = "API $code: ${text?.take(200)}"
+            return Result.failure(if (code == 429 || code == 503) BusyException(msg) else Exception(msg))
+        }
+        text ?: return Result.failure(Exception("空响应"))
+        val obj = gson.fromJson(text, JsonObject::class.java)
+        val content = obj.getAsJsonArray("choices")
+            ?.firstOrNull()?.asJsonObject
+            ?.getAsJsonObject("message")
+            ?.get("content")?.asString
+            ?: return Result.failure(Exception("响应缺少 choices[0].message.content"))
+        return Result.success(content)
+    }
 
     // key 加密存储（SecretStore，自动从旧明文 prefs 迁移）——不硬编码，避免泄露
     private const val PREFS = "workflow_ai_prefs"
