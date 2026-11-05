@@ -268,6 +268,11 @@ def setup_habitat(
 
 # --------------------------------------------------------------------------- MCP client
 class Mcp:
+    # The app's MCP server is on 127.0.0.1 (adb forward). WSL has HTTP_PROXY=127.0.0.1:7897 (Clash) and
+    # NO_PROXY="127.*,...": urllib does not expand that wildcard, so these calls went through Clash, which answered
+    # 502 now and then and killed three jobs at once (2026-11-05 21:16). Never use a proxy for them.
+    _direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
     def __init__(self, token: str, url: str):
         self.token, self.url, self.next_id = token, url, 1
 
@@ -280,7 +285,7 @@ class Mcp:
             headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream", "Authorization": f"Bearer {self.token}"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with self._direct.open(req, timeout=timeout) as resp:
             reply = json.loads(resp.read())
         if "error" in reply:
             return False, reply["error"].get("message", "")
@@ -307,7 +312,10 @@ def run_goal(mcp: Mcp, goal: str, provider: str, planner: bool, max_steps: int, 
     status: dict = {}
     while time.time() < deadline:
         time.sleep(3)
-        ok, text = mcp.call("agent_status")
+        try:
+            ok, text = mcp.call("agent_status")
+        except (OSError, ValueError):  # one lost poll (adb forward hiccup) is not the end of the task; the agent keeps running
+            continue
         status = json.loads(text) if ok else {}
         if status and not status.get("running"):
             return status
