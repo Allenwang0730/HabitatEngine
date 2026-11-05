@@ -282,6 +282,14 @@ class PlannerTest {
     }
 
     @Test
+    fun stepCheckParses() {
+        assertEquals(true, PlanPrompts.parseStepCheck("""好的 {"done":true,"reason":"已在 Health 列表页"}"""))
+        assertEquals(false, PlanPrompts.parseStepCheck("""{"done":false,"reason":"还在侧边栏"}"""))
+        assertEquals(null, PlanPrompts.parseStepCheck("""{"done":"maybe"}"""))
+        assertEquals(null, PlanPrompts.parseStepCheck("no json"))
+    }
+
+    @Test
     fun replanPromptCarriesReflections() {
         val ctx = ReplanContext("删除笔记", "兜圈", emptyList(), reflections = listOf(Reflection("一直长按", "点删除图标")))
         val text = PlanPrompts.planUser("Delete the note", screen("net.gsantner.markor"), apps, ctx)

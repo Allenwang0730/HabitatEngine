@@ -234,6 +234,8 @@ class AgentLoop(
      * false：旧行为，死路直接从候选里删掉，不反思。
      */
     private val softPenalties: Boolean = false,
+    /** true：多步计划里每做 [STEP_CHECK_EVERY] 步让规划模型复查一次这一步完成没有（[Planner.checkStep]）。 */
+    private val stepChecks: Boolean = false,
 ) {
     @Volatile var stopRequested: Boolean = false
 
@@ -639,6 +641,7 @@ class AgentLoop(
         var invalidPicks = 0
         var autoTaps = 0
         var redecides = 0
+        var nextCheckAt = STEP_CHECK_EVERY
         val excluded = mutableSetOf<String>()
         val start = run.used
         while (run.used - start < budget && run.used < maxSteps) {
@@ -652,6 +655,18 @@ class AgentLoop(
             if (step.check?.satisfied(observation) == true) {
                 onStep("这一步已完成：${step.doneWhen}")
                 return StepOutcome("done", step.doneWhen)
+            }
+            // 每做两步问一次规划模型（看截图）"这一步完成没有"：执行器常常已经到了却认不出来——
+            // AndroidWorld（Joplin）实测点进 Health 文件夹后，因为标题栏不写「Health」，执行器又去开侧边栏，把步数耗光。
+            // 只是一次模型调用，不点任何东西，不算步数。
+            val checker = planner
+            if (stepChecks && checker != null && total > 1 && run.used - start >= nextCheckAt) {
+                nextCheckAt = run.used - start + STEP_CHECK_EVERY
+                val done = runCatching { checker.checkStep(run.goal, step.instruction, step.doneWhen, observation) }.getOrNull()
+                if (done == true) {
+                    onStep("复查：这一步的完成条件已经成立（${step.doneWhen}）")
+                    return StepOutcome("done", step.doneWhen)
+                }
             }
             // 代码先点名字对得上的那一行（最多两次）；点错了屏幕会变，下一轮由 check 或执行器接手
             val auto = step.autoTap?.takeIf { autoTaps < MAX_AUTO_TAPS }?.let { Catalogs.leadingMatch(observation, it) }
@@ -940,6 +955,9 @@ class AgentLoop(
 
         /** 一步里模型想重复同一动作时，最多几次"去掉它重选"（不花步数），之后才由代码换招。 */
         const val MAX_REDECIDES = 2
+
+        /** 多步计划里，一步做了几个动作后复查一次完成条件（[stepChecks]）。 */
+        const val STEP_CHECK_EVERY = 2
 
         /** 技能步里代码自己点名字对得上的那一行，最多几次。 */
         const val MAX_AUTO_TAPS = 2

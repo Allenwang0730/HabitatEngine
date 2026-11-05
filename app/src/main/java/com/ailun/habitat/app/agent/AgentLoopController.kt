@@ -259,6 +259,7 @@ object AgentLoopController {
             allowGoalUnlock = origin != ORIGIN_REMOTE || evalLocal,
             planner = planner,
             softPenalties = getPenaltyMode(context) == PENALTY_SOFT,
+            stepChecks = getVisionMode(context) != VISION_OFF,
         )
         synchronized(this) {
             if (_state.value.running) return "自主模式已在运行"
