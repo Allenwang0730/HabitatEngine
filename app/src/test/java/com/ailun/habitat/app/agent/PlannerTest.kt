@@ -404,5 +404,11 @@ class PlannerTest {
         assertNull(Catalogs.build("Open the search", obs, apps).operations["TAP_POINT"])
         // 去掉死路时 TAP_POINT 留着
         assertNotNull(catalog.without(setOf("x")) { it.id }.operations["TAP_POINT"])
+        // 滑动：同样按 1.5 倍换算；起点在「Pay now」上、太短、格式不对都不执行
+        val swipe = catalog.resolve("SWIPE_POINT", "600,500,100,500")!!
+        assertEquals(listOf(900, 750, 150, 750), listOf("x1", "y1", "x2", "y2").map { swipe.params[it] })
+        assertNull(catalog.resolve("SWIPE_POINT", "360,1200,50,1200"))
+        assertNull(catalog.resolve("SWIPE_POINT", "600,500,610,505"))
+        assertNull(catalog.resolve("SWIPE_POINT", "600,500"))
     }
 }

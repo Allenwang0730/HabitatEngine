@@ -126,6 +126,21 @@ data class PointTap(
     }
 
     fun isBlocked(x: Int, y: Int): Boolean = blocked.any { x in it.left..it.right && y in it.top..it.bottom }
+
+    /** "x1,y1,x2,y2"（截图像素）→ 屏幕坐标的起点和终点；格式不对、在截图外、几乎没动返回 null。 */
+    fun toScreenSwipe(target: String?): List<Int>? {
+        val parts = target?.split(',')?.map { it.trim() } ?: return null
+        if (parts.size != 4) return null
+        val from = toScreen("${parts[0]},${parts[1]}") ?: return null
+        val to = toScreen("${parts[2]},${parts[3]}") ?: return null
+        if (kotlin.math.abs(from.first - to.first) + kotlin.math.abs(from.second - to.second) < MIN_SWIPE_PX) return null
+        return listOf(from.first, from.second, to.first, to.second)
+    }
+
+    companion object {
+        /** 比这短的"滑动"其实是点击，让模型用 TAP_POINT。 */
+        const val MIN_SWIPE_PX = 40
+    }
 }
 
 /**
@@ -204,6 +219,7 @@ data class ActionCatalog(
         "SET_SLIDER" -> actions.find { it.operation == "SET_SLIDER" && it.target == target }
         "SCROLL_LEFT", "SCROLL_RIGHT" -> actions.find { it.operation == operation && it.target == target }
         "TAP_POINT" -> pointAction(target)
+        "SWIPE_POINT" -> swipeAction(target)
         "SCROLL_DOWN", "SCROLL_UP", "BACK", "HOME", "WAIT", "DONE", "BLOCKED",
         "PRESS_ENTER", "CLEAR_TEXT",
         -> actions.find { it.operation == operation }
@@ -232,6 +248,25 @@ data class ActionCatalog(
     }
 
     /**
+     * 按截图坐标现做一次滑动（左滑露出删除、在画布上画线、拖动）。起点落在安全闸挡住的控件里不执行：
+     * 有的应用左滑一行就是删除，起点在被挡的行上等于绕过闸。
+     */
+    fun swipeAction(target: String?): CatalogAction? {
+        val p = pointTap ?: return null
+        val (x1, y1, x2, y2) = p.toScreenSwipe(target) ?: return null
+        if (p.isBlocked(x1, y1)) return null
+        return CatalogAction(
+            id = "swipe_${x1 / POINT_CELL}_${y1 / POINT_CELL}_${x2 / POINT_CELL}_${y2 / POINT_CELL}",
+            operation = "SWIPE_POINT",
+            target = target,
+            label = "按截图坐标滑动（$target）",
+            tool = "ACTION_SWIPE",
+            params = mapOf("x1" to x1, "y1" to y1, "x2" to x2, "y2" to y2, "duration" to 400),
+            matchText = "sw@${x1 / POINT_CELL}/${y1 / POINT_CELL}>${x2 / POINT_CELL}/${y2 / POINT_CELL}",
+        )
+    }
+
+    /**
      * 去掉这次任务里已经证明走不通的动作（按 [signatureOf] 匹配）。
      * 操作下的候选全被去掉时，连操作本身一起去掉，模型就不会再选它。
      * DONE/BLOCKED/WAIT/BACK/HOME 永远保留：模型必须始终有路可退。
@@ -243,7 +278,7 @@ data class ActionCatalog(
             val ids = keep.filter { it.operation == op }.mapNotNull { it.target }.toSet()
             map.filterKeys { it in ids }
         }
-        val ops = operations.filterKeys { op -> op in ALWAYS_KEEP || op == "TAP_POINT" || keep.any { it.operation == op } }
+        val ops = operations.filterKeys { op -> op in ALWAYS_KEEP || op == "TAP_POINT" || op == "SWIPE_POINT" || keep.any { it.operation == op } }
         return copy(
             actions = keep,
             operations = ops,

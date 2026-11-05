@@ -264,7 +264,11 @@ fun decisionFromChoice(
         }
         ?: return Decision(
             "error", operation, target, confidence = confidence,
-            detail = if (operation == "TAP_POINT") "坐标 $target 不在截图里，或落在不能点的控件上" else "候选里没有 $operation/$target",
+            detail = when (operation) {
+                "TAP_POINT" -> "坐标 $target 不在截图里，或落在不能点的控件上"
+                "SWIPE_POINT" -> "滑动 $target 格式不对（要 x1,y1,x2,y2）、在截图外、太短，或起点落在不能点的控件上"
+                else -> "候选里没有 $operation/$target"
+            },
         )
     val status = if (operation == "WAIT") "wait" else "action"
     return Decision(status, operation, effectiveTarget, action, confidence, detail)

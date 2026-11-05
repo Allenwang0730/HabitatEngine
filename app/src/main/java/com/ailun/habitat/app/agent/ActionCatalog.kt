@@ -381,6 +381,8 @@ object Catalogs {
             val ih = (observation.screenHeight.toLong() * iw / observation.screenWidth).toInt()
             operations["TAP_POINT"] = "按截图坐标点一下（target 写截图上的像素坐标 \"x,y\"，截图 ${iw}×${ih}）。" +
                 "只在要点的东西不在控件一览里、但截图上看得见时用；控件一览里有的用 TAP。"
+            operations["SWIPE_POINT"] = "按截图坐标滑动（target 写 \"x1,y1,x2,y2\"）：左滑一行露出删除/更多、在画布上画线、拖动。" +
+                "上下翻页用 SCROLL_DOWN/UP，横排用 SCROLL_RIGHT/LEFT。"
             PointTap(iw, ih, observation.screenWidth, observation.screenHeight, blockedAreas(goal, observation, allowGoalUnlock))
         } else null
 
