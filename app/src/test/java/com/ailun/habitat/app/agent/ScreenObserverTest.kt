@@ -138,6 +138,15 @@ class ScreenObserverTest {
     }
 
     @Test
+    fun blankContainerDoesNotSwallowItsText() {
+        // 文件管理器：item_root 可点但自己一个字都没拿到，文件名在更深的子节点上——吞掉子节点，这一行就没有文字了
+        val item = row("", 700, "com.google.android.documentsui:id/item_root")
+        val name = rowChild("task.html", 700).copy(ancestorClickable = true)
+        val obs = ScreenObserver.select(listOf(item, name), 1440, 3200, "a11y")
+        assertTrue(obs.elements.any { it.text == "task.html" && it.clickable })
+    }
+
+    @Test
     fun elementWithClickableDescendantCountsAsClickable() {
         val wrapper = node(
             text = "关于手机", x = 720, y = 900, clickable = false, descendantClickable = true,

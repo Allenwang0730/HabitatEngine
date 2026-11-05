@@ -65,7 +65,9 @@ object ScreenObserver {
 
     /** 与 Android 无关的 OCR 结果，便于单测合并逻辑。 */
     data class OcrText(val text: String, val bounds: ElementBounds)
-    private const val DESC_DEPTH = 3
+    // 容器标签从后代里找文字的深度。3 层时文件管理器（DocumentsUI）的列表项一个字都拿不到：
+    // 文件名在 item_root 下面第 4~6 层，于是每一行都成了「图标按钮 item root」，模型认不出哪行是哪个文件
+    private const val DESC_DEPTH = 6
     private const val DESC_MAX_PARTS = 3
     private const val DESC_MAX_LEN = 80
 
@@ -243,6 +245,9 @@ object ScreenObserver {
     internal data class ScreenState(val interactive: Boolean, val locked: Boolean)
 
     internal fun walk(service: AccessibilityService, width: Int, height: Int, source: String): ScreenObservation {
+        // 系统的无障碍节点缓存靠事件失效；列表换内容不发事件时，读到的是上一屏的节点。
+        // AndroidWorld（文件管理器）实测：截图里已经进了 Recordings，读屏还是之前的「Alarms」页，点下去全落空
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) runCatching { service.clearCache() }
         val raw = mutableListOf<RawNode>()
         val infos = mutableListOf<WindowInfo>()
         val images = mutableListOf<ElementBounds>()
@@ -427,7 +432,8 @@ object ScreenObserver {
         // AndroidWorld（Markor 多选模式）：顶部操作栏被聚合成一行「Favourite Rename Details」，点它的中心什么都没发生，
         // 真正的「删除」按钮就在里面，模型却一直看不到。开关不算按钮（行里一个开关是"开关行"，由 singleCheckableDescendant 处理）。
         val buttonGroups = rowSized.filter { c -> isButtonGroup(c, nodes, width, height) }.toSet()
-        val containers = rowSized.filter { it !in inputBars && it !in buttonGroups }
+        // 自己没拿到任何文字的容器不吞子节点：吞掉之后这一行的文字就彻底没了（只剩「图标按钮 item root」）
+        val containers = rowSized.filter { it !in inputBars && it !in buttonGroups && it.text.isNotBlank() }
         val kept = nodes.filter { node ->
             val bounds = node.bounds
             val shadowed = bounds != null && containers.any { it !== node && it.bounds!!.contains(bounds) }
