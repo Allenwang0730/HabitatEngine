@@ -434,8 +434,10 @@ class AgentLoop(
             // 复核：不相信"每一步都选了 DONE"，按屏幕证据再判断一次
             val reviewer = planner ?: return LoopResult("done", run.used, withFacts("完成", run))
             run.observation = ScreenObserver.observe(context)
+            // 这次不通过也没有机会再改了（重规划用完 / 步数快用完）：最后一次复核
+            val last = run.replans >= maxReplans || run.used >= maxSteps - 1
             val review = runCatching {
-                reviewer.review(goal, run.observation, run.completed, reviewFacts(run))
+                reviewer.review(goal, run.observation, run.completed, reviewFacts(run, lastChance = last))
             }.getOrNull()
             if (review == null) {
                 onStep("复核不可用，按执行器判断结束")
@@ -468,12 +470,13 @@ class AgentLoop(
      * 给复核员的事实：读到的、记下的，再加上本次成功输入过的文字（typed_N，逐字）。
      * 最后一屏常常显示不全（长正文、合并后的笔记），AndroidWorld MarkorMergeNotes 里内容全对，复核员因为看不到第三段判了三次未通过。
      */
-    private fun reviewFacts(run: Run): Map<String, String> {
+    private fun reviewFacts(run: Run, lastChance: Boolean = false): Map<String, String> {
         val typed = run.history.filter { it.operation == "TYPE_TEXT" && it.error.isEmpty() }
             .mapNotNull { it.label.removePrefix("输入「").removeSuffix("」").takeIf { t -> t != it.label && t.isNotBlank() } }
             .distinct().takeLast(MAX_NOTES)
-        if (typed.isEmpty()) return run.facts
-        return run.facts + typed.mapIndexed { i, t -> "typed_${i + 1}" to t.take(600) }
+        val withTyped = if (typed.isEmpty()) run.facts else run.facts + typed.mapIndexed { i, t -> "typed_${i + 1}" to t.take(600) }
+        // 最后一次复核（没有重规划/步数再去补证据了）：告诉复核员，它按"没有反证"判，不再要求屏幕上的正面证据
+        return if (lastChance) withTyped + (LAST_CHANCE to "true") else withTyped
     }
 
     /** 本次任务里成功执行过「输入 X」。 */
@@ -512,7 +515,7 @@ class AgentLoop(
         val reason = "达到步数上限 $maxSteps"
         val reviewer = planner ?: return LoopResult("blocked", run.used, reason)
         run.observation = ScreenObserver.observe(context)
-        val review = runCatching { reviewer.review(run.goal, run.observation, run.completed, reviewFacts(run)) }.getOrNull()
+        val review = runCatching { reviewer.review(run.goal, run.observation, run.completed, reviewFacts(run, lastChance = true)) }.getOrNull()
         val answer = AnswerFormat.normalize(run.goal, review?.answer.orEmpty())
         // 复核员按屏幕证据判定已完成：就是在最后一步做完了，照常报完成（调用方的步数预算里已经给这一步留了位）
         if (review?.done == true) {
@@ -1066,6 +1069,8 @@ class AgentLoop(
         const val MAX_BAD_REPLIES = 2
         /** 一步里动作执行失败（节点返回失败）几次才算这一步走不通。 */
         const val MAX_NODE_FAILURES = 3
+        /** 复核员看到这个事实（值 "true"）就知道这是最后一次复核。 */
+        const val LAST_CHANCE = "last_chance"
         /** 跨屏笔记最多留几条。 */
         const val MAX_NOTES = 6
         /** 一次任务里按 replan_after 接着规划的上限：防止每版计划都写 replan_after 来回规划（录入很多条时要接着规划好几次）。 */
