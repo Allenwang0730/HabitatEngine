@@ -215,7 +215,9 @@ object AgentLoopController {
             // 提问类目标的答案本身（按目标要求的格式）；没有为空串。detail 是「答案 — 依据」给人看
             put("answer", s.answer)
             if (s.obsSources.isNotEmpty()) put("obs_sources", s.obsSources)
-            put("log", s.lines.joinToString("\n"))
+            // 跑完给整轮日志（runLog，每行 ≤ RunRecords.MAX_LINE），跑着时只给界面上那 40 行：长任务的计划和反思在前面，
+            // 只给最后 40 行，失败分析时看不到它是怎么规划的
+            put("log", if (s.running) s.lines.joinToString("\n") else synchronized(this) { runLog.joinToString("\n") }.ifEmpty { s.lines.joinToString("\n") })
         }
     }
 
