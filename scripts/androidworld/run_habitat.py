@@ -450,7 +450,20 @@ def main() -> None:
                 goal, complexity = task.goal, task.complexity
                 env.reset(go_home=True)
                 enable_habitat_a11y(adb)  # AndroidWorld resets can drop extra services
-                task.initialize_task(env)
+                try:
+                    task.initialize_task(env)
+                except Exception as e:
+                    # an app's database only exists after the app has run once (OsmAnd's map_markers_db on a fresh
+                    # read-only emulator); the reference runner's order happened to open it earlier. Open it, retry once.
+                    app = getattr(task, "app_name_with_db", None) or getattr(task, "app_name", None)
+                    if "no such table" not in str(e) or not app:
+                        raise
+                    from android_world.env import adb_utils
+                    adb_utils.launch_app(app, env.controller)
+                    time.sleep(8)
+                    adb_utils.close_app(app, env.controller)
+                    env.reset(go_home=True)
+                    task.initialize_task(env)
             except Exception as e:  # one broken task setup must not end a 116-task run
                 row = {"task": name, "seed": seed, "goal": goal, "score": 0.0, "phase": "init_error",
                        "detail": repr(e)[:300], "complexity": complexity}
