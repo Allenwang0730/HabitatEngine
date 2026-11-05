@@ -73,6 +73,8 @@ object Catalogs {
     private const val MAX_TAPS = 30
     private const val MAX_LONG_PRESS = 12
     private const val MAX_HSCROLLS = 3
+    /** TAP_POINT 落在多大的控件里就按点那个控件算（像素，宽高都不超过）。 */
+    private const val CLAIM_MAX_PX = 320
     private const val MAX_APPS = 8
     private const val MAX_TEXTS = 6
     private const val TEXT_PREVIEW = 40
@@ -383,7 +385,13 @@ object Catalogs {
                 "只在要点的东西不在控件一览里、但截图上看得见时用；控件一览里有的用 TAP。"
             operations["SWIPE_POINT"] = "按截图坐标滑动（target 写 \"x1,y1,x2,y2\"）：左滑一行露出删除/更多、在画布上画线、拖动。" +
                 "上下翻页用 SCROLL_DOWN/UP，横排用 SCROLL_RIGHT/LEFT。"
-            PointTap(iw, ih, observation.screenWidth, observation.screenHeight, blockedAreas(goal, observation, allowGoalUnlock))
+            PointTap(
+                iw, ih, observation.screenWidth, observation.screenHeight, blockedAreas(goal, observation, allowGoalUnlock),
+                // 只认按钮大小的控件；整行、整块容器里点哪儿是有区别的（工具栏行里的放大镜），照坐标点
+                claimed = taps.mapNotNull { el ->
+                    el.bounds?.takeIf { it.width <= CLAIM_MAX_PX && it.height <= CLAIM_MAX_PX }?.let { it to "tap_${el.index}" }
+                },
+            )
         } else null
 
         return ActionCatalog(

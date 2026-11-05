@@ -115,6 +115,12 @@ data class PointTap(
     val screenWidth: Int,
     val screenHeight: Int,
     val blocked: List<ElementBounds> = emptyList(),
+    /**
+     * 控件一览里本来就能点的小控件（范围 → TAP 候选 id）。坐标落在里面就按那个 TAP 算：
+     * 模型看着截图爱用坐标点，判重、软惩罚、"去掉它重选"都是按控件算的，用坐标点等于绕开它们
+     * （AndroidWorld CameraTakeVideo：「Shutter」连点两次被去掉后，模型改用坐标再点一次）。
+     */
+    val claimed: List<Pair<ElementBounds, String>> = emptyList(),
 ) {
     /** "x,y"（截图像素）→ 屏幕坐标；格式不对或在截图外返回 null。 */
     fun toScreen(target: String?): Pair<Int, Int>? {
@@ -234,6 +240,10 @@ data class ActionCatalog(
         val p = pointTap ?: return null
         val (x, y) = p.toScreen(target) ?: return null
         if (p.isBlocked(x, y)) return null
+        // 落在一览里的小控件上：就是点那个控件。它这一步被去掉了（重复、死路）就不让用坐标绕过去
+        p.claimed.filter { (b, _) -> x in b.left..b.right && y in b.top..b.bottom }
+            .minByOrNull { (b, _) -> b.width.toLong() * b.height }
+            ?.let { (_, id) -> return actions.find { it.id == id } }
         return CatalogAction(
             id = "point_${x / POINT_CELL}_${y / POINT_CELL}",
             operation = "TAP_POINT",

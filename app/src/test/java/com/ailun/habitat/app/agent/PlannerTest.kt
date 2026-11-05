@@ -411,4 +411,20 @@ class PlannerTest {
         assertNull(catalog.resolve("SWIPE_POINT", "600,500,610,505"))
         assertNull(catalog.resolve("SWIPE_POINT", "600,500"))
     }
+
+    @Test
+    fun tapPointOnAListedControlIsThatControl() {
+        val shutter = el("1", "Shutter", 2200).copy(centerX = 540, bounds = ElementBounds(440, 2100, 640, 2300))
+        val obs = screen("com.android.camera2", shutter).copy(screenWidth = 1080, screenHeight = 2400)
+        val catalog = Catalogs.build("Take one video", obs, apps, pointTaps = true)
+        // 截图 (360,1466) = 屏幕 (540,2199)：落在「Shutter」里，就按 TAP 它算（判重、惩罚都对得上）
+        val viaPoint = catalog.resolve("TAP_POINT", "360,1466")!!
+        assertEquals("TAP", viaPoint.operation)
+        assertEquals("tap_1", viaPoint.id)
+        // 「Shutter」这一步被去掉了（连点两次被判重复）：不能用坐标再点它
+        val without = catalog.without(setOf("tap_1")) { it.id }
+        assertNull(without.resolve("TAP_POINT", "360,1466"))
+        // 不在任何控件里的点照常按坐标点
+        assertEquals("TAP_POINT", catalog.resolve("TAP_POINT", "100,100")!!.operation)
+    }
 }
