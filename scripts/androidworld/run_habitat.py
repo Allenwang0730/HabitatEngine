@@ -154,6 +154,32 @@ def grant_app_permissions(adb: Adb) -> None:
             adb.shell(f"pm grant {pkg} android.permission.{perm}", check=False)
 
 
+def a11y_healthy(mcp: "Mcp") -> bool:
+    """Habitat's accessibility service sees windows with text (an empty tree made one 25-task run score 2/25)."""
+    try:
+        ok, text = mcp.call("screen", timeout=20)
+        snap = json.loads(text) if ok else {}
+    except Exception:
+        return False
+    return bool(snap.get("window_count")) and bool(str(snap.get("screen_text", "")).strip())
+
+
+def ensure_a11y(adb: Adb, mcp: "Mcp") -> str:
+    """Before each task: if Habitat sees an empty screen, rebind its accessibility service. Returns what happened."""
+    if a11y_healthy(mcp):
+        return "ok"
+    for attempt in range(3):
+        current = adb.shell("settings get secure enabled_accessibility_services", check=False)
+        others = [s for s in current.split(":") if s and s != "null" and s != A11Y_SERVICE]
+        adb.shell(f"settings put secure enabled_accessibility_services {':'.join(others) or 'null'}", check=False)
+        time.sleep(2)
+        enable_habitat_a11y(adb)
+        time.sleep(4 + 2 * attempt)
+        if a11y_healthy(mcp):
+            return f"rebound after {attempt + 1}"
+    return "unhealthy"
+
+
 def setup_habitat(
     adb: Adb, apk: str | None, token: str, forwarder_port: int, provider: str, mcp_port: int, extras: dict[str, str],
 ) -> None:
@@ -161,6 +187,8 @@ def setup_habitat(
     if apk:
         adb.run("install", "-r", "-g", apk)
     adb.shell(f"appops set {PKG} SYSTEM_ALERT_WINDOW allow", check=False)
+    # 「修改系统设置」：用户在 App 引导里会授权；没有它亮度工具必失败（AndroidWorld 有 4 个亮度任务）
+    adb.shell(f"appops set {PKG} WRITE_SETTINGS allow", check=False)
     adb.shell(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS", check=False)
     enable_habitat_a11y(adb)
     time.sleep(3)  # let the accessibility service connect
@@ -169,9 +197,12 @@ def setup_habitat(
     base = f"http://10.0.2.2:{forwarder_port}"
     flags = {
         "agent_token": token, "deepseek_key": "via-host-forwarder", "deepseek_url": f"{base}/chat/completions",
-        "jev_key": "via-host-forwarder", "jev_url": f"{base}/v1/systemone", "provider": provider, **extras,
+        "jev_key": "via-host-forwarder", "jev_url": f"{base}/v1/systemone", "provider": provider,
+        **{k: v for k, v in extras.items() if k != "eval_local_hours"},
     }
     args = " ".join(f"--es {k} {v}" for k, v in flags.items() if v)
+    hours = int(extras.get("eval_local_hours") or 0)
+    args += f" --ei eval_local_hours {hours}"  # always sent, so a run without the flag switches it off
     adb.shell(f"am start -W -n {SELFTEST} --ez eval_setup true --ez start_agent true {args}")
     time.sleep(3)
     adb.run("forward", f"tcp:{mcp_port}", "tcp:8931")
@@ -263,6 +294,8 @@ def main() -> None:
     ap.add_argument("--mcp_port", type=int, default=8931, help="host port forwarded to the app's MCP server (8931 on the device)")
     ap.add_argument("--ocr_mode", default="", help="fallback / hybrid (app setting; empty = keep the app default)")
     ap.add_argument("--penalty_mode", default="", help="hard / soft (app setting; empty = keep the app default)")
+    ap.add_argument("--eval_local", action="store_true",
+                    help="treat MCP goals as typed on the phone (debug builds only; sensitive actions the goal names are allowed)")
     ap.add_argument("--out", default="habitat_androidworld.jsonl")
     ap.add_argument("--start_index", type=int, default=0, help="resume an interrupted run: skip the first N tasks (seeds stay seed+i)")
     a = ap.parse_args()
@@ -286,7 +319,7 @@ def main() -> None:
     )
     adb = Adb(a.adb, f"emulator-{a.console_port}")
     token = secrets.token_urlsafe(24)
-    extras = {"ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode}
+    extras = {"ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode, "eval_local_hours": "12" if a.eval_local else "0"}
     setup_habitat(adb, a.apk, token, a.forwarder_port, a.provider, a.mcp_port, extras)
     mcp = Mcp(token, f"http://127.0.0.1:{a.mcp_port}/mcp")
     mcp.wait_ready()
@@ -323,6 +356,7 @@ def main() -> None:
                 continue
             budget = step_budget(task.complexity, a.budget)
             timeout = max(300, min(1800, 25 * budget))
+            a11y = ensure_a11y(adb, mcp)
             t0 = time.time()
             net_before = _Forwarder.network_errors
             usage_before = dict(_Forwarder.usage)
@@ -349,7 +383,7 @@ def main() -> None:
                 "phase": status.get("phase"), "detail": status.get("detail", "")[:500], "answer": answer[:200],
                 "seconds": seconds, "provider": a.provider, "planner": a.planner == "on",
                 "complexity": task.complexity, "budget": budget, "check_error": status.get("check_error"),
-                "network_errors": status["network_errors"], "usage": usage,
+                "network_errors": status["network_errors"], "usage": usage, "a11y": a11y, "eval_local": a.eval_local,
                 "obs_sources": status.get("obs_sources") or obs_sources(status.get("log", "")),
             }
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -364,7 +398,7 @@ def main() -> None:
     summary = {
         "started": started, "finished": time.strftime("%Y-%m-%d %H:%M:%S"), "passed": passed, "ran": done,
         "tasks": len(names), "seed": a.seed, "provider": a.provider, "planner": a.planner, "budget": a.budget,
-        "ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode, "apk": a.apk, "usage": _Forwarder.usage,
+        "ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode, "eval_local": a.eval_local, "apk": a.apk, "usage": _Forwarder.usage,
         "network_errors": _Forwarder.network_errors,
     }
     with open(os.path.splitext(a.out)[0] + ".summary.json", "w", encoding="utf-8") as f:

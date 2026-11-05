@@ -127,6 +127,24 @@ object AgentLoopController {
     const val PENALTY_HARD = "hard"
     const val PENALTY_SOFT = "soft"
 
+    /**
+     * 评测用：远程（MCP）发起的目标按"本机发起"处理——目标原文点名了敏感动作（删除/发送）就放行，和用户在手机上自己输入一样。
+     * 三道限制：只在 debug 构建生效；只能经 NodeSelfTestActivity（DUMP 权限，只有 adb shell 能拉起）打开；最多 24 小时后自动失效。
+     * 每次生效都写进步骤日志。release 构建里这个设置被忽略。
+     */
+    fun evalLocalOriginActive(context: Context): Boolean {
+        val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (!debuggable) return false
+        val until = context.getSharedPreferences(PREFS, 0).getLong("eval_local_until", 0L)
+        return System.currentTimeMillis() < until
+    }
+
+    /** [hours] ≤ 0 关闭；最多 24 小时。 */
+    fun setEvalLocalOrigin(context: Context, hours: Int) {
+        val until = if (hours <= 0) 0L else System.currentTimeMillis() + hours.coerceAtMost(24) * 3_600_000L
+        context.getSharedPreferences(PREFS, 0).edit().putLong("eval_local_until", until).apply()
+    }
+
     fun getPenaltyMode(context: Context): String =
         context.getSharedPreferences(PREFS, 0).getString("penalty_mode", PENALTY_HARD) ?: PENALTY_HARD
 
@@ -199,17 +217,21 @@ object AgentLoopController {
         }
         val steps = (maxSteps ?: DEFAULT_STEPS).coerceIn(1, MAX_STEPS)
         val planner = if (usePlanner == false) null else plannerFor(context, force = usePlanner == true)
+        // 评测开关（[evalLocalOriginActive]，仅 debug + adb + 限时）：远程目标按本机发起放行敏感动作
+        val evalLocal = origin == ORIGIN_REMOTE && evalLocalOriginActive(context)
         val agent = AgentLoop(
             context.applicationContext,
             provider,
             steps,
-            allowGoalUnlock = origin != ORIGIN_REMOTE,
+            allowGoalUnlock = origin != ORIGIN_REMOTE || evalLocal,
             planner = planner,
             softPenalties = getPenaltyMode(context) == PENALTY_SOFT,
         )
         synchronized(this) {
             if (_state.value.running) return "自主模式已在运行"
-            val tag = (if (origin == ORIGIN_REMOTE) " · 远程" else "") + (if (planner != null) " · DeepSeek 规划" else "")
+            val tag = (if (origin == ORIGIN_REMOTE) " · 远程" else "") +
+                (if (evalLocal) " · 评测模式：按本机发起放行" else "") +
+                (if (planner != null) " · DeepSeek 规划" else "")
             val first = "开始：$providerName$tag · $text"
             _state.value = AgentLoopState(running = true, phase = "running", lines = listOf(first))
             runLog.clear()

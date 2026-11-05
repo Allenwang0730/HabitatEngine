@@ -347,7 +347,7 @@ class AgentLoop(
             while (index < plan.steps.size) {
                 if (stopRequested) return LoopResult("stopped", run.used, "已停止")
                 finished()?.let { return it }
-                if (run.used >= maxSteps) return LoopResult("blocked", run.used, "达到步数上限 $maxSteps")
+                if (run.used >= maxSteps) return outOfSteps(run, onStep)
                 val step = plan.steps[index]
                 run.seq++
                 if (plan.steps.size > 1) onStep("步骤 ${index + 1}/${plan.steps.size}：${step.instruction}（完成条件：${step.doneWhen}）")
@@ -369,7 +369,8 @@ class AgentLoop(
                         planListener?.onStepStatus(index, PlanStatus.FAILED)
                         // 卡住时先看终点：远程任务卡在被挡住的发送按钮上，其实消息已经填好了
                         finished()?.let { return it }
-                        if (planner == null || run.replans >= MAX_REPLANS || run.used >= maxSteps) {
+                        if (run.used >= maxSteps) return outOfSteps(run, onStep)
+                        if (planner == null || run.replans >= MAX_REPLANS) {
                             return LoopResult(if (outcome.status == "error") "error" else "blocked", run.used, outcome.detail)
                         }
                         run.replans++
@@ -408,7 +409,7 @@ class AgentLoop(
             }
             onStep("复核未通过：${review.reason}")
             if (run.replans >= MAX_REPLANS || run.used >= maxSteps) {
-                return LoopResult("blocked", run.used, "复核未通过：${review.reason}")
+                return LoopResult("blocked", run.used, "复核未通过：${review.reason}", answer = review.answer)
             }
             run.replans++
             reflectOnFailure(run, "复核", review.reason, onStep)
@@ -420,6 +421,21 @@ class AgentLoop(
     /** 本次任务里成功执行过「输入 X」。 */
     private fun typedInRun(run: Run, text: String): Boolean =
         run.history.any { it.operation == "TYPE_TEXT" && it.error.isEmpty() && it.label.contains("「$text」") }
+
+    /**
+     * 步数用完：结束前让复核员看一眼当前屏幕（只是一次模型调用，不点任何东西，不算步数）。
+     * 提问类目标常常是答案已经在屏幕上、只差最后一步"作答"——不问就白白交空卷。
+     * 状态仍是 blocked（没确认完成），答案放在 [LoopResult.answer]，交给调用方决定用不用。
+     */
+    private suspend fun outOfSteps(run: Run, onStep: (String) -> Unit): LoopResult {
+        val reason = "达到步数上限 $maxSteps"
+        val reviewer = planner ?: return LoopResult("blocked", run.used, reason)
+        run.observation = ScreenObserver.observe(context)
+        val review = runCatching { reviewer.review(run.goal, run.observation, run.completed, run.facts) }.getOrNull()
+        val answer = review?.answer.orEmpty()
+        if (answer.isNotBlank()) onStep("步数用完，屏幕上读到的答案（未确认完成）：$answer")
+        return LoopResult("blocked", run.used, if (answer.isBlank()) reason else "$reason；屏幕上的答案（未确认）：$answer", answer = answer)
+    }
 
     /**
      * 写小屏/工作区：不看屏幕变化（小屏不在读屏里），成功就算这一步完成；失败不影响任务本身。
@@ -562,8 +578,21 @@ class AgentLoop(
         val result = runNode(inv.node, inv.params, inv.successFlag, inv.outputs)
         run.used++
         run.facts.putAll(result.outputs)
-        delay(700)
-        val after = ScreenObserver.observe(context)
+        // 应用冷启动常要 1~2 秒：只看 700ms 时的前台会把成功判成失败，再在界面上重做一遍，白花一步
+        var after = ScreenObserver.observe(context)
+        if (result.ok && inv.expectPackage != null) {
+            var waited = 0L
+            delay(700)
+            after = ScreenObserver.observe(context)
+            while (!after.packageName.contains(inv.expectPackage, ignoreCase = true) && waited < 1_800L) {
+                delay(450)
+                waited += 450
+                after = ScreenObserver.observe(context)
+            }
+        } else {
+            delay(700)
+            after = ScreenObserver.observe(context)
+        }
         val pkgOk = inv.expectPackage == null || after.packageName.contains(inv.expectPackage, ignoreCase = true)
         val changed = !LoopPolicy.sameScreen(after, before)
         run.history += StepNote(
@@ -602,6 +631,8 @@ class AgentLoop(
         var recoveries = 0
         var invalidPicks = 0
         var autoTaps = 0
+        var redecides = 0
+        val excluded = mutableSetOf<String>()
         val start = run.used
         while (run.used - start < budget && run.used < maxSteps) {
             if (stopRequested) return StepOutcome("stopped", "已停止")
@@ -641,11 +672,13 @@ class AgentLoop(
                 },
             )
             // 软惩罚：死路和做过没用的动作留在候选里、按分数降权；硬模式（旧行为）：死路直接删掉
-            val catalog = if (softPenalties) {
+            val scored = if (softPenalties) {
                 built.copy(penalties = Penalties.forCatalog(built, run.history, observation, run.reflections.flatMap { it.avoid }))
             } else {
                 built.without(LoopPolicy.deadEnds(run.history)) { LoopPolicy.signatureOf(it, observation) }
             }
+            // 本步里判过"在重复"的动作：这一步内不再给（[MAX_REDECIDES]）
+            val catalog = if (excluded.isEmpty()) scored else scored.without(excluded) { LoopPolicy.signatureOf(it, observation) }
             obsCounts.merge(observation.source, 1, Int::plus)
             onStep("读屏 ${ctx.nav?.path ?: observation.packageName} / ${observation.source} / ${observation.elements.size} 个控件（已用 ${run.used} 步，剩 ${maxSteps - run.used} 步）")
             catalog.guard?.let { onStep("限制：$it") }
@@ -719,6 +752,14 @@ class AgentLoop(
             }
             if (repeatReason != null && recoveries >= LoopPolicy.MAX_RECOVERIES) {
                 return StepOutcome("blocked", "$repeatReason，换招后仍在重复")
+            }
+            // 先让模型在去掉这个动作的候选里重选（不花步数）；重选还是不行，才由代码换招（返回/滚动，要花一步）。
+            // AndroidWorld 官方步数下最简单的任务只有 10 步，换招平均每个失败任务要吃掉 1~2 步。
+            if (repeatReason != null && redecides < MAX_REDECIDES) {
+                redecides++
+                excluded += signature
+                onStep("$repeatReason，去掉它重新选择")
+                continue
             }
             if (action.operation == "TAP" && !stillThere(action, observation)) {
                 stale++
@@ -889,6 +930,9 @@ class AgentLoop(
 
         /** 失败反思最多留几条（新的挤掉旧的），控制提示词长度。 */
         const val MAX_REFLECTIONS = 3
+
+        /** 一步里模型想重复同一动作时，最多几次"去掉它重选"（不花步数），之后才由代码换招。 */
+        const val MAX_REDECIDES = 2
 
         /** 技能步里代码自己点名字对得上的那一行，最多几次。 */
         const val MAX_AUTO_TAPS = 2

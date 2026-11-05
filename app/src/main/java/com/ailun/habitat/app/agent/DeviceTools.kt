@@ -237,7 +237,8 @@ object DeviceTools {
             "set_dnd" -> toggle(tool, args, "ACTION_DND_MODE", "免打扰", "dnd_success", listOf("dnd_state"))
             "set_brightness" -> {
                 val level = args.getValue("level")
-                val value = mapOf("max" to 255, "high" to 190, "mid" to 128, "low" to 60, "min" to 10).getValue(level)
+                // 最低档写 1：Android 的亮度下限是 1（AndroidWorld 也按 1 判"最低"），写 10 屏幕没到最暗
+                val value = mapOf("max" to 255, "high" to 190, "mid" to 128, "low" to 60, "min" to 1).getValue(level)
                 Invocation(
                     tool, args, "ACTION_BRIGHTNESS", mapOf("action" to "set", "value" to value),
                     "亮度设为${levelName(level)}", "brightness_success", listOf("brightness_value"),
