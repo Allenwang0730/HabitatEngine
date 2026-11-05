@@ -114,7 +114,7 @@ object WeChatOcr {
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private suspend fun capture(service: AccessibilityService): Bitmap? = suspendCancellableCoroutine { cont ->
+    internal suspend fun capture(service: AccessibilityService): Bitmap? = suspendCancellableCoroutine { cont ->
         service.takeScreenshot(
             Display.DEFAULT_DISPLAY,
             executor,

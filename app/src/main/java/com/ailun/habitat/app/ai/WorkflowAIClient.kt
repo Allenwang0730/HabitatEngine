@@ -30,9 +30,28 @@ object WorkflowAIClient {
 
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
-    /** 调 DeepSeek 生成工作流；返回 LLM 原始文本。[model] 为空用默认模型（deepseek-chat，不思考、快）。 */
+    /** 用户消息的 content：没图是纯字符串（和以前完全一样）；有图是 [文字, image_url] 数组。 */
+    internal fun userContent(text: String, imageJpegBase64: String?): com.google.gson.JsonElement {
+        if (imageJpegBase64.isNullOrEmpty()) return com.google.gson.JsonPrimitive(text)
+        return com.google.gson.JsonArray().apply {
+            add(JsonObject().apply {
+                addProperty("type", "text")
+                addProperty("text", text)
+            })
+            add(JsonObject().apply {
+                addProperty("type", "image_url")
+                add("image_url", JsonObject().apply { addProperty("url", "data:image/jpeg;base64,$imageJpegBase64") })
+            })
+        }
+    }
+
+    /**
+     * 调 DeepSeek（或 OpenAI 兼容网关）；返回 LLM 原始文本。[model] 为空用默认模型（deepseek-chat，不思考、快）。
+     * [imageJpegBase64] 非空时把截图按 OpenAI 的 image_url（data URL）随用户消息发出——只有多模态模型能用，DeepSeek 原生接口不收图。
+     */
     suspend fun chat(
         apiKey: String, systemPrompt: String, userPrompt: String, baseUrl: String = DEFAULT_URL, model: String? = null,
+        imageJpegBase64: String? = null,
     ): Result<String> =
         withContext(Dispatchers.IO) {
             try {
@@ -46,7 +65,7 @@ object WorkflowAIClient {
                         })
                         add(JsonObject().apply {
                             addProperty("role", "user")
-                            addProperty("content", userPrompt)
+                            add("content", userContent(userPrompt, imageJpegBase64))
                         })
                     })
                 }

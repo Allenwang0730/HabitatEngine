@@ -58,6 +58,7 @@ class NodeSelfTestActivity : Activity() {
         i.getStringExtra("penalty_mode")?.let { com.ailun.habitat.app.agent.AgentLoopController.setPenaltyMode(this, it) }
         i.getStringExtra("ocr_mode")?.let { com.ailun.habitat.app.agent.ScreenObserver.setOcrMode(this, it) }
         i.getStringExtra("planner_model")?.let { com.ailun.habitat.app.agent.AgentLoopController.setPlannerModel(this, it) }
+        i.getStringExtra("vision")?.let { com.ailun.habitat.app.agent.AgentLoopController.setVisionMode(this, it) }
         // 评测：远程目标按本机发起处理 N 小时（0 关闭，最多 24）。只在 debug 构建生效
         if (i.hasExtra("eval_local_hours")) {
             com.ailun.habitat.app.agent.AgentLoopController.setEvalLocalOrigin(this, i.getIntExtra("eval_local_hours", 0))

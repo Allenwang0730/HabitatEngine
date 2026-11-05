@@ -90,7 +90,10 @@ object AgentLoopController {
     private fun plannerFor(context: Context, force: Boolean = false): Planner? {
         if (!force && !isPlannerEnabled(context)) return null
         val key = WorkflowAIClient.getApiKey(context)?.takeIf { it.isNotBlank() } ?: return null
-        return DeepSeekPlanner(key, WorkflowAIClient.getBaseUrl(context), getPlannerModel(context).ifBlank { null })
+        return DeepSeekPlanner(
+            key, WorkflowAIClient.getBaseUrl(context), getPlannerModel(context).ifBlank { null },
+            screenshot = screenshotSupplier.takeIf { getVisionMode(context) != VISION_OFF },
+        )
     }
 
     /** Jev 请求的 HTTP 代理（host:port），只存本机，不能远程设置。 */
@@ -126,6 +129,23 @@ object AgentLoopController {
     /** 规划/复核/反思用的 DeepSeek 模型名；空 = deepseek-chat（默认，不思考）。执行器不受影响。 */
     fun getPlannerModel(context: Context): String =
         context.getSharedPreferences(PREFS, 0).getString("planner_model", "") ?: ""
+
+    /**
+     * 截图给模型看：off（默认，只发文字）/ plan（规划、复核、反思附截图，一次任务几张）/ all（每一步决策也附，慢）。
+     * 只有接的是多模态模型才有用；DeepSeek 原生接口不收图，开了会报错。
+     */
+    const val VISION_OFF = "off"
+    const val VISION_PLAN = "plan"
+    const val VISION_ALL = "all"
+
+    fun getVisionMode(context: Context): String =
+        context.getSharedPreferences(PREFS, 0).getString("vision", VISION_OFF) ?: VISION_OFF
+
+    fun setVisionMode(context: Context, mode: String) {
+        if (mode in setOf(VISION_OFF, VISION_PLAN, VISION_ALL)) context.getSharedPreferences(PREFS, 0).edit().putString("vision", mode).apply()
+    }
+
+    private val screenshotSupplier: suspend () -> String? = { ScreenCapture.jpegBase64() }
 
     fun setPlannerModel(context: Context, model: String) {
         // 「-」= 恢复默认（adb 的 --es 传不了空串）
@@ -220,7 +240,10 @@ object AgentLoopController {
             PROVIDER_DEEPSEEK -> {
                 val key = WorkflowAIClient.getApiKey(context)
                 if (key.isNullOrBlank()) return "未配置 DeepSeek API key"
-                DeepSeekDecisionProvider(key, WorkflowAIClient.getBaseUrl(context))
+                DeepSeekDecisionProvider(
+                    key, WorkflowAIClient.getBaseUrl(context),
+                    screenshot = screenshotSupplier.takeIf { getVisionMode(context) == VISION_ALL },
+                )
             }
             PROVIDER_LOCAL -> LocalDecisionProvider()
             else -> return "未知决策器: $providerName"

@@ -214,26 +214,39 @@ class DeepSeekPlanner(
     private val apiKey: String,
     private val baseUrl: String,
     private val model: String? = null,
+    /** 非空时规划/复核/反思都附上当前截图（需要多模态模型，见 [AgentLoopController.getVisionMode]）。 */
+    private val screenshot: (suspend () -> String?)? = null,
 ) : Planner {
+    private suspend fun shot(): String? = screenshot?.invoke()
+
+    private fun withShotNote(prompt: String, shot: String?): String =
+        if (shot == null) prompt else "$prompt\n附件是当前屏幕截图：和上面的屏幕文字是同一屏。文字里看不出的状态（开关、勾选、滑块位置、图片里的字）以截图为准。"
+
     override suspend fun plan(
         goal: String, observation: ScreenObservation, apps: List<AppEntry>, replan: ReplanContext?, scope: ToolScope,
     ): Plan? {
-        val raw = WorkflowAIClient.chat(apiKey, PlanPrompts.SYSTEM_PLAN, PlanPrompts.planUser(goal, observation, apps, replan, scope), baseUrl, model)
-            .getOrNull() ?: return null
+        val img = shot()
+        val raw = WorkflowAIClient.chat(
+            apiKey, PlanPrompts.SYSTEM_PLAN, withShotNote(PlanPrompts.planUser(goal, observation, apps, replan, scope), img), baseUrl, model, img,
+        ).getOrNull() ?: return null
         return PlanPrompts.parsePlan(raw, goal, apps, scope)
     }
 
     override suspend fun review(goal: String, observation: ScreenObservation, completed: List<String>, facts: Map<String, String>): Review? {
-        val raw = WorkflowAIClient.chat(apiKey, PlanPrompts.SYSTEM_REVIEW, PlanPrompts.reviewUser(goal, observation, completed, facts), baseUrl, model)
-            .getOrNull() ?: return null
+        val img = shot()
+        val raw = WorkflowAIClient.chat(
+            apiKey, PlanPrompts.SYSTEM_REVIEW, withShotNote(PlanPrompts.reviewUser(goal, observation, completed, facts), img), baseUrl, model, img,
+        ).getOrNull() ?: return null
         return PlanPrompts.parseReview(raw)
     }
 
     override suspend fun reflect(
         goal: String, failedStep: String, reason: String, recent: List<String>, observation: ScreenObservation,
     ): Reflection? {
+        val img = shot()
         val raw = WorkflowAIClient.chat(
-            apiKey, PlanPrompts.SYSTEM_REFLECT, PlanPrompts.reflectUser(goal, failedStep, reason, recent, observation), baseUrl, model,
+            apiKey, PlanPrompts.SYSTEM_REFLECT, withShotNote(PlanPrompts.reflectUser(goal, failedStep, reason, recent, observation), img),
+            baseUrl, model, img,
         ).getOrNull() ?: return null
         return PlanPrompts.parseReflection(raw)
     }
