@@ -50,6 +50,7 @@ class _Forwarder(http.server.BaseHTTPRequestHandler):
     upstream_url: str = ""
     upstream_key_name: str = "deepseek"
     model_map: dict[str, str] = {}
+    fallback_map: dict[str, str] = {}  # real model -> backup model when the gateway says it is unavailable
     network_errors = 0  # requests that still failed after retries; reported per task
     usage = {"deepseek_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cache_hit_tokens": 0, "jev_calls": 0}
     lock = threading.Lock()
@@ -62,6 +63,7 @@ class _Forwarder(http.server.BaseHTTPRequestHandler):
         name, url = route
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         key_name = name
+        req_model = ""
         if name == "deepseek" and self.upstream_url:
             url, key_name = self.upstream_url, self.upstream_key_name
             if self.model_map:
@@ -70,6 +72,7 @@ class _Forwarder(http.server.BaseHTTPRequestHandler):
                     asked = req_json.get("model", "")
                     if asked in self.model_map:
                         req_json["model"] = self.model_map[asked]
+                        req_model = req_json["model"]
                         # thinking models reject a low temperature on some gateways; let the gateway default it
                         req_json.pop("temperature", None)
                         body = json.dumps(req_json).encode()
@@ -97,6 +100,22 @@ class _Forwarder(http.server.BaseHTTPRequestHandler):
                 if attempt == 3:
                     break
             time.sleep(2 * (attempt + 1))
+        # 网关上某个模型整体不可用（503 没有可用账号、404、400 上游锁定）：换备用模型再试一次，而不是让整轮评测作废
+        # （2026-11-05 实测 gpt-6-luna 跑到一半开始 503/404，51 个任务因此报错）
+        fb = self.fallback_map.get(req_model) if req_model else None
+        if fb and status in (400, 404, 429, 500, 502, 503):
+            try:
+                req_json = json.loads(body)
+                req_json["model"] = fb
+                req2 = urllib.request.Request(url, data=json.dumps(req_json).encode(), headers=req.headers, method="POST")
+                with urllib.request.urlopen(req2, timeout=120) as resp:
+                    status, data = resp.status, resp.read()
+                with _Forwarder.lock:
+                    _Forwarder.usage["fallbacks"] = _Forwarder.usage.get("fallbacks", 0) + 1
+            except urllib.error.HTTPError as e:
+                status, data = e.code, e.read()
+            except Exception as e:
+                status, data = 502, json.dumps({"error": str(e)}).encode()
         with _Forwarder.lock:
             if status == 502:
                 _Forwarder.network_errors += 1
@@ -336,6 +355,8 @@ def main() -> None:
                     help="where the app's DeepSeek-route calls go; truesota = true-sota.com (any model, key in TS_API_KEY)")
     ap.add_argument("--exec_model", default="", help="with --upstream truesota: real model for the per-step executor (app asks for deepseek-chat)")
     ap.add_argument("--plan_model", default="", help="with --upstream truesota: real model for planner/reviewer/reflection")
+    ap.add_argument("--exec_fallback", default="", help="backup executor model if the gateway says exec_model is unavailable")
+    ap.add_argument("--plan_fallback", default="", help="backup planner model if the gateway says plan_model is unavailable")
     ap.add_argument("--vision", default="off", choices=["off", "plan", "all"],
                     help="attach screenshots: plan = planner/reviewer/reflection, all = every executor step too (needs multimodal models)")
     ap.add_argument("--budget", default="30", help="steps per task: a number, 'official' = AndroidWorld's int(10*complexity), 'official15' = 1.5x; Habitat caps at 40")
@@ -357,6 +378,7 @@ def main() -> None:
             raise SystemExit("set TS_API_KEY (stays on the host)")
         _Forwarder.upstream_url, _Forwarder.upstream_key_name = TRUESOTA_URL, "truesota"
         _Forwarder.model_map = {k: v for k, v in (("deepseek-chat", a.exec_model), (a.planner_model or "deepseek-flash", a.plan_model)) if v}
+        _Forwarder.fallback_map = {k: v for k, v in ((a.exec_model, a.exec_fallback), (a.plan_model, a.plan_fallback)) if k and v}
         keys["deepseek"] = keys["deepseek"] or "unused"  # the app still needs the DeepSeek route switched on
     if (a.provider == "deepseek" or a.planner == "on") and not keys["deepseek"]:
         raise SystemExit("set DEEPSEEK_API_KEY (stays on the host; the emulator only sees a placeholder)")
