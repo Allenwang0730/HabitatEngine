@@ -116,6 +116,18 @@ class PenaltiesTest {
     }
 
     @Test
+    fun englishGoalsUnlockTheMatchingDeviceTools() {
+        // 只认中文时，英文「Turn brightness to the min value.」拿不到亮度工具，只能在界面上拖（AndroidWorld 0/4）
+        val ids = { g: String -> DeviceTools.available(g).map { it.id } }
+        assertTrue("set_brightness" in ids("Turn brightness to the min value."))
+        assertTrue("set_volume" in ids("Mute the ring volume"))
+        assertTrue("set_dnd" in ids("Turn on Do Not Disturb"))
+        assertFalse("set_brightness" in ids("Open the display settings"))
+        val inv = DeviceTools.resolve("set_brightness", mapOf("level" to "min"), "Turn brightness to the min value.", emptyList())!!
+        assertEquals(1, inv.params["value"])
+    }
+
+    @Test
     fun focusedInputCanBeLongPressed() {
         val input = ScreenElement("3", "Order No: B654321", 540, 200, clickable = true, editable = true, focused = true,
             bounds = ElementBounds(40, 160, 1040, 240))

@@ -206,21 +206,25 @@ avoid 写下一次不该再选的动作（用最近动作里的原文），没�
         text.lowercase().filterNot { it.isWhitespace() || it in "\"'「」『』“”‘’" }
 }
 
-/** 用 DeepSeek（OpenAI 兼容接口）做规划与复核。 */
+/**
+ * 用 DeepSeek（OpenAI 兼容接口）做规划与复核。[model] 为空用默认（deepseek-chat，不思考）；
+ * 可设成带思考的 deepseek-flash——规划/复核/反思一次任务只调几次，慢一点（实测约 11 秒）换更好的计划和答案。
+ */
 class DeepSeekPlanner(
     private val apiKey: String,
     private val baseUrl: String,
+    private val model: String? = null,
 ) : Planner {
     override suspend fun plan(
         goal: String, observation: ScreenObservation, apps: List<AppEntry>, replan: ReplanContext?, scope: ToolScope,
     ): Plan? {
-        val raw = WorkflowAIClient.chat(apiKey, PlanPrompts.SYSTEM_PLAN, PlanPrompts.planUser(goal, observation, apps, replan, scope), baseUrl)
+        val raw = WorkflowAIClient.chat(apiKey, PlanPrompts.SYSTEM_PLAN, PlanPrompts.planUser(goal, observation, apps, replan, scope), baseUrl, model)
             .getOrNull() ?: return null
         return PlanPrompts.parsePlan(raw, goal, apps, scope)
     }
 
     override suspend fun review(goal: String, observation: ScreenObservation, completed: List<String>, facts: Map<String, String>): Review? {
-        val raw = WorkflowAIClient.chat(apiKey, PlanPrompts.SYSTEM_REVIEW, PlanPrompts.reviewUser(goal, observation, completed, facts), baseUrl)
+        val raw = WorkflowAIClient.chat(apiKey, PlanPrompts.SYSTEM_REVIEW, PlanPrompts.reviewUser(goal, observation, completed, facts), baseUrl, model)
             .getOrNull() ?: return null
         return PlanPrompts.parseReview(raw)
     }
@@ -229,7 +233,7 @@ class DeepSeekPlanner(
         goal: String, failedStep: String, reason: String, recent: List<String>, observation: ScreenObservation,
     ): Reflection? {
         val raw = WorkflowAIClient.chat(
-            apiKey, PlanPrompts.SYSTEM_REFLECT, PlanPrompts.reflectUser(goal, failedStep, reason, recent, observation), baseUrl,
+            apiKey, PlanPrompts.SYSTEM_REFLECT, PlanPrompts.reflectUser(goal, failedStep, reason, recent, observation), baseUrl, model,
         ).getOrNull() ?: return null
         return PlanPrompts.parseReflection(raw)
     }

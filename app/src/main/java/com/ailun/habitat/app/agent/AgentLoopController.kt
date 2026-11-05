@@ -90,7 +90,7 @@ object AgentLoopController {
     private fun plannerFor(context: Context, force: Boolean = false): Planner? {
         if (!force && !isPlannerEnabled(context)) return null
         val key = WorkflowAIClient.getApiKey(context)?.takeIf { it.isNotBlank() } ?: return null
-        return DeepSeekPlanner(key, WorkflowAIClient.getBaseUrl(context))
+        return DeepSeekPlanner(key, WorkflowAIClient.getBaseUrl(context), getPlannerModel(context).ifBlank { null })
     }
 
     /** Jev 请求的 HTTP 代理（host:port），只存本机，不能远程设置。 */
@@ -121,6 +121,16 @@ object AgentLoopController {
         if (u.isEmpty() || u.startsWith("https://") || u.startsWith("http://")) {
             context.getSharedPreferences(PREFS, 0).edit().putString("jev_url", u).apply()
         }
+    }
+
+    /** 规划/复核/反思用的 DeepSeek 模型名；空 = deepseek-chat（默认，不思考）。执行器不受影响。 */
+    fun getPlannerModel(context: Context): String =
+        context.getSharedPreferences(PREFS, 0).getString("planner_model", "") ?: ""
+
+    fun setPlannerModel(context: Context, model: String) {
+        // 「-」= 恢复默认（adb 的 --es 传不了空串）
+        val m = model.trim().let { if (it == "-") "" else it }
+        if (m.isEmpty() || m.matches(Regex("[A-Za-z0-9._-]{1,64}"))) context.getSharedPreferences(PREFS, 0).edit().putString("planner_model", m).apply()
     }
 
     /** 失败项怎么处理：hard=从候选里删掉（旧行为）；soft=留着降权 + 卡住时先反思（[Penalties]、[Planner.reflect]）。 */

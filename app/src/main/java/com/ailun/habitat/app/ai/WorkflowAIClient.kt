@@ -22,19 +22,22 @@ object WorkflowAIClient {
     private const val DEFAULT_MODEL = "deepseek-chat"
 
     private val gson = Gson()
+    // 规划/复核可以用带思考的模型（deepseek-flash 实测单次约 11 秒）：读超时放宽到 120 秒
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
-    /** 调 DeepSeek 生成工作流；返回 LLM 原始文本。 */
-    suspend fun chat(apiKey: String, systemPrompt: String, userPrompt: String, baseUrl: String = DEFAULT_URL): Result<String> =
+    /** 调 DeepSeek 生成工作流；返回 LLM 原始文本。[model] 为空用默认模型（deepseek-chat，不思考、快）。 */
+    suspend fun chat(
+        apiKey: String, systemPrompt: String, userPrompt: String, baseUrl: String = DEFAULT_URL, model: String? = null,
+    ): Result<String> =
         withContext(Dispatchers.IO) {
             try {
                 val body = JsonObject().apply {
-                    addProperty("model", DEFAULT_MODEL)
+                    addProperty("model", model?.takeIf { it.isNotBlank() } ?: DEFAULT_MODEL)
                     addProperty("temperature", 0.3)
                     add("messages", com.google.gson.JsonArray().apply {
                         add(JsonObject().apply {

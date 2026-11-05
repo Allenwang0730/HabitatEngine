@@ -260,11 +260,21 @@ def run_goal(mcp: Mcp, goal: str, provider: str, planner: bool, max_steps: int, 
     return status
 
 
-def step_budget(complexity: float, mode: str) -> int:
-    """AndroidWorld's runner gives int(10 * complexity) steps; Habitat caps a run at 40."""
-    if mode == "official":
-        return max(5, min(40, int(10 * complexity)))
-    return int(mode)
+def step_budget(complexity: float, mode: str) -> tuple[int, int]:
+    """(AndroidWorld steps, device actions Habitat may take).
+
+    'official' = AndroidWorld's runner, int(10 * complexity); 'official15' = 1.5x (DroidRun's public harness default,
+    ceil(15 * complexity)). In both, one step is kept for the final answer/status, which the reference agents spend
+    as an action; Habitat does it as its review, so its device actions are capped at budget - 1. Habitat caps a run at 40.
+    A plain number is a fixed budget with no reserved step (the 25-task subset runs).
+    """
+    import math
+
+    if mode in ("official", "official15"):
+        total = int(10 * complexity) if mode == "official" else math.ceil(15 * complexity)
+        total = max(5, min(40, total))
+        return total, total - 1
+    return int(mode), int(mode)
 
 
 def obs_sources(log: str) -> dict[str, int]:
@@ -288,7 +298,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=30)
     ap.add_argument("--provider", default="deepseek", choices=["deepseek", "jev", "local"])
     ap.add_argument("--planner", default="on", choices=["on", "off"])
-    ap.add_argument("--budget", default="30", help="steps per task: a number, or 'official' = AndroidWorld's int(10*complexity), capped at 40")
+    ap.add_argument("--planner_model", default="", help="DeepSeek model for planner/reviewer/reflection (e.g. deepseek-flash = thinking); empty = deepseek-chat")
+    ap.add_argument("--budget", default="30", help="steps per task: a number, 'official' = AndroidWorld's int(10*complexity), 'official15' = 1.5x; Habitat caps at 40")
     ap.add_argument("--forwarder_port", type=int, default=18080)
     ap.add_argument("--grpc_port", type=int, default=8554)
     ap.add_argument("--mcp_port", type=int, default=8931, help="host port forwarded to the app's MCP server (8931 on the device)")
@@ -319,7 +330,8 @@ def main() -> None:
     )
     adb = Adb(a.adb, f"emulator-{a.console_port}")
     token = secrets.token_urlsafe(24)
-    extras = {"ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode, "eval_local_hours": "12" if a.eval_local else "0"}
+    extras = {"ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode, "planner_model": a.planner_model or "-",
+              "eval_local_hours": "12" if a.eval_local else "0"}
     setup_habitat(adb, a.apk, token, a.forwarder_port, a.provider, a.mcp_port, extras)
     mcp = Mcp(token, f"http://127.0.0.1:{a.mcp_port}/mcp")
     mcp.wait_ready()
@@ -330,7 +342,7 @@ def main() -> None:
     if unknown:
         raise SystemExit(f"unknown tasks: {unknown}")
 
-    passed = done = 0
+    passed = passed_official = done = 0
     with open(a.out, "a", encoding="utf-8") as out:
         for i, name in enumerate(names):
             if i < a.start_index:
@@ -354,13 +366,13 @@ def main() -> None:
                 if adb.run("get-state", check=False).strip() != "device":
                     raise SystemExit("emulator is not reachable any more; stopping")
                 continue
-            budget = step_budget(task.complexity, a.budget)
-            timeout = max(300, min(1800, 25 * budget))
+            budget, device_steps = step_budget(task.complexity, a.budget)
+            timeout = max(300, min(2400, 35 * budget))
             a11y = ensure_a11y(adb, mcp)
             t0 = time.time()
             net_before = _Forwarder.network_errors
             usage_before = dict(_Forwarder.usage)
-            status = run_goal(mcp, task.goal, a.provider, a.planner == "on", budget, timeout)
+            status = run_goal(mcp, task.goal, a.provider, a.planner == "on", device_steps, timeout)
             status["network_errors"] = _Forwarder.network_errors - net_before
             usage = {k: _Forwarder.usage[k] - usage_before[k] for k in usage_before}
             seconds = round(time.time() - t0)
@@ -377,12 +389,16 @@ def main() -> None:
             except Exception as e:
                 status["teardown_error"] = repr(e)[:200]
             passed += score == 1.0
+            # AndroidWorld's runner: `agent_successful = task_successful if interaction_results.done else 0.0` —
+            # a run that never reported completion scores 0 even if the phone ends up right.
+            score_official = score if status.get("phase") == "done" else 0.0
+            passed_official += score_official == 1.0
             done += 1
             row = {
-                "task": name, "seed": a.seed + i, "goal": task.goal, "score": score,
+                "task": name, "seed": a.seed + i, "goal": task.goal, "score": score, "score_official": score_official,
                 "phase": status.get("phase"), "detail": status.get("detail", "")[:500], "answer": answer[:200],
-                "seconds": seconds, "provider": a.provider, "planner": a.planner == "on",
-                "complexity": task.complexity, "budget": budget, "check_error": status.get("check_error"),
+                "seconds": seconds, "provider": a.provider, "planner": a.planner == "on", "planner_model": a.planner_model,
+                "complexity": task.complexity, "budget": budget, "device_steps": device_steps, "check_error": status.get("check_error"),
                 "network_errors": status["network_errors"], "usage": usage, "a11y": a11y, "eval_local": a.eval_local,
                 "obs_sources": status.get("obs_sources") or obs_sources(status.get("log", "")),
             }
@@ -396,14 +412,16 @@ def main() -> None:
                 f.write(status.get("log", ""))
             print(f"[{i + 1}/{len(names)}] {'PASS' if score == 1.0 else 'FAIL'} {name} ({seconds}s, {status.get('phase')}) — {task.goal}", flush=True)
     summary = {
-        "started": started, "finished": time.strftime("%Y-%m-%d %H:%M:%S"), "passed": passed, "ran": done,
-        "tasks": len(names), "seed": a.seed, "provider": a.provider, "planner": a.planner, "budget": a.budget,
+        "started": started, "finished": time.strftime("%Y-%m-%d %H:%M:%S"), "passed": passed,
+        "passed_official": passed_official, "ran": done,
+        "tasks": len(names), "seed": a.seed, "provider": a.provider, "planner": a.planner, "planner_model": a.planner_model,
+        "budget": a.budget,
         "ocr_mode": a.ocr_mode, "penalty_mode": a.penalty_mode, "eval_local": a.eval_local, "apk": a.apk, "usage": _Forwarder.usage,
         "network_errors": _Forwarder.network_errors,
     }
     with open(os.path.splitext(a.out)[0] + ".summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=1)
-    print(f"\n{passed}/{len(names)} passed; results appended to {a.out}", flush=True)
+    print(f"\n{passed}/{len(names)} passed ({passed_official} under the official done rule); results appended to {a.out}", flush=True)
     env.close()
 
 

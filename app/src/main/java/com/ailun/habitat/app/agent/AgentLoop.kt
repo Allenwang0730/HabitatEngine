@@ -403,13 +403,14 @@ class AgentLoop(
                 return LoopResult("done", run.used, withFacts("完成（未复核）", run))
             }
             if (review.done) {
-                val detail = listOf(review.answer, review.reason).filter { it.isNotBlank() }.joinToString(" — ").ifBlank { "完成" }
+                val answer = AnswerFormat.normalize(goal, review.answer)
+                val detail = listOf(answer, review.reason).filter { it.isNotBlank() }.joinToString(" — ").ifBlank { "完成" }
                 onStep("复核通过：$detail")
-                return LoopResult("done", run.used, detail, answer = review.answer)
+                return LoopResult("done", run.used, detail, answer = answer)
             }
             onStep("复核未通过：${review.reason}")
             if (run.replans >= MAX_REPLANS || run.used >= maxSteps) {
-                return LoopResult("blocked", run.used, "复核未通过：${review.reason}", answer = review.answer)
+                return LoopResult("blocked", run.used, "复核未通过：${review.reason}", answer = AnswerFormat.normalize(goal, review.answer))
             }
             run.replans++
             reflectOnFailure(run, "复核", review.reason, onStep)
@@ -432,7 +433,13 @@ class AgentLoop(
         val reviewer = planner ?: return LoopResult("blocked", run.used, reason)
         run.observation = ScreenObserver.observe(context)
         val review = runCatching { reviewer.review(run.goal, run.observation, run.completed, run.facts) }.getOrNull()
-        val answer = review?.answer.orEmpty()
+        val answer = AnswerFormat.normalize(run.goal, review?.answer.orEmpty())
+        // 复核员按屏幕证据判定已完成：就是在最后一步做完了，照常报完成（调用方的步数预算里已经给这一步留了位）
+        if (review?.done == true) {
+            val detail = listOf(answer, review.reason).filter { it.isNotBlank() }.joinToString(" — ").ifBlank { "完成" }
+            onStep("步数用完时复核通过：$detail")
+            return LoopResult("done", run.used, detail, answer = answer)
+        }
         if (answer.isNotBlank()) onStep("步数用完，屏幕上读到的答案（未确认完成）：$answer")
         return LoopResult("blocked", run.used, if (answer.isBlank()) reason else "$reason；屏幕上的答案（未确认）：$answer", answer = answer)
     }
