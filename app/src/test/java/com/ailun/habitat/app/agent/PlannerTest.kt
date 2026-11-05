@@ -427,4 +427,24 @@ class PlannerTest {
         // 不在任何控件里的点照常按坐标点
         assertEquals("TAP_POINT", catalog.resolve("TAP_POINT", "100,100")!!.operation)
     }
+
+    @Test
+    fun stepNamingAnEmptyFieldTypesIntoItWithoutTappingFirst() {
+        fun field(i: String, text: String, y: Int) = ScreenElement(
+            i, text, 540, y, clickable = true, editable = true, focused = false, bounds = ElementBounds(40, y - 60, 1040, y + 60),
+        )
+        // 菜谱表单：Title 已经填了值，Description、Servings 还是提示字
+        val obs = screen("com.flauschcode.broccoli", field("1", "Chickpea Soup", 300), field("2", "Description", 500), field("3", "Servings", 700))
+            .copy(screenWidth = 1080, screenHeight = 2400)
+        val ctx = StepContext(
+            goal = "Add the recipes", instruction = "在 Description 输入框输入描述（菜名 Chickpea Soup）", doneWhen = "Description 里是描述",
+            index = 1, total = 5,
+        )
+        val catalog = Catalogs.build("Add the recipes", obs, apps, step = ctx, stepText = "A hearty soup")
+        val type = catalog.actions.single { it.operation == "TYPE_TEXT" }
+        assertEquals("540,500", type.params["target"])
+        // 没点名哪个框、也没有焦点：不猜（要先点一个）
+        val plain = Catalogs.build("Add the recipes", obs, apps, step = ctx.copy(instruction = "填表"), stepText = "A hearty soup")
+        assertTrue(plain.actions.none { it.operation == "TYPE_TEXT" })
+    }
 }

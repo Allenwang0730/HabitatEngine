@@ -73,6 +73,8 @@ object Catalogs {
     private const val MAX_TAPS = 30
     private const val MAX_LONG_PRESS = 12
     private const val MAX_HSCROLLS = 3
+    /** 输入框名字后面紧跟的词：「Title 输入框」「名称框」「the Title field」。 */
+    private const val FIELD_WORD = """\s*["'」』”]?\s*(?:输入框|文本框|框|栏|field|box|input)"""
     /** TAP_POINT 落在多大的控件里就按点那个控件算（像素，宽高都不超过）。 */
     private const val CLAIM_MAX_PX = 320
     private const val MAX_APPS = 8
@@ -96,9 +98,22 @@ object Catalogs {
      * 本屏要往哪个输入框里写：有焦点的那个；没报告焦点但只有一个输入框时就是它。
      * QQ/微信的输入框点过之后常常不报 isFocused，旧逻辑只认焦点，于是一直不给 TYPE_TEXT，
      * 模型只能反复点输入框直到判兜圈。多个输入框又都没焦点时不猜，让模型先点一个。
+     * 例外：这一步的说明点名了某个空输入框（「在 Title 输入框输入…」，框里显示的就是 Title 这个提示），直接写它——
+     * AndroidWorld 的菜谱表单 7 个框，每个框都要"先点再输"，官方 30 步的预算一半花在点框上。
      */
-    fun inputTarget(observation: ScreenObservation): ScreenElement? {
+    fun inputTarget(observation: ScreenObservation, instruction: String = "", typing: String? = null): ScreenElement? {
         val editable = observation.elements.filter { it.editable && !it.password && !it.system }
+        if (instruction.isNotBlank() && editable.size > 1) {
+            val named = editable.filter { el ->
+                val label = el.text.trim()
+                // 要紧跟着「输入框/框/field…」才算点名这个框：「在 Description 输入框输入」是，「（菜名 Chickpea Soup）」不是；
+                // 已经填好的框（框里是上一步输入的值）也不算
+                label.length in 3..40 && Regex("(?i)" + Regex.escape(label) + FIELD_WORD).containsMatchIn(instruction) &&
+                    typing?.contains(label, ignoreCase = true) != true
+            }
+            // 说明里同时点名了好几个框（"把 Title 和 Description 都填上"）就不猜
+            named.singleOrNull()?.let { return it }
+        }
         return editable.firstOrNull { it.index == observation.focusedIndex || it.focused }
             ?: editable.singleOrNull()
     }
@@ -149,7 +164,7 @@ object Catalogs {
         val sliderTargets = linkedMapOf<String, String>()
 
         val guard = guardOf(goal, observation, allowGoalUnlock)
-        val input = if (guard == null) inputTarget(observation) else null
+        val input = if (guard == null) inputTarget(observation, step?.instruction.orEmpty(), stepText) else null
         // 规划器给的输入文字已经在 PlanPrompts.parsePlan 里校验过是目标原文子串；
         // 这一步指定了文字就只给它（搜会话这一步不该把消息正文也列出来）
         val stepTexts = stepText?.let { listOf(it) } ?: textCandidates(goal)
