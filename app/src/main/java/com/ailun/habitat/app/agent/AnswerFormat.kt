@@ -12,6 +12,12 @@ object AnswerFormat {
     private val NUMBER = Regex("""-?\d[\d,]*(?:\.\d+)?""")
     private val ASKS_NUMBER = Regex("""(?i)\b(?:single (?:integer|number)|just a (?:single )?number|as a number|only the number|an integer|nearest integer)\b|只(?:回答|给|写)?(?:一个)?数字""")
     private val ASKS_BOOL = Regex("""(?i)\b(?:'True'|"True"|True)\b.*\b(?:'False'|"False"|False)\b""")
+    private val QUESTION = Regex(
+        """(?i)^\s*(?:what|how|which|when|where|who|is|are|do|does|did|was|were|has|have|can)\b|\?\s*$|\b(?:express your answer|answer with|answer in|format your answer)\b|[？]|(?:多少|几个|几点|哪[个些天里]|是什么|是否|有没有|吗)\s*[？?]?\s*$""",
+    )
+
+    /** 目标是不是一个提问（要给出答案，而不是改设备状态）。 */
+    fun isQuestion(goal: String): Boolean = QUESTION.containsMatchIn(goal.trim())
 
     fun normalize(goal: String, raw: String): String {
         var a = raw.trim()

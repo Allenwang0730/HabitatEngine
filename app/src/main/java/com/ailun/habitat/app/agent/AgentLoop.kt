@@ -719,13 +719,16 @@ class AgentLoop(
             }
             // 每做两步问一次规划模型（看截图）"这一步完成没有"：执行器常常已经到了却认不出来——
             // AndroidWorld（Joplin）实测点进 Health 文件夹后，因为标题栏不写「Health」，执行器又去开侧边栏，把步数耗光。
-            // 只是一次模型调用，不点任何东西，不算步数。
+            // 提问类目标每一步都问（单步计划也问）：答案常常要翻好几屏凑（这周的活动、某天的所有日程），
+            // 复核员只看最后一屏，前面几屏的内容要靠这里记成笔记。只是一次模型调用，不点任何东西，不算步数。
             val checker = planner
-            if (stepChecks && checker != null && total > 1 && run.used - start >= nextCheckAt) {
-                nextCheckAt = run.used - start + STEP_CHECK_EVERY
+            val question = AnswerFormat.isQuestion(run.goal)
+            if (stepChecks && checker != null && (total > 1 || question) && run.used - start >= nextCheckAt) {
+                nextCheckAt = run.used - start + if (question) 1 else STEP_CHECK_EVERY
                 val check = runCatching { checker.checkStep(run.goal, step.instruction, step.doneWhen, observation) }.getOrNull()
                 check?.note?.let { saveNote(run, it, onStep) }
-                if (check?.done == true) {
+                // 单步的提问计划：复查只为记笔记。它看到第一屏就会说"完成了"，可答案可能还要往下翻
+                if (check?.done == true && total > 1) {
                     onStep("复查：这一步的完成条件已经成立（${step.doneWhen}）")
                     return StepOutcome("done", step.doneWhen)
                 }
