@@ -3,7 +3,7 @@
 > 本文件由 `lib/src/main/java/com/ailun/habitat/spec/` 自动生成，不要手改。
 > 更新：改规格后运行 `UPDATE_DOCS=1 ./gradlew :lib:testDebugUnitTest --tests '*NodeSpecDocTest*'`。
 
-共 88 种节点。所有节点都可以加通用参数：
+共 90 种节点。所有节点都可以加通用参数：
 - `on_error`：节点出错时：skip=跳过继续（默认），stop=停止整个工作流
 - `require`：执行后要求为 true 的变量名（如 click_success），不满足按出错处理
 - `node_timeout_ms`：单节点超时毫秒，0=不限；默认 30 分钟
@@ -12,7 +12,7 @@
 
 ## 目录
 
-[`ACTION_FORK`](#action_fork) · [`ACTION_JOIN`](#action_join) · [`CONDITION_SWITCH`](#condition_switch) · [`CONDITION_ADVANCED_SWITCH`](#condition_advanced_switch) · [`ACTION_DELAY`](#action_delay) · [`ACTION_LOOP`](#action_loop) · [`ACTION_TRY_CATCH`](#action_try_catch) · [`ACTION_LOG`](#action_log) · [`ACTION_SET_VARIABLE`](#action_set_variable) · [`ACTION_TEXT_OPERATION`](#action_text_operation) · [`ACTION_MATH`](#action_math) · [`ACTION_CLIPBOARD`](#action_clipboard) · [`ACTION_PARSE_JSON`](#action_parse_json) · [`ACTION_PARSE_XML`](#action_parse_xml) · [`ACTION_BASE64`](#action_base64) · [`ACTION_FILE_OPERATION`](#action_file_operation) · [`ACTION_WORKSPACE`](#action_workspace) · [`ACTION_SQLITE_QUERY`](#action_sqlite_query) · [`ACTION_ZIP`](#action_zip) · [`ACTION_CRYPTO`](#action_crypto) · [`ACTION_ARRAY`](#action_array) · [`ACTION_PARSE_DATETIME`](#action_parse_datetime) · [`ACTION_GET_TIME`](#action_get_time) · [`ACTION_RANDOM`](#action_random) · [`ACTION_WAIT_UNTIL_TIME`](#action_wait_until_time) · [`ACTION_GET_BATTERY`](#action_get_battery) · [`ACTION_GET_DEVICE_INFO`](#action_get_device_info) · [`ACTION_GET_STORAGE_INFO`](#action_get_storage_info) · [`ACTION_GET_SENSOR`](#action_get_sensor) · [`ACTION_GET_SCREEN_STATE`](#action_get_screen_state) · [`ACTION_GET_AUDIO_STATE`](#action_get_audio_state) · [`ACTION_GET_SETTING`](#action_get_setting) · [`ACTION_RETRY`](#action_retry) · [`ACTION_ASSERT`](#action_assert) · [`ACTION_TOAST`](#action_toast) · [`ACTION_VIBRATE`](#action_vibrate) · [`ACTION_CLICK`](#action_click) · [`ACTION_SWIPE`](#action_swipe) · [`ACTION_LONG_PRESS`](#action_long_press) · [`ACTION_INPUT_TEXT`](#action_input_text) · [`ACTION_GLOBAL_KEY`](#action_global_key) · [`ACTION_FIND_ELEMENT`](#action_find_element) · [`ACTION_GLOBAL_NAV`](#action_global_nav) · [`ACTION_WAIT_FOR_ELEMENT`](#action_wait_for_element) · [`ACTION_SHELL`](#action_shell) · [`ACTION_LAUNCH_APP`](#action_launch_app) · [`ACTION_FORCE_STOP_APP`](#action_force_stop_app) · [`ACTION_SCREEN_WAKE`](#action_screen_wake) · [`ACTION_WIFI`](#action_wifi) · [`ACTION_BLUETOOTH`](#action_bluetooth) · [`ACTION_VOLUME`](#action_volume) · [`ACTION_BRIGHTNESS`](#action_brightness) · [`ACTION_FLASHLIGHT`](#action_flashlight) · [`ACTION_SET_ALARM`](#action_set_alarm) · [`ACTION_DND_MODE`](#action_dnd_mode) · [`ACTION_SHARE`](#action_share) · [`ACTION_SEND_BROADCAST`](#action_send_broadcast) · [`ACTION_MEDIA_CONTROL`](#action_media_control) · [`ACTION_CALL_PHONE`](#action_call_phone) · [`ACTION_CALL_DIRECT`](#action_call_direct) · [`ACTION_WAIT_CALL_END`](#action_wait_call_end) · [`ACTION_WAIT_CALL_ANSWER`](#action_wait_call_answer) · [`ACTION_GET_CALL_STATE`](#action_get_call_state) · [`ACTION_GET_SIM_INFO`](#action_get_sim_info) · [`ACTION_READ_CALL_LOG`](#action_read_call_log) · [`ACTION_SCREENSHOT`](#action_screenshot) · [`ACTION_TEXT_TO_SPEECH`](#action_text_to_speech) · [`ACTION_PLAY_MEDIA`](#action_play_media) · [`ACTION_RECORD_AUDIO`](#action_record_audio) · [`ACTION_CAPTURE_PHOTO`](#action_capture_photo) · [`ACTION_SET_WALLPAPER`](#action_set_wallpaper) · [`ACTION_SAY_TO_FILE`](#action_say_to_file) · [`ACTION_HTTP_REQUEST`](#action_http_request) · [`ACTION_NETWORK_STATUS`](#action_network_status) · [`ACTION_GET_WEATHER`](#action_get_weather) · [`ACTION_GEOCODE`](#action_geocode) · [`ACTION_GET_TRAFFIC`](#action_get_traffic) · [`ACTION_READ_SCREEN`](#action_read_screen) · [`ACTION_READ_SMS`](#action_read_sms) · [`ACTION_GET_APP_INFO`](#action_get_app_info) · [`ACTION_FOREGROUND_APP`](#action_foreground_app) · [`ACTION_APP_SEARCH`](#action_app_search) · [`ACTION_GET_LOCATION`](#action_get_location) · [`ACTION_READ_NOTIFICATIONS`](#action_read_notifications) · [`ACTION_AI_CHAT`](#action_ai_chat) · [`ACTION_SEND_NOTIFICATION`](#action_send_notification) · [`ACTION_DYNAMIC_ISLAND`](#action_dynamic_island) · [`ACTION_MINI_SCREEN`](#action_mini_screen)
+[`ACTION_FORK`](#action_fork) · [`ACTION_JOIN`](#action_join) · [`CONDITION_SWITCH`](#condition_switch) · [`CONDITION_ADVANCED_SWITCH`](#condition_advanced_switch) · [`ACTION_DELAY`](#action_delay) · [`ACTION_LOOP`](#action_loop) · [`ACTION_TRY_CATCH`](#action_try_catch) · [`ACTION_LOG`](#action_log) · [`ACTION_SET_VARIABLE`](#action_set_variable) · [`ACTION_TEXT_OPERATION`](#action_text_operation) · [`ACTION_MATH`](#action_math) · [`ACTION_CLIPBOARD`](#action_clipboard) · [`ACTION_PARSE_JSON`](#action_parse_json) · [`ACTION_PARSE_XML`](#action_parse_xml) · [`ACTION_BASE64`](#action_base64) · [`ACTION_FILE_OPERATION`](#action_file_operation) · [`ACTION_WORKSPACE`](#action_workspace) · [`ACTION_SQLITE_QUERY`](#action_sqlite_query) · [`ACTION_ZIP`](#action_zip) · [`ACTION_CRYPTO`](#action_crypto) · [`ACTION_ARRAY`](#action_array) · [`ACTION_PARSE_DATETIME`](#action_parse_datetime) · [`ACTION_GET_TIME`](#action_get_time) · [`ACTION_RANDOM`](#action_random) · [`ACTION_WAIT_UNTIL_TIME`](#action_wait_until_time) · [`ACTION_GET_BATTERY`](#action_get_battery) · [`ACTION_GET_DEVICE_INFO`](#action_get_device_info) · [`ACTION_GET_STORAGE_INFO`](#action_get_storage_info) · [`ACTION_GET_SENSOR`](#action_get_sensor) · [`ACTION_GET_SCREEN_STATE`](#action_get_screen_state) · [`ACTION_GET_AUDIO_STATE`](#action_get_audio_state) · [`ACTION_GET_SETTING`](#action_get_setting) · [`ACTION_RETRY`](#action_retry) · [`ACTION_ASSERT`](#action_assert) · [`ACTION_TOAST`](#action_toast) · [`ACTION_VIBRATE`](#action_vibrate) · [`ACTION_CLICK`](#action_click) · [`ACTION_SWIPE`](#action_swipe) · [`ACTION_LONG_PRESS`](#action_long_press) · [`ACTION_INPUT_TEXT`](#action_input_text) · [`ACTION_GLOBAL_KEY`](#action_global_key) · [`ACTION_FIND_ELEMENT`](#action_find_element) · [`ACTION_GLOBAL_NAV`](#action_global_nav) · [`ACTION_WAIT_FOR_ELEMENT`](#action_wait_for_element) · [`ACTION_SHELL`](#action_shell) · [`ACTION_LAUNCH_APP`](#action_launch_app) · [`ACTION_FORCE_STOP_APP`](#action_force_stop_app) · [`ACTION_SCREEN_WAKE`](#action_screen_wake) · [`ACTION_WIFI`](#action_wifi) · [`ACTION_BLUETOOTH`](#action_bluetooth) · [`ACTION_VOLUME`](#action_volume) · [`ACTION_BRIGHTNESS`](#action_brightness) · [`ACTION_FLASHLIGHT`](#action_flashlight) · [`ACTION_SET_ALARM`](#action_set_alarm) · [`ACTION_DND_MODE`](#action_dnd_mode) · [`ACTION_SHARE`](#action_share) · [`ACTION_SEND_BROADCAST`](#action_send_broadcast) · [`ACTION_MEDIA_CONTROL`](#action_media_control) · [`ACTION_OPEN_URL`](#action_open_url) · [`ACTION_CALL_PHONE`](#action_call_phone) · [`ACTION_CALL_DIRECT`](#action_call_direct) · [`ACTION_WAIT_CALL_END`](#action_wait_call_end) · [`ACTION_WAIT_CALL_ANSWER`](#action_wait_call_answer) · [`ACTION_GET_CALL_STATE`](#action_get_call_state) · [`ACTION_GET_SIM_INFO`](#action_get_sim_info) · [`ACTION_READ_CALL_LOG`](#action_read_call_log) · [`ACTION_SCREENSHOT`](#action_screenshot) · [`ACTION_TEXT_TO_SPEECH`](#action_text_to_speech) · [`ACTION_PLAY_MEDIA`](#action_play_media) · [`ACTION_RECORD_AUDIO`](#action_record_audio) · [`ACTION_CAPTURE_PHOTO`](#action_capture_photo) · [`ACTION_SET_WALLPAPER`](#action_set_wallpaper) · [`ACTION_SAY_TO_FILE`](#action_say_to_file) · [`ACTION_HTTP_REQUEST`](#action_http_request) · [`ACTION_NETWORK_STATUS`](#action_network_status) · [`ACTION_GET_WEATHER`](#action_get_weather) · [`ACTION_GEOCODE`](#action_geocode) · [`ACTION_GET_TRAFFIC`](#action_get_traffic) · [`ACTION_READ_SCREEN`](#action_read_screen) · [`ACTION_READ_SMS`](#action_read_sms) · [`ACTION_GET_APP_INFO`](#action_get_app_info) · [`ACTION_FOREGROUND_APP`](#action_foreground_app) · [`ACTION_APP_SEARCH`](#action_app_search) · [`ACTION_GET_LOCATION`](#action_get_location) · [`ACTION_READ_NOTIFICATIONS`](#action_read_notifications) · [`ACTION_AI_CHAT`](#action_ai_chat) · [`ACTION_SEND_NOTIFICATION`](#action_send_notification) · [`ACTION_DYNAMIC_ISLAND`](#action_dynamic_island) · [`ACTION_MINI_SCREEN`](#action_mini_screen) · [`ACTION_OCR`](#action_ocr)
 
 ### ACTION_FORK
 
@@ -806,6 +806,19 @@ WiFi 开关、切换、查询状态
 
 输出：`media_success` `media_error`
 
+### ACTION_OPEN_URL
+
+用系统默认浏览器（或认领该链接的 App）打开一个网址
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `url` ★ | string | 要打开的网址，支持 ${var}；只接受 http / https，不写协议按 https 补全 |
+| `package` | string | 可选：指定用哪个 App 打开，如 com.android.chrome；不填由系统选择 |
+
+输出：`open_url_success` `open_url` `open_url_error`
+
+> 拒绝 javascript: / file: / content: / intent: 等协议和带用户名密码的网址。只负责打开，不等页面加载完；页面里的点击、输入用 ACTION_CLICK / ACTION_INPUT_TEXT（浏览器页面的无障碍树通常可用）。
+
 ### ACTION_CALL_PHONE
 
 打开系统拨号界面并填好号码（不拨出，需用户自己点拨打）
@@ -1250,3 +1263,18 @@ WiFi 开关、切换、查询状态
 输出：`mini_screen_success` `mini_screen_shown` `mini_screen_error`
 
 > show/append 时 text、image、title、progress 至少给一个。不阻塞。用户在本次运行中关掉小屏后，后续写入只更新内容不再弹出（mini_screen_shown=false）。来源标签由系统标注，不能用参数指定。
+
+### ACTION_OCR
+
+截当前屏幕并识别文字（本机离线 OCR，中英文），给无障碍树读不到字的界面用
+
+前置：宿主 App 注册；需开启 Habitat 无障碍服务，Android 11+；屏幕需亮且未锁
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `contains` | string | 可选：只保留包含这段文字的块（不区分大小写），支持 ${var} |
+| `output_var` | string | 识别出的文字存到哪个变量（默认 ocr_text） |
+
+输出：`ocr_success` `ocr_text` `ocr_blocks` `ocr_count` `ocr_error`
+
+> ocr_text 按从上到下、从左到右拼接；ocr_blocks 是 JSON 数组（text、left/top/right/bottom、center_x/center_y，屏幕像素），可把 center_x,center_y 交给 ACTION_CLICK 的 target 点击。只读，不点任何东西；识别在本机完成，不上传。普通 App 的文字优先用 ACTION_FIND_ELEMENT / ACTION_CLICK（更快更准），图片里的字、游戏、Flutter/Unity 页面再用 OCR。

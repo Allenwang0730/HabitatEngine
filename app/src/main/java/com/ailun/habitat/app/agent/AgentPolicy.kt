@@ -64,12 +64,13 @@ object MobilePriors {
         "同一个文字可能在多处出现。候选里 ⟪id/xxx⟫ 是这个控件的稳定标识，按语义选最匹配的那个。",
         "点击、输入之后屏幕通常会变（进下一级、出现新内容）。不要因为上一步文字还在就以为没生效。",
         "SCROLL_DOWN/UP 用来露出当前屏幕上没有的内容。要找的东西可能是对不上的词，先滚动再判断。",
+        "要找的项在一横排（类别芯片、标签栏）里却看不见时，用 SCROLL_RIGHT / SCROLL_LEFT 横着滑那一排；上下滚动带不动横排。",
         "进入二级页面后要回上一层，用 BACK；只有需要离开整个应用时才用 HOME。",
         "要找的入口不在当前屏幕时，先在当前列表里 SCROLL_DOWN 翻到底，确认没有再去猜它在哪个子菜单里；进过又退出来的子菜单不要再进。",
         "recentActions 里 marked (无变化)/(失败) 的动作不要再原样重复；连续两次没效果就换一个思路。",
         "DONE 只有在屏幕上确实出现了目标完成的状态（目标页面已打开、开关已按要求处于该状态）才能选。",
         "目标是「进入/打开某个页面」时：pageTitle（页面顶部标题）或 activity 已经是那个页面，就选 DONE，不要再去点页面里同名的标题行。",
-        "拿不准目标是否已经完成时，选 WAIT，不要选 DONE。",
+        "拿不准目标是否已经完成时不要选 DONE。WAIT 只在屏幕确实还在加载/转场时用；不知道下一步点哪里时，选最可能推进的动作（滚动找、点像入口的控件），不要原地等。",
         "TYPE_TEXT 只能从给出的原文里选，不要自己编造要输入的内容。",
         "输入框已经有焦点时，ACTION_SET_TEXT 是整框替换；想清空就选 CLEAR_TEXT。",
         "输入完要提交或搜索，选 PRESS_ENTER，然后等屏幕响应。",
@@ -81,6 +82,12 @@ object MobilePriors {
         "nav.tried 里标了「进去过，已退回」「无变化」「失败」的入口不要再点；nav.atBottom=true 表示这一页已经滚到底，不要再 SCROLL_DOWN。",
         "nav.path 是当前位置；要回上一层用 BACK（会回到 nav.parent），不要用 HOME 从头再找。",
     )
+
+    /**
+     * 执行器每一步提示词里每条事实最多带多少字：长笔记（整张图里的三份菜谱）每一步都整段带上太费，
+     * 要输入的内容由规划器写进 text，执行器只需要知道"有这回事"。规划器、复核员拿到的是全文。
+     */
+    private const val EXEC_FACT_CHARS = 300
 
     /** operation 题干开头：有规划时强调"只做当前一步"。 */
     fun operationLead(step: StepContext?): String = if (step != null && step.multiStep) {
@@ -97,7 +104,10 @@ object MobilePriors {
             put("done_when", step.doneWhen)
             if (step.completed.isNotEmpty()) put("completed", step.completed)
         }
-        if (step.facts.isNotEmpty()) put("facts", step.facts)
+        if (step.facts.isNotEmpty()) put("facts", step.facts.mapValues { it.value.take(EXEC_FACT_CHARS) })
+        if (step.reflections.isNotEmpty()) {
+            put("reflections", step.reflections.map { mapOf("cause" to it.cause, "next" to it.next) })
+        }
         step.nav?.let { nav ->
             put("nav", buildMap {
                 put("path", nav.path)
@@ -116,7 +126,7 @@ object MobilePriors {
             add("这一步的完成条件: ${step.doneWhen}（屏幕上看到它就选 DONE）")
             if (step.completed.isNotEmpty()) add("已完成: ${step.completed.joinToString("；")}")
         }
-        if (step.facts.isNotEmpty()) add("已知事实: " + step.facts.entries.joinToString("；") { "${it.key}=${it.value}" })
+        if (step.facts.isNotEmpty()) add("已知事实: " + step.facts.entries.joinToString("；") { "${it.key}=${it.value.take(EXEC_FACT_CHARS)}" })
         step.nav?.let { nav ->
             add("当前位置: ${nav.path}（第 ${nav.depth} 层${nav.parent?.let { "，BACK 回到「$it」" } ?: ""}）")
             if (nav.triedHere.isNotEmpty()) add("本页已试过: ${nav.triedHere.joinToString("；")}")
@@ -148,15 +158,21 @@ object MobilePriors {
         return observation.elements
             .asSequence()
             .filter { it.centerY in STATUS_BAR_PX..limit && !it.editable && !it.system }
-            .flatMap { it.text.trim().split(' ').asSequence() }
+            // 只拆中文的聚合行；英文标题里本来就有空格（「Files in Downloads」拆开只剩「Files」）
+            .flatMap { el -> el.text.trim().let { t -> if (CJK.containsMatchIn(t)) t.split(' ') else listOf(t) }.asSequence() }
             .map { it.trim() }
             .firstOrNull { t ->
-                t.length in 2..30 && TITLE_SKIP.none { t.startsWith(it) } && !t.contains("未读") &&
-                    !t.contains("通知：") && !CLOCK.matches(t)
+                t.length in 2..30 && TITLE_SKIP.none { t.startsWith(it) } && TITLE_SKIP_EN.none { t.equals(it, ignoreCase = true) } &&
+                    !t.contains("未读") && !t.contains("通知：") && !CLOCK.matches(t)
             }
     }
 
     private val TITLE_SKIP = listOf("返回", "取消", "搜索", "更多", "关闭", "完成")
+    // 英文工具栏按钮的无障碍描述，整段相等才跳过（「Backup」不是「Back」）。AndroidWorld：文件管理器的标题被读成了汉堡菜单的「Show roots」
+    private val TITLE_SKIP_EN = listOf(
+        "Navigate up", "Show roots", "Open navigation drawer", "More options", "Search", "Back", "Cancel", "Close", "Menu",
+    )
+    private val CJK = Regex("[\\u4e00-\\u9fff]")
 
     /** 状态栏高度下限：真机状态栏文字在 y≈75，页面标题在 y≈260。 */
     private const val STATUS_BAR_PX = 150
@@ -174,7 +190,7 @@ object MobilePriors {
     /** 元素摘要，供 prompt 与 state 复用。 */
     fun elementBrief(el: ScreenElement): Map<String, Any?> = buildMap {
         put("index", el.index)
-        put("text", el.text.take(80))
+        put("text", el.text.ifBlank { Catalogs.iconLabel(el).orEmpty() }.take(80))
         put("type", Catalogs.typeOf(el))
         put("clickable", el.clickable)
         put("editable", el.editable)
@@ -239,16 +255,36 @@ fun decisionFromChoice(
     if (operation == "BLOCKED") {
         return Decision("blocked", "BLOCKED", action = catalog.resolve("BLOCKED", null), confidence = confidence, detail = detail)
     }
-    // TYPE_TEXT 只有一个原文候选时，target 编号不重要：模型常把输入框的元素序号当成原文序号
+    // TYPE_TEXT 只有一个原文候选时，target 编号不重要：模型常把输入框的元素序号当成原文序号。横排只有一排时同理
     val effectiveTarget = if (operation == "TYPE_TEXT" && catalog.textValues.size == 1 && target !in catalog.textValues) {
         catalog.textValues.keys.first()
+    } else if ((operation == "SCROLL_RIGHT" || operation == "SCROLL_LEFT") && catalog.hScrollTargets.size == 1 && target !in catalog.hScrollTargets) {
+        catalog.hScrollTargets.keys.first()
     } else {
         target
     }
     val action = catalog.resolve(operation, effectiveTarget)
-        ?: return Decision("error", operation, target, confidence = confidence, detail = "候选里没有 $operation/$target")
+        ?: containerFallback(catalog, operation, effectiveTarget)?.let { (container, a) ->
+            val status = if (operation == "WAIT") "wait" else "action"
+            return Decision(status, operation, container, a, confidence, "$detail（${effectiveTarget} 不可点，改点包住它的 $container）")
+        }
+        ?: return Decision(
+            "error", operation, target, confidence = confidence,
+            detail = when (operation) {
+                "TAP_POINT" -> "坐标 $target 不在截图里，或落在不能点的控件上"
+                "SWIPE_POINT" -> "滑动 $target 格式不对（要 x1,y1,x2,y2）、在截图外、太短，或起点落在不能点的控件上"
+                else -> "候选里没有 $operation/$target"
+            },
+        )
     val status = if (operation == "WAIT") "wait" else "action"
     return Decision(status, operation, effectiveTarget, action, confidence, detail)
+}
+
+/** TAP / LONG_PRESS 选了不在候选里的元素：改用屏幕上包住它的候选（[ActionCatalog.containerOf]）。 */
+private fun containerFallback(catalog: ActionCatalog, operation: String, target: String?): Pair<String, CatalogAction>? {
+    if (operation != "TAP" && operation != "LONG_PRESS") return null
+    val container = target?.let { catalog.containerOf[it] } ?: return null
+    return catalog.resolve(operation, container)?.let { container to it }
 }
 
 fun actionDecision(action: CatalogAction, detail: String) = Decision(
@@ -275,4 +311,41 @@ fun parseModelDecision(raw: String, catalog: ActionCatalog): Decision {
         return Decision("error", operation, target, detail = "操作不在候选中: $operation")
     }
     return decisionFromChoice(catalog, operation, target, 1.0, "DeepSeek 选择 $operation")
+}
+
+/**
+ * 软惩罚模式下 DeepSeek 一次给出最多 3 个备选（各带概率）：
+ * `{"choices":[{"operation":"TAP","target":"3","p":0.6},…]}`。
+ * 先丢掉不在候选里的（这也顺带解决了"首选报候选里没有"——退到下一个备选），
+ * 再按 [Penalties.rerank] 降低受罚动作的分。拿不到 choices 时退回单选格式（[parseModelDecision]）。
+ */
+fun parseModelChoices(raw: String, catalog: ActionCatalog): Decision {
+    val start = raw.indexOf('{')
+    val end = raw.lastIndexOf('}')
+    val obj = if (start in 0 until end) {
+        runCatching { com.google.gson.JsonParser.parseString(raw.substring(start, end + 1)).asJsonObject }.getOrNull()
+    } else null
+    val list = obj?.get("choices")?.takeIf { it.isJsonArray }?.asJsonArray ?: return parseModelDecision(raw, catalog)
+    data class Option(val key: String, val operation: String, val target: String?, val p: Double)
+    val options = list.mapNotNull { el ->
+        val o = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        val op = o.get("operation").stringOrNull()?.trim().orEmpty()
+        if (op !in catalog.operations) return@mapNotNull null
+        val target = o.get("target").stringOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+        val decision = decisionFromChoice(catalog, op, target, 1.0, "")
+        if (decision.status == "error") return@mapNotNull null
+        val p = o.get("p")?.let { runCatching { it.asDouble }.getOrNull() }?.takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
+        Option("$op|${decision.target.orEmpty()}", op, decision.target, p)
+    }.distinctBy { it.key }
+    if (options.isEmpty()) return parseModelDecision(raw, catalog)
+    // 模型没给概率（全 0）时按它列出的顺序给递减的分
+    val probs = if (options.all { it.p == 0.0 }) options.mapIndexed { i, o -> o.key to 1.0 / (i + 1) }.toMap()
+    else options.associate { it.key to it.p }
+    val byKey = options.associateBy { it.key }
+    val pick = Penalties.rerank(probs, byKey.keys) { k -> byKey.getValue(k).let { catalog.penaltyOf(it.operation, it.target) } }
+        ?: return parseModelDecision(raw, catalog)
+    val chosen = byKey.getValue(pick.choice)
+    val note = if (pick.flipped) "（惩罚后改选）" else ""
+    // 置信度保持 1.0（与单选格式一致）：DeepSeek 自报的概率没校准，拿它去碰低置信阈值会凭空多出"不确定"
+    return decisionFromChoice(catalog, chosen.operation, chosen.target, 1.0, "DeepSeek 选择 ${chosen.operation}$note")
 }

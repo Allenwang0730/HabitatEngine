@@ -49,18 +49,18 @@ object DeviceTools {
         "main" to Triple("设置首页", "android.settings.SETTINGS", listOf("设置")),
         "wifi" to Triple("WLAN", "android.settings.WIFI_SETTINGS", listOf("wlan", "wifi", "wi-fi", "无线")),
         "bluetooth" to Triple("蓝牙", "android.settings.BLUETOOTH_SETTINGS", listOf("蓝牙", "bluetooth")),
-        "mobile_network" to Triple("移动网络", "android.settings.DATA_ROAMING_SETTINGS", listOf("移动网络", "流量", "数据", "sim", "双卡")),
-        "display" to Triple("显示与亮度", "android.settings.DISPLAY_SETTINGS", listOf("显示", "亮度", "深色", "护眼", "字体")),
-        "sound" to Triple("声音与振动", "android.settings.SOUND_SETTINGS", listOf("声音", "铃声", "振动", "音量")),
-        "notifications" to Triple("通知", "android.settings.NOTIFICATION_SETTINGS", listOf("通知")),
-        "battery" to Triple("电池", "android.intent.action.POWER_USAGE_SUMMARY", listOf("电池", "电量", "耗电")),
-        "storage" to Triple("存储", "android.settings.INTERNAL_STORAGE_SETTINGS", listOf("存储", "空间", "内存")),
-        "location" to Triple("定位", "android.settings.LOCATION_SOURCE_SETTINGS", listOf("定位", "位置", "gps")),
-        "date" to Triple("日期与时间", "android.settings.DATE_SETTINGS", listOf("日期", "时间", "时区")),
+        "mobile_network" to Triple("移动网络", "android.settings.DATA_ROAMING_SETTINGS", listOf("mobile network", "mobile data", "移动网络", "流量", "数据", "sim", "双卡")),
+        "display" to Triple("显示与亮度", "android.settings.DISPLAY_SETTINGS", listOf("display", "brightness", "dark theme", "显示", "亮度", "深色", "护眼", "字体")),
+        "sound" to Triple("声音与振动", "android.settings.SOUND_SETTINGS", listOf("sound", "ringtone", "vibrat", "声音", "铃声", "振动", "音量")),
+        "notifications" to Triple("通知", "android.settings.NOTIFICATION_SETTINGS", listOf("notification", "通知")),
+        "battery" to Triple("电池", "android.intent.action.POWER_USAGE_SUMMARY", listOf("battery", "电池", "电量", "耗电")),
+        "storage" to Triple("存储", "android.settings.INTERNAL_STORAGE_SETTINGS", listOf("storage", "存储", "空间", "内存")),
+        "location" to Triple("定位", "android.settings.LOCATION_SOURCE_SETTINGS", listOf("location", "定位", "位置", "gps")),
+        "date" to Triple("日期与时间", "android.settings.DATE_SETTINGS", listOf("date & time", "date and time", "time zone", "日期", "时间", "时区")),
         "language" to Triple("语言", "android.settings.LOCALE_SETTINGS", listOf("语言", "language")),
-        "accessibility" to Triple("无障碍", "android.settings.ACCESSIBILITY_SETTINGS", listOf("无障碍", "辅助功能")),
-        "about" to Triple("关于手机", "android.settings.DEVICE_INFO_SETTINGS", listOf("关于手机", "关于本机", "版本号", "型号", "设备信息")),
-        "airplane" to Triple("飞行模式", "android.settings.AIRPLANE_MODE_SETTINGS", listOf("飞行模式")),
+        "accessibility" to Triple("无障碍", "android.settings.ACCESSIBILITY_SETTINGS", listOf("accessibility", "无障碍", "辅助功能")),
+        "about" to Triple("关于手机", "android.settings.DEVICE_INFO_SETTINGS", listOf("about phone", "android version", "build number", "关于手机", "关于本机", "版本号", "型号", "设备信息")),
+        "airplane" to Triple("飞行模式", "android.settings.AIRPLANE_MODE_SETTINGS", listOf("airplane", "飞行模式")),
     )
 
     private val ON_OFF = listOf("on", "off")
@@ -88,6 +88,9 @@ object DeviceTools {
 
     const val MAX_TOOL_TEXT = 2000
 
+    /** 写剪贴板的门控词。只收明确说剪贴板的：「复制文件」「复制一份笔记」不是要动剪贴板。 */
+    val CLIPBOARD_WORDS = listOf("剪贴板", "剪切板", "clipboard", "复制到剪", "拷贝到剪")
+
     /** 输出类工具：只把结果交给用户（小屏/工作区），不操作界面。 */
     val OUTPUT_TOOLS = setOf("show_on_screen", "save_note")
 
@@ -100,12 +103,12 @@ object DeviceTools {
         DeviceTool("set_wifi", "打开或关闭 WLAN", mapOf("state" to ON_OFF), gate = listOf("wlan", "wifi", "wi-fi", "无线网")),
         DeviceTool("set_bluetooth", "打开或关闭蓝牙", mapOf("state" to ON_OFF), gate = listOf("蓝牙", "bluetooth")),
         DeviceTool("set_flashlight", "打开或关闭手电筒", mapOf("state" to ON_OFF), gate = listOf("手电", "闪光灯", "flashlight")),
-        DeviceTool("set_dnd", "打开或关闭免打扰", mapOf("state" to ON_OFF), gate = listOf("免打扰", "勿扰")),
-        DeviceTool("set_brightness", "把屏幕亮度设为某一档（需要\"修改系统设置\"授权，失败会退回界面操作）", mapOf("level" to LEVELS), gate = listOf("亮度")),
+        DeviceTool("set_dnd", "打开或关闭免打扰", mapOf("state" to ON_OFF), gate = listOf("免打扰", "勿扰", "do not disturb")),
+        DeviceTool("set_brightness", "把屏幕亮度设为某一档（需要\"修改系统设置\"授权，失败会退回界面操作）", mapOf("level" to LEVELS), gate = listOf("亮度", "brightness")),
         DeviceTool(
             "set_volume", "把某一路音量设为某一档",
             mapOf("stream" to listOf("music", "ring", "alarm", "notification"), "level" to listOf("max", "high", "mid", "low", "mute")),
-            gate = listOf("音量", "静音", "声音"),
+            gate = listOf("音量", "静音", "声音", "volume", "mute"),
         ),
         DeviceTool("call", "给目标里的联系人打电话（号码由代码查好，不用参数）", emptyMap(), gate = CALL_WORDS),
         DeviceTool("read_battery", "读取电量与是否在充电", emptyMap()),
@@ -124,6 +127,14 @@ object DeviceTools {
             "read_note", "从本机工作区找一条之前记下的笔记，读出内容（query 填要找的关键词，如「取件码」；不填取最近一条）", emptyMap(),
             gate = READ_NOTE_WORDS, textArgs = mapOf("query" to false),
         ),
+        DeviceTool(
+            "open_url", "用浏览器打开目标里写的网址（url 必须原样出现在目标里；之后页面里的操作照常在界面上做）", emptyMap(),
+            textArgs = mapOf("url" to true),
+        ),
+        DeviceTool(
+            "copy_text", "把一段文字放进剪贴板（text 必须原样出现在目标里）", emptyMap(),
+            gate = CLIPBOARD_WORDS, textArgs = mapOf("text" to true),
+        ),
     )
 
     private val BY_ID = ALL.associateBy { it.id }
@@ -135,9 +146,22 @@ object DeviceTools {
     fun available(goal: String, scope: ToolScope = ToolScope()): List<DeviceTool> {
         val folded = goal.lowercase()
         return ALL.filter { tool ->
-            (tool.gate.isEmpty() || tool.gate.any { folded.contains(it) }) && (tool.id != "call" || scope.callee != null)
+            (tool.gate.isEmpty() || tool.gate.any { folded.contains(it) }) &&
+                (tool.id != "call" || scope.callee != null) &&
+                (tool.id != "open_url" || urlsIn(goal).isNotEmpty())
         }
     }
+
+    /** 目标原文里写出的网址（带协议的，或 www. / 常见顶级域名结尾的裸域名），规范化后返回。 */
+    fun urlsIn(goal: String): List<String> =
+        URL_IN_TEXT.findAll(goal).mapNotNull { m ->
+            com.ailun.habitat.handlers.NodeOpenUrlHandler.normalize(m.value.trimEnd('.', ',', '。', '，', ')', '）'))
+        }.distinct().toList()
+
+    // 只认 ASCII 网址字符：中文紧跟在网址后面（「打开 example.com看看」）时在汉字处截断
+    private val URL_IN_TEXT = Regex(
+        """(?i)\bhttps?://[A-Za-z0-9\-._~:/?#\[\]@!$&*+;=%]+|\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|cn|net|org|io|dev|app|edu|gov|co|me|info|top|xyz)\b(?::\d+)?(?:/[A-Za-z0-9\-._~:/?#\[\]@!$&*+;=%]*)?""",
+    )
 
     /**
      * 把规划器/执行器给的 (tool, args) 校验成可执行调用。任何一项不合法返回 null：
@@ -213,7 +237,8 @@ object DeviceTools {
             "set_dnd" -> toggle(tool, args, "ACTION_DND_MODE", "免打扰", "dnd_success", listOf("dnd_state"))
             "set_brightness" -> {
                 val level = args.getValue("level")
-                val value = mapOf("max" to 255, "high" to 190, "mid" to 128, "low" to 60, "min" to 10).getValue(level)
+                // 最低档写 1：Android 的亮度下限是 1（AndroidWorld 也按 1 判"最低"），写 10 屏幕没到最暗
+                val value = mapOf("max" to 255, "high" to 190, "mid" to 128, "low" to 60, "min" to 1).getValue(level)
                 Invocation(
                     tool, args, "ACTION_BRIGHTNESS", mapOf("action" to "set", "value" to value),
                     "亮度设为${levelName(level)}", "brightness_success", listOf("brightness_value"),
@@ -227,6 +252,21 @@ object DeviceTools {
                 Invocation(
                     tool, args, "ACTION_VOLUME", mapOf("action" to "set", "stream" to stream, "value" to value),
                     "${name}音量设为${levelName(level)}", "volume_success", listOf("volume_current", "volume_max"),
+                )
+            }
+            "open_url" -> {
+                // 规划器给的网址必须规范化后等于目标里写出的某个网址：不能自己挑网站
+                val url = com.ailun.habitat.handlers.NodeOpenUrlHandler.normalize(args.getValue("url")) ?: return null
+                if (url !in urlsIn(goal)) return null
+                Invocation(tool, args, "ACTION_OPEN_URL", mapOf("url" to url), "用浏览器打开 $url", "open_url_success")
+            }
+            "copy_text" -> {
+                // 和输入文字同一条规矩：内容必须是目标原文的子串，规划器不能往剪贴板里塞别的东西
+                val text = args.getValue("text").trim()
+                if (!goal.contains(text)) return null
+                Invocation(
+                    tool, args, "ACTION_CLIPBOARD", mapOf("action" to "set", "text" to text),
+                    "复制「${text.take(30)}」到剪贴板", "clipboard_success",
                 )
             }
             "read_battery" -> Invocation(

@@ -30,6 +30,8 @@ data class ScreenElement(
     val rangeFraction: Double? = null,
     /** 来自非活动的系统窗口（状态栏、灵动岛、导航栏）。 */
     val system: Boolean = false,
+    /** 混合读屏时由 OCR 补进来的图片文字（无障碍树里没有）。只用来"看"，判断屏幕是否变化时不算。 */
+    val ocr: Boolean = false,
 )
 
 data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom: Int) {
@@ -54,6 +56,8 @@ data class WindowInfo(
     val focused: Boolean,
     val nodeCount: Int,
     val text: String,
+    /** 窗口根节点在屏幕上的范围（输入法窗口用它把键盘区域的 OCR 文字排除掉）。 */
+    val bounds: ElementBounds? = null,
 )
 
 data class ScreenObservation(
@@ -68,6 +72,10 @@ data class ScreenObservation(
     val locked: Boolean = false,
     /** 本次读屏遍历到的窗口（已排掉本 App 自己的）。 */
     val windows: List<WindowInfo> = emptyList(),
+    /** 图片 / WebView / 画布类控件占屏幕面积的比例（0~1），混合 OCR 据此决定要不要补读图片文字。 */
+    val imageFraction: Double = 0.0,
+    /** 能横向滚动的一排控件（标签栏、类别芯片行）：竖着滚动带不动它们，屏幕外的项要横着滑才露出来。 */
+    val hScrolls: List<ScrollRow> = emptyList(),
 ) {
     companion object {
         fun empty(width: Int, height: Int) = ScreenObservation(
@@ -93,6 +101,53 @@ data class ScreenObservation(
 }
 
 data class AppEntry(val label: String, val packageName: String)
+
+/** 一排能横向滚动的控件。[label]：这一排当前看得见的几项文字（让模型认出是哪一排）。 */
+data class ScrollRow(val bounds: ElementBounds, val label: String)
+
+/**
+ * TAP_POINT：按截图坐标点（控件一览里没有、截图上看得见的图标）。模型给的是截图像素 [imageWidth]×[imageHeight]，
+ * 换算成屏幕坐标再点。[blocked]：安全闸挡住的控件范围（敏感按钮、目标没放行的发送键），点到里面一律不执行。
+ */
+data class PointTap(
+    val imageWidth: Int,
+    val imageHeight: Int,
+    val screenWidth: Int,
+    val screenHeight: Int,
+    val blocked: List<ElementBounds> = emptyList(),
+    /**
+     * 控件一览里本来就能点的小控件（范围 → TAP 候选 id）。坐标落在里面就按那个 TAP 算：
+     * 模型看着截图爱用坐标点，判重、软惩罚、"去掉它重选"都是按控件算的，用坐标点等于绕开它们
+     * （AndroidWorld CameraTakeVideo：「Shutter」连点两次被去掉后，模型改用坐标再点一次）。
+     */
+    val claimed: List<Pair<ElementBounds, String>> = emptyList(),
+) {
+    /** "x,y"（截图像素）→ 屏幕坐标；格式不对或在截图外返回 null。 */
+    fun toScreen(target: String?): Pair<Int, Int>? {
+        val parts = target?.split(',')?.map { it.trim().toDoubleOrNull() } ?: return null
+        if (parts.size != 2 || parts.any { it == null }) return null
+        val (x, y) = parts[0]!! to parts[1]!!
+        if (x < 0 || y < 0 || x > imageWidth || y > imageHeight) return null
+        return (x * screenWidth / imageWidth).toInt() to (y * screenHeight / imageHeight).toInt()
+    }
+
+    fun isBlocked(x: Int, y: Int): Boolean = blocked.any { x in it.left..it.right && y in it.top..it.bottom }
+
+    /** "x1,y1,x2,y2"（截图像素）→ 屏幕坐标的起点和终点；格式不对、在截图外、几乎没动返回 null。 */
+    fun toScreenSwipe(target: String?): List<Int>? {
+        val parts = target?.split(',')?.map { it.trim() } ?: return null
+        if (parts.size != 4) return null
+        val from = toScreen("${parts[0]},${parts[1]}") ?: return null
+        val to = toScreen("${parts[2]},${parts[3]}") ?: return null
+        if (kotlin.math.abs(from.first - to.first) + kotlin.math.abs(from.second - to.second) < MIN_SWIPE_PX) return null
+        return listOf(from.first, from.second, to.first, to.second)
+    }
+
+    companion object {
+        /** 比这短的"滑动"其实是点击，让模型用 TAP_POINT。 */
+        const val MIN_SWIPE_PX = 40
+    }
+}
 
 /**
  * 代码拥有的一个可执行候选。决策模型只能选 operation/target，不能发明参数。
@@ -121,6 +176,11 @@ data class CatalogAction(
     val outputs: List<String> = emptyList(),
     /** 设备工具的身份（tool|args），用于记"本次失败过的工具"。 */
     val toolKey: String? = null,
+    /**
+     * TAP / LONG_PRESS 的目标是列表行（[Catalogs.typeOf] = 列表行：可点的容器，不是按钮、开关、输入框）。
+     * 只有这种点击、长按在"手势做了屏幕没变"时改用节点动作（[LoopPolicy.rowNodeVariant]）。
+     */
+    val listRow: Boolean = false,
 )
 
 data class ActionCatalog(
@@ -136,9 +196,31 @@ data class ActionCatalog(
     val toolTargets: Map<String, String> = emptyMap(),
     /** SET_SLIDER 的候选：`序号:max|min|mid` → 说明。 */
     val sliderTargets: Map<String, String> = emptyMap(),
+    /** SCROLL_LEFT / SCROLL_RIGHT 的候选：横向滚动的那一排（`h1`…）→ 说明。两个方向共用同一组键。 */
+    val hScrollTargets: Map<String, String> = emptyMap(),
+    /** 非空表示这一步可以按截图坐标点（TAP_POINT），动作在选中后按坐标现做（[decisionFromChoice]）。 */
+    val pointTap: PointTap? = null,
     /** 输入框里已经是要输入的文字，第一个 TAP 候选就是「发送/搜索/确定」。 */
     val submitReady: Boolean = false,
+    /**
+     * 软惩罚（[Penalties]）：动作 id → 惩罚分。本次任务里做过却没用的动作不删掉，只降低被选中的概率；
+     * 硬模式下为空（走 [without] 直接删）。
+     */
+    val penalties: Map<String, Double> = emptyMap(),
+    /**
+     * 控件一览里不在候选中的元素 → 屏幕上包含它的那个候选（序号）。模型常照着一览选卡片里的标题文字（它本身不可点），
+     * 这时改点包着它的那一行/卡片（[decisionFromChoice]）。被包含的候选都已过安全闸，不会绕开任何限制。
+     */
+    val containerOf: Map<String, String> = emptyMap(),
 ) {
+    /** (操作, 目标) 的惩罚分；没有对应候选或没受罚为 0。 */
+    fun penaltyOf(operation: String, target: String?): Double =
+        resolve(operation, target)?.let { penalties[it.id] } ?: 0.0
+
+    /** 某个操作下最轻的惩罚：只要还有一个没受罚的目标，这个操作本身就不该被压低。 */
+    fun operationPenalty(operation: String): Double =
+        actions.filter { it.operation == operation }.minOfOrNull { penalties[it.id] ?: 0.0 } ?: 0.0
+
     fun resolve(operation: String, target: String?): CatalogAction? = when (operation) {
         "TAP" -> actions.find { it.operation == "TAP" && it.target == target }
         "TYPE_TEXT" -> actions.find { it.operation == "TYPE_TEXT" && it.target == target }
@@ -146,10 +228,57 @@ data class ActionCatalog(
         "LONG_PRESS" -> actions.find { it.operation == "LONG_PRESS" && it.target == target }
         "USE_TOOL" -> actions.find { it.operation == "USE_TOOL" && it.target == target }
         "SET_SLIDER" -> actions.find { it.operation == "SET_SLIDER" && it.target == target }
+        "SCROLL_LEFT", "SCROLL_RIGHT" -> actions.find { it.operation == operation && it.target == target }
+        "TAP_POINT" -> pointAction(target)
+        "SWIPE_POINT" -> swipeAction(target)
         "SCROLL_DOWN", "SCROLL_UP", "BACK", "HOME", "WAIT", "DONE", "BLOCKED",
         "PRESS_ENTER", "CLEAR_TEXT",
         -> actions.find { it.operation == operation }
         else -> null
+    }
+
+    /**
+     * 按截图坐标现做一个点击。坐标不合法、落在安全闸挡住的控件里，返回 null（调用方报"候选里没有"，模型重选）。
+     * 判重锚点按 40 像素分格：在同一个地方反复点，和反复点同一个控件一样会被判兜圈。
+     */
+    fun pointAction(target: String?): CatalogAction? {
+        val p = pointTap ?: return null
+        val (x, y) = p.toScreen(target) ?: return null
+        if (p.isBlocked(x, y)) return null
+        // 落在一览里的小控件上：就是点那个控件。它这一步被去掉了（重复、死路）就不让用坐标绕过去
+        p.claimed.filter { (b, _) -> x in b.left..b.right && y in b.top..b.bottom }
+            .minByOrNull { (b, _) -> b.width.toLong() * b.height }
+            ?.let { (_, id) -> return actions.find { it.id == id } }
+        return CatalogAction(
+            id = "point_${x / POINT_CELL}_${y / POINT_CELL}",
+            operation = "TAP_POINT",
+            target = target,
+            label = "点截图位置（$target）",
+            tool = "ACTION_CLICK",
+            params = mapOf("target" to "$x,$y"),
+            centerX = x,
+            centerY = y,
+            matchText = "pt@${x / POINT_CELL}/${y / POINT_CELL}",
+        )
+    }
+
+    /**
+     * 按截图坐标现做一次滑动（左滑露出删除、在画布上画线、拖动）。起点落在安全闸挡住的控件里不执行：
+     * 有的应用左滑一行就是删除，起点在被挡的行上等于绕过闸。
+     */
+    fun swipeAction(target: String?): CatalogAction? {
+        val p = pointTap ?: return null
+        val (x1, y1, x2, y2) = p.toScreenSwipe(target) ?: return null
+        if (p.isBlocked(x1, y1)) return null
+        return CatalogAction(
+            id = "swipe_${x1 / POINT_CELL}_${y1 / POINT_CELL}_${x2 / POINT_CELL}_${y2 / POINT_CELL}",
+            operation = "SWIPE_POINT",
+            target = target,
+            label = "按截图坐标滑动（$target）",
+            tool = "ACTION_SWIPE",
+            params = mapOf("x1" to x1, "y1" to y1, "x2" to x2, "y2" to y2, "duration" to 400),
+            matchText = "sw@${x1 / POINT_CELL}/${y1 / POINT_CELL}>${x2 / POINT_CELL}/${y2 / POINT_CELL}",
+        )
     }
 
     /**
@@ -164,7 +293,7 @@ data class ActionCatalog(
             val ids = keep.filter { it.operation == op }.mapNotNull { it.target }.toSet()
             map.filterKeys { it in ids }
         }
-        val ops = operations.filterKeys { op -> op in ALWAYS_KEEP || keep.any { it.operation == op } }
+        val ops = operations.filterKeys { op -> op in ALWAYS_KEEP || op == "TAP_POINT" || op == "SWIPE_POINT" || keep.any { it.operation == op } }
         return copy(
             actions = keep,
             operations = ops,
@@ -174,6 +303,7 @@ data class ActionCatalog(
             longPressTargets = keptTargets("LONG_PRESS", longPressTargets),
             toolTargets = keptTargets("USE_TOOL", toolTargets),
             sliderTargets = keptTargets("SET_SLIDER", sliderTargets),
+            hScrollTargets = keptTargets("SCROLL_LEFT", hScrollTargets) + keptTargets("SCROLL_RIGHT", hScrollTargets),
         )
     }
 
@@ -187,6 +317,7 @@ data class ActionCatalog(
 
     companion object {
         val ALWAYS_KEEP = setOf("DONE", "BLOCKED", "WAIT", "BACK", "HOME")
+        private const val POINT_CELL = 40
     }
 
     /** 目标原文与候选文字的重合度；容器行文字是拼接的，用 contains 双向匹配。 */
@@ -253,6 +384,11 @@ data class PlanStep(
      * 点不到或点错了再交给执行器。真机上模型在 QQ 消息列表里反复按返回，几步就耗光了预算。
      */
     val autoTap: String? = null,
+    /**
+     * 做完这一步就带着读到的内容重新规划剩下的部分（规划器写 replan_after）。后面要输入的内容在别的屏幕上、
+     * 规划时还没看到（文件里的账目、图片里的字）时用：第一版计划写不出 text，执行器只能干着急。
+     */
+    val replanAfter: Boolean = false,
 )
 
 data class Plan(
@@ -320,6 +456,14 @@ data class StepContext(
     val facts: Map<String, String> = emptyMap(),
     /** 导航栈与本页已试过的入口（[NavigationState.snapshot]）。 */
     val nav: NavSnapshot? = null,
+    /** 本次任务里前几次失败后的反思（最近的在后），提醒执行器别再走同样的路。 */
+    val reflections: List<Reflection> = emptyList(),
 ) {
     val multiStep: Boolean get() = total > 1
 }
+
+/**
+ * 一次失败后的反思（Reflexion 式，只在本次任务内有效）：为什么没成、下一次换什么做法、哪些动作别再选。
+ * [avoid] 里的文字会给匹配的候选加惩罚（[Penalties.fromReflections]），不会把它们删掉。
+ */
+data class Reflection(val cause: String, val next: String, val avoid: List<String> = emptyList())

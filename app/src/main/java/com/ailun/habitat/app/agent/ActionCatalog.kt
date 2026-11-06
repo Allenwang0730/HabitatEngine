@@ -24,16 +24,41 @@ object Catalogs {
 
     /**
      * 敏感词的同义说法：目标写了其中之一也算"点名"了这个敏感动作。
-     * 「给我的电脑发消息说你好」里没有「发送」两个字，但显然是要发。
+     * 「给我的电脑发消息说你好」里没有「发送」两个字，但显然是要发。英文目标同理（本机发起时才有用，远程永远不解锁）。
      */
     private val unlockAliases: Map<String, Regex> = mapOf(
-        "发送" to Regex("发送|发(?:个|一个|一条|条)?(?:消息|信息|短信|微信)|发给|回复"),
+        "发送" to Regex("发送|发(?:个|一个|一条|条)?(?:消息|信息|短信|微信)|发给|回复|(?i)\\b(?:send|resend|reply)\\b|^\\s*text\\b"),
+    )
+
+    /**
+     * 英文界面上的同一批敏感按钮（规范到中文词，放行规则和中文完全一样）。
+     * 之前只认中文，AndroidWorld（英文界面）实测远程目标点到了「Delete」，模型把日历事件、记账条目删了。
+     * 只收和中文表一一对应的说法：「Remove from favourites」「Clear search」这类不算。
+     */
+    private val englishSensitive: List<Pair<Regex, String>> = listOf(
+        Regex("(?i)\\b(?:re)?send\\b") to "发送",
+        Regex("(?i)\\b(?:pay|pay now|transfer|purchase|buy now|place order|checkout|top up|withdraw)\\b") to "支付",
+        Regex("(?i)\\bdelete\\b") to "删除",
+        Regex("(?i)\\b(?:clear all|clear data|clear storage|erase)\\b") to "清空",
+        Regex("(?i)\\buninstall\\b") to "卸载",
+        Regex("(?i)\\b(?:factory reset|reset phone|reset device)\\b") to "恢复出厂",
+        Regex("(?i)\\b(?:sign out|log out|logout|delete account)\\b") to "退出登录",
+        Regex("(?i)\\b(?:allow|grant|agree|while using the app|only this time)\\b") to "允许",
+    )
+
+    /** 发送按钮：文字或 viewId 是「发送 / send」，或者聊天类应用里紧挨着底部输入框右边的那个按钮（Simple SMS 的发送键只写着「SMS」）。 */
+    private val SEND_ID = Regex("(?i)(?:^|[/_:])send(?:$|[_]|_?(?:button|btn|icon|message|sms))")
+    private val MESSAGING_PACKAGE = Regex(
+        "(?i)(sms|mms|messag|com\\.tencent\\.(mm|mobileqq)|whatsapp|telegram|signal|viber|\\.line\\.|kakao|discord|slack)",
     )
 
     /** 输入完之后要点的提交类按钮。 */
     val SUBMIT_WORDS = listOf("发送", "搜索", "确定", "完成", "提交", "前往")
     /** 出现这些文字说明是验证/支付凭据页，模型不能碰任何控件。 */
     val lockedScreenWords = listOf("支付密码", "请输入6位", "验证指纹", "指纹支付", "面容支付", "人脸验证", "刷脸", "银行卡号")
+    private val lockedScreenEnglish = Regex(
+        "(?i)\\b(?:payment password|enter (?:your )?pin|cvv|cvc|card number|verify (?:your )?(?:fingerprint|face|identity))\\b",
+    )
     val guardedPackages = setOf(
         "com.android.permissioncontroller",
         "com.google.android.permissioncontroller",
@@ -46,7 +71,12 @@ object Catalogs {
     private const val SELF_PACKAGE = "com.ailun.habitat"
 
     private const val MAX_TAPS = 30
-    private const val MAX_LONG_PRESS = 8
+    private const val MAX_LONG_PRESS = 12
+    private const val MAX_HSCROLLS = 3
+    /** 输入框名字后面紧跟的词：「Title 输入框」「名称框」「the Title field」。 */
+    private const val FIELD_WORD = """\s*["'」』”]?\s*(?:输入框|文本框|框|栏|field|box|input)"""
+    /** TAP_POINT 落在多大的控件里就按点那个控件算（像素，宽高都不超过）。 */
+    private const val CLAIM_MAX_PX = 320
     private const val MAX_APPS = 8
     private const val MAX_TEXTS = 6
     private const val TEXT_PREVIEW = 40
@@ -68,9 +98,22 @@ object Catalogs {
      * 本屏要往哪个输入框里写：有焦点的那个；没报告焦点但只有一个输入框时就是它。
      * QQ/微信的输入框点过之后常常不报 isFocused，旧逻辑只认焦点，于是一直不给 TYPE_TEXT，
      * 模型只能反复点输入框直到判兜圈。多个输入框又都没焦点时不猜，让模型先点一个。
+     * 例外：这一步的说明点名了某个空输入框（「在 Title 输入框输入…」，框里显示的就是 Title 这个提示），直接写它——
+     * AndroidWorld 的菜谱表单 7 个框，每个框都要"先点再输"，官方 30 步的预算一半花在点框上。
      */
-    fun inputTarget(observation: ScreenObservation): ScreenElement? {
+    fun inputTarget(observation: ScreenObservation, instruction: String = "", typing: String? = null): ScreenElement? {
         val editable = observation.elements.filter { it.editable && !it.password && !it.system }
+        if (instruction.isNotBlank() && editable.size > 1) {
+            val named = editable.filter { el ->
+                val label = el.text.trim()
+                // 要紧跟着「输入框/框/field…」才算点名这个框：「在 Description 输入框输入」是，「（菜名 Chickpea Soup）」不是；
+                // 已经填好的框（框里是上一步输入的值）也不算
+                label.length in 3..40 && Regex("(?i)" + Regex.escape(label) + FIELD_WORD).containsMatchIn(instruction) &&
+                    typing?.contains(label, ignoreCase = true) != true
+            }
+            // 说明里同时点名了好几个框（"把 Title 和 Description 都填上"）就不猜
+            named.singleOrNull()?.let { return it }
+        }
         return editable.firstOrNull { it.index == observation.focusedIndex || it.focused }
             ?: editable.singleOrNull()
     }
@@ -105,6 +148,11 @@ object Catalogs {
         scope: ToolScope = ToolScope(),
         /** 这一步里是否已经点过这个控件（按判重签名）；null 表示不知道，按没点过算。 */
         tappedBefore: ((ScreenElement) -> Boolean)? = null,
+        /**
+         * true：决策器看得到截图，可以按截图坐标点（TAP_POINT）。只在本机发起（或评测放行）时给：
+         * 坐标点不经过控件候选，安全闸只能靠 [PointTap.blocked] 兜。
+         */
+        pointTaps: Boolean = false,
     ): ActionCatalog {
         val actions = mutableListOf<CatalogAction>()
         val operations = linkedMapOf<String, String>()
@@ -116,7 +164,7 @@ object Catalogs {
         val sliderTargets = linkedMapOf<String, String>()
 
         val guard = guardOf(goal, observation, allowGoalUnlock)
-        val input = if (guard == null) inputTarget(observation) else null
+        val input = if (guard == null) inputTarget(observation, step?.instruction.orEmpty(), stepText) else null
         // 规划器给的输入文字已经在 PlanPrompts.parsePlan 里校验过是目标原文子串；
         // 这一步指定了文字就只给它（搜会话这一步不该把消息正文也列出来）
         val stepTexts = stepText?.let { listOf(it) } ?: textCandidates(goal)
@@ -152,8 +200,10 @@ object Catalogs {
                         params = mapOf("target" to "${el.centerX},${el.centerY}"),
                         centerX = el.centerX,
                         centerY = el.centerY,
-                        matchText = el.text,
+                        // OCR 文字不保证每次读屏都在（OCR 限频、缓存过期），不拿它做"目标还在原位"的复查
+                        matchText = el.text.takeUnless { el.ocr },
                         viewId = el.viewId,
+                        listRow = type == "列表行",
                     ),
                 )
             }
@@ -207,7 +257,7 @@ object Catalogs {
 
         operations["BACK"] = "返回上一屏。从二级页面回列表时用它，不要用 HOME。"
         operations["HOME"] = "回到桌面。只在需要离开当前应用时用。"
-        operations["WAIT"] = "屏幕还在加载时短暂等待。不确定该做什么时选它，不要选 DONE。"
+        operations["WAIT"] = "屏幕还在加载、转场时短暂等待。不是用来\"不知道点哪里\"的：那时选最可能推进的动作。"
         operations["DONE"] = if (step != null && step.multiStep) {
             "当前这一步已完成：屏幕上已经能看到「${step.doneWhen}」。只判断这一步，不用管整个目标。"
         } else {
@@ -222,9 +272,12 @@ object Catalogs {
 
         // 长按：少数行要长按才出菜单。候选目标与 TAP 相同（同一批控件）。
         // 只在确实有候选控件时出现，避免空页面里给模型一堆无效动作。
-        if (guard == null && taps.isNotEmpty()) {
-            operations["LONG_PRESS"] = "长按一个控件，用于唤出长按菜单（重命名、删除、更多选项）。"
-            taps.take(MAX_LONG_PRESS).forEach { el ->
+        // 有焦点的输入框不进 TAP（再点也没变化），但长按它才能弹出「全选/复制/粘贴」——AndroidWorld 复制到剪贴板的任务就卡在这里。
+        val focusedInput = input?.takeIf { it.focused && taps.none { t -> t.index == it.index } && allowedTap(goal, it.text, allowGoalUnlock) }
+        val longTargets = (listOfNotNull(focusedInput) + taps).take(MAX_LONG_PRESS)
+        if (guard == null && longTargets.isNotEmpty()) {
+            operations["LONG_PRESS"] = "长按一个控件，用于唤出长按菜单（重命名、删除、更多选项），或在输入框里唤出全选/复制/粘贴。"
+            longTargets.forEach { el ->
                 val key = el.index
                 val type = typeOf(el)
                 longPressTargets[key] = describeTarget(el, type)
@@ -240,6 +293,7 @@ object Catalogs {
                         centerY = el.centerY,
                         matchText = el.text,
                         viewId = el.viewId,
+                        listRow = type == "列表行",
                     ),
                 )
             }
@@ -247,8 +301,8 @@ object Catalogs {
 
         // 有输入框时才给"提交"和"清空"。两者都靠 lib 已有节点实现。
         if (input != null) {
-            // 聊天页里回车就是发送：屏幕上有「发送」而目标没解锁发送时，不给回车，否则能绕开发送按钮的闸
-            val sendVisible = observation.elements.any { it.text.trim() == "发送" }
+            // 聊天页里回车就是发送：屏幕上有发送按钮（不管写着什么）而目标没解锁发送时，不给回车，否则能绕开发送按钮的闸
+            val sendVisible = observation.elements.any { isSendControl(it, observation) }
             if (!sendVisible || allowedTap(goal, "发送", allowGoalUnlock)) {
                 operations["PRESS_ENTER"] = "在输入框里按回车，用于提交搜索或确认输入。提交后等待屏幕变化。"
                 actions.add(
@@ -323,12 +377,71 @@ object Catalogs {
             }
         }
 
+        // 横向滚动的一排（类别芯片、标签栏）：整屏上下滚动带不动它，右边被挡住的项只能横着滑出来。
+        // AndroidWorld 实测：Pro Expense 的类别 Education 在芯片行右侧屏幕外，执行器只有上下滚动，三个记账任务卡死在这里
+        val hScrollTargets = linkedMapOf<String, String>()
+        if (guard == null) {
+            observation.hScrolls.take(MAX_HSCROLLS).forEachIndexed { i, row ->
+                val key = "h${i + 1}"
+                hScrollTargets[key] = "横排「${row.label.take(TEXT_PREVIEW)}」（y≈${row.bounds.centerY}）"
+                actions.add(hScrollAction(row, key, right = true))
+                actions.add(hScrollAction(row, key, right = false))
+            }
+            if (hScrollTargets.isNotEmpty()) {
+                operations["SCROLL_RIGHT"] = "在某一横排（标签栏、类别芯片行）上向左滑，露出这一排右边被挡住的项。整屏上下滚动带不动横排。"
+                operations["SCROLL_LEFT"] = "在某一横排上向右滑，露出这一排左边被挡住的项。"
+            }
+        }
+
+        // 按截图坐标点：控件一览里没有、截图上看得见的图标（Joplin 右上角的放大镜在无障碍树里读不出来）。
+        // 落在安全闸挡住的控件里的点不执行；验证/支付页（guard）整个不给
+        val pointTap = if (pointTaps && guard == null && allowGoalUnlock && observation.screenWidth > 0 && observation.screenHeight > 0) {
+            val iw = minOf(observation.screenWidth, ScreenCapture.MAX_WIDTH)
+            val ih = (observation.screenHeight.toLong() * iw / observation.screenWidth).toInt()
+            operations["TAP_POINT"] = "按截图坐标点一下（target 写截图上的像素坐标 \"x,y\"，截图 ${iw}×${ih}）。" +
+                "只在要点的东西不在控件一览里、但截图上看得见时用；控件一览里有的用 TAP。"
+            operations["SWIPE_POINT"] = "按截图坐标滑动（target 写 \"x1,y1,x2,y2\"）：左滑一行露出删除/更多、在画布上画线、拖动。" +
+                "上下翻页用 SCROLL_DOWN/UP，横排用 SCROLL_RIGHT/LEFT。"
+            PointTap(
+                iw, ih, observation.screenWidth, observation.screenHeight, blockedAreas(goal, observation, allowGoalUnlock),
+                // 只认按钮大小的控件；整行、整块容器里点哪儿是有区别的（工具栏行里的放大镜），照坐标点
+                claimed = taps.mapNotNull { el ->
+                    el.bounds?.takeIf { it.width <= CLAIM_MAX_PX && it.height <= CLAIM_MAX_PX }?.let { it to "tap_${el.index}" }
+                },
+            )
+        } else null
+
         return ActionCatalog(
             actions, operations, tapTargets, textValues, appTargets, longPressTargets, guard,
-            toolTargets = toolTargets, sliderTargets = sliderTargets,
+            toolTargets = toolTargets, sliderTargets = sliderTargets, hScrollTargets = hScrollTargets, pointTap = pointTap,
             submitReady = typed && taps.firstOrNull()?.let { el -> SUBMIT_WORDS.any { el.text.trim() == it } } == true,
+            containerOf = containersFor(observation, taps),
         )
     }
+
+    /**
+     * 不在候选里的元素 → 屏幕上包住它的最小候选（不含整页大小的容器）。AndroidWorld 基线里失败的任务平均每个有 3 次
+     * 「候选里没有」：模型照着控件一览选了卡片里的标题、行里的副标题，它们自己不可点，可点的是外面那一行。
+     */
+    internal fun containersFor(observation: ScreenObservation, taps: List<ScreenElement>): Map<String, String> {
+        val w = observation.screenWidth.coerceAtLeast(1)
+        val h = observation.screenHeight.coerceAtLeast(1)
+        val offered = taps.filter { it.bounds != null && !isPageSizedBounds(it.bounds!!, w, h) }
+        if (offered.isEmpty()) return emptyMap()
+        val offeredIds = taps.map { it.index }.toSet()
+        val out = mutableMapOf<String, String>()
+        observation.elements.forEach { el ->
+            val b = el.bounds ?: return@forEach
+            if (el.index in offeredIds || el.system) return@forEach
+            offered.filter { it.bounds!!.contains(b) && it.index != el.index }
+                .minByOrNull { it.bounds!!.width.toLong() * it.bounds!!.height }
+                ?.let { out[el.index] = it.index }
+        }
+        return out
+    }
+
+    private fun isPageSizedBounds(b: ElementBounds, w: Int, h: Int): Boolean =
+        b.width.toLong() * b.height > 0.35 * w * h
 
     /** 从滑块当前位置拖到目标位置；拖过头一点（两端各留 1%）保证到头。 */
     private fun sliderAction(el: ScreenElement, pos: String, key: String, label: String): CatalogAction {
@@ -374,16 +487,53 @@ object Catalogs {
      */
     fun orderedTaps(goal: String, observation: ScreenObservation, allowGoalUnlock: Boolean = true): List<ScreenElement> {
         if (observation.packageName == SELF_PACKAGE) return emptyList()
+        val w = observation.screenWidth.takeIf { it > 0 } ?: 1080
+        val h = observation.screenHeight.takeIf { it > 0 } ?: 2400
         return observation.elements
+            // 无文字的图标按钮换成生成的名字，后面的标签、候选描述、判重都用它
+            .map { el -> if (el.text.isBlank()) iconLabel(el, w, h)?.let { el.copy(text = it) } ?: el else el }
             .filter { (it.clickable || it.selectable || it.editable) && it.text.isNotBlank() }
             // 状态栏/灵动岛（vivo 的「电话,8分钟18秒」胶囊）属于系统窗口，点了会跳去别的应用，不是页面控件
             .filter { !it.system }
             // 已经有焦点的输入框再点也不会变（真机上模型反复点搜索框直到被判兜圈），该做的是 TYPE_TEXT
             .filter { !(it.editable && it.focused) }
-            .filter { allowedTap(goal, it.text, allowGoalUnlock) }
+            .filter { allowedElement(goal, it, observation, allowGoalUnlock) }
             // 先按"控件可信度"分层，再在层内按屏幕从上到下（模型看屏幕的习惯顺序）
             .sortedWith(compareBy({ tierOf(it) }, { it.centerY }, { it.centerX }))
             .take(MAX_TAPS)
+    }
+
+    /**
+     * 没有文字也没有 contentDescription 的可点控件（图标按钮：「+」悬浮按钮、汉堡菜单）。
+     * 以前整个丢掉，模型在控件一览里看到「13=」去选，结果报"候选里没有"——AndroidWorld 实测 25 个任务里 4 个因此失败。
+     * 有 viewId 的用 viewId 的末段当名字（fb_main_add → 「fb main add」），再加位置；
+     * 都没有的只在屏幕边角（工具栏、底部悬浮按钮的常见位置）才放进来，避免把整块容器当按钮。
+     */
+    fun iconLabel(el: ScreenElement, width: Int = 1080, height: Int = 2400): String? {
+        if (el.text.isNotBlank() || !el.clickable || el.editable) return null
+        val b = el.bounds
+        // 整页大小的可点容器（RecyclerView、WebView 外壳）不是按钮，哪怕它有 viewId
+        if (b != null && b.width.toLong() * b.height > 0.35 * width * height) return null
+        val name = shortViewId(el.viewId).removePrefix("id/").replace('_', ' ').trim()
+        val where = positionWord(el, width, height)
+        if (name.isNotEmpty()) return "图标按钮 $name（$where）"
+        val small = b == null || ((b.right - b.left) <= width / 4 && (b.bottom - b.top) <= height / 8)
+        val edge = el.centerY < height * 0.14 || el.centerY > height * 0.80
+        return if (small && edge) "无文字图标按钮（$where）" else null
+    }
+
+    private fun positionWord(el: ScreenElement, width: Int, height: Int): String {
+        val v = when {
+            el.centerY < height / 3 -> "顶部"
+            el.centerY > height * 2 / 3 -> "底部"
+            else -> "中部"
+        }
+        val h = when {
+            el.centerX < width / 3 -> "左"
+            el.centerX > width * 2 / 3 -> "右"
+            else -> "中"
+        }
+        return "$v$h"
     }
 
     /** 0 = 真按钮/开关，1 = 列表行/容器，2 = 只有文字的节点。 */
@@ -403,6 +553,7 @@ object Catalogs {
     fun typeOf(el: ScreenElement): String {
         val id = el.viewId.lowercase()
         return when {
+            el.ocr -> if (el.clickable) "图片文字·可点" else "图片文字"
             el.editable -> "输入框"
             el.rangeFraction != null -> "滑块"
             el.checkable && el.selectable -> "开关行"
@@ -438,9 +589,36 @@ object Catalogs {
     }
 
     fun allowedTap(goal: String, label: String, allowGoalUnlock: Boolean = true): Boolean {
-        val hit = sensitiveWords.firstOrNull { label.contains(it) } ?: return true
+        val hit = sensitiveWords.firstOrNull { label.contains(it) }
+            ?: englishSensitive.firstOrNull { (re, _) -> re.containsMatchIn(label) }?.second
+            ?: return true
         if (!allowGoalUnlock) return false
-        return goal.contains(hit) || unlockAliases[hit]?.containsMatchIn(goal) == true
+        return goal.contains(hit) || unlockAliases[hit]?.containsMatchIn(goal) == true || englishUnlock(goal, hit)
+    }
+
+    /** 本机英文目标点名了同一个敏感动作（「Delete the event…」解锁「Delete」）。远程发起走不到这里。 */
+    private fun englishUnlock(goal: String, canonical: String): Boolean =
+        englishSensitive.any { (re, c) -> c == canonical && re.containsMatchIn(goal) }
+
+    /** 带上控件本身的判断：发送按钮不管写着什么（「SMS」、纸飞机图标）都按「发送」放行。 */
+    fun allowedElement(goal: String, el: ScreenElement, observation: ScreenObservation, allowGoalUnlock: Boolean = true): Boolean {
+        if (isSendControl(el, observation)) return allowedTap(goal, "发送", allowGoalUnlock)
+        return allowedTap(goal, el.text, allowGoalUnlock)
+    }
+
+    /**
+     * 这是不是"发出消息"的按钮。文字 / viewId 明说了 send / 发送；或者在聊天类应用里，它和底部的输入框在同一行、在输入框右边。
+     * 只在聊天类应用里用位置判断：别的应用底部"输入框 + 按钮"多半是搜索或添加，不能一律当成发送拦下。
+     */
+    fun isSendControl(el: ScreenElement, observation: ScreenObservation): Boolean {
+        if (el.editable || !el.clickable) return false
+        if (el.text.trim().let { it == "发送" || it.equals("send", ignoreCase = true) }) return true
+        if (SEND_ID.containsMatchIn(shortViewId(el.viewId))) return true
+        if (!MESSAGING_PACKAGE.containsMatchIn(observation.packageName)) return false
+        val h = observation.screenHeight.coerceAtLeast(1)
+        val compose = observation.elements.firstOrNull { it.editable && !it.password && it.centerY > h * 0.6 } ?: return false
+        val cb = compose.bounds ?: return false
+        return el.centerX > cb.right - 8 && el.centerY in cb.top - 40..cb.bottom + 40
     }
 
     /** 当前屏幕需要整体收紧时返回原因，否则 null。 */
@@ -448,11 +626,51 @@ object Catalogs {
         lockedScreenWords.firstOrNull { observation.visibleText.contains(it) }?.let {
             return "验证/支付凭据页（$it），不点击也不输入"
         }
+        lockedScreenEnglish.find(observation.visibleText)?.let {
+            return "验证/支付凭据页（${it.value}），不点击也不输入"
+        }
         if (observation.packageName in guardedPackages) {
             val unlocked = allowGoalUnlock && guardedUnlockWords.any { goal.contains(it) }
             if (!unlocked) return "系统权限/安装界面，目标未要求授权，不点击"
         }
         return null
+    }
+
+    /**
+     * 按坐标点时不能点的范围：安全闸不放行的控件（敏感按钮、目标没解锁的发送键）。
+     * 没有文字的图标按钮按生成的名字（含 viewId，如「btn pay」）判。
+     */
+    internal fun blockedAreas(goal: String, observation: ScreenObservation, allowGoalUnlock: Boolean): List<ElementBounds> {
+        val w = observation.screenWidth.takeIf { it > 0 } ?: 1080
+        val h = observation.screenHeight.takeIf { it > 0 } ?: 2400
+        return observation.elements.mapNotNull { el ->
+            val b = el.bounds ?: return@mapNotNull null
+            val named = if (el.text.isBlank()) el.copy(text = iconLabel(el, w, h) ?: shortViewId(el.viewId).replace('_', ' ')) else el
+            b.takeUnless { allowedElement(goal, named, observation, allowGoalUnlock) }
+        }
+    }
+
+    /**
+     * 横排里横着滑：手指从一侧的 80% 处拖到 20% 处（只在这一排的高度上，不碰上下的内容）。
+     * [right] = 露出右边的项（手指向左滑）。慢一点拖，避免甩出去滑过头。
+     */
+    private fun hScrollAction(row: ScrollRow, key: String, right: Boolean): CatalogAction {
+        val b = row.bounds
+        val y = b.centerY
+        val near = b.left + (b.width * 0.2).toInt()
+        val far = b.left + (b.width * 0.8).toInt()
+        val op = if (right) "SCROLL_RIGHT" else "SCROLL_LEFT"
+        val name = row.label.take(TEXT_PREVIEW)
+        return CatalogAction(
+            id = "${op.lowercase()}_$key",
+            operation = op,
+            target = key,
+            label = if (right) "横排「$name」向右翻" else "横排「$name」向左翻",
+            tool = "ACTION_SWIPE",
+            params = mapOf("x1" to if (right) far else near, "y1" to y, "x2" to if (right) near else far, "y2" to y, "duration" to 500),
+            // 判重按"哪一排"：同一排滑过几次都没变化就说明到头了
+            matchText = "h@${b.top}",
+        )
     }
 
     private fun scrollAction(observation: ScreenObservation, down: Boolean): CatalogAction {

@@ -40,9 +40,12 @@ class NodeBluetoothHandler(
 
         try {
             when (action) {
-                "on" -> success = setEnabled(bluetoothAdapter, true)
-                "off" -> success = setEnabled(bluetoothAdapter, false)
-                "toggle" -> success = setEnabled(bluetoothAdapter, !isEnabled(bluetoothAdapter))
+                "on" -> success = setEnabled(bluetoothAdapter, true) || settlesTo(bluetoothAdapter, true)
+                "off" -> success = setEnabled(bluetoothAdapter, false) || settlesTo(bluetoothAdapter, false)
+                "toggle" -> {
+                    val want = !isEnabled(bluetoothAdapter)
+                    success = setEnabled(bluetoothAdapter, want) || settlesTo(bluetoothAdapter, want)
+                }
                 "status" -> {
                     val enabled = isEnabled(bluetoothAdapter)
                     context.putVariable("bluetooth_enabled", enabled)
@@ -70,6 +73,19 @@ class NodeBluetoothHandler(
         adapter.isEnabled
     } catch (_: SecurityException) {
         false
+    }
+
+    /**
+     * 调用报失败、但开关其实在变：最多等 [SETTLE_MS] 看最终状态。AndroidWorld（API 33、无 Shizuku）：
+     * BluetoothAdapter.enable() 返回 false，蓝牙却开了；节点报失败，Agent 又去设置页里找开关，把 9 步耗光。
+     */
+    private suspend fun settlesTo(adapter: BluetoothAdapter, enabled: Boolean): Boolean {
+        val deadline = System.currentTimeMillis() + SETTLE_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (isEnabled(adapter) == enabled) return true
+            kotlinx.coroutines.delay(300)
+        }
+        return isEnabled(adapter) == enabled
     }
 
     @Suppress("DEPRECATION", "MissingPermission")
@@ -103,5 +119,6 @@ class NodeBluetoothHandler(
 
     companion object {
         private const val TAG = "HabitatBluetooth"
+        private const val SETTLE_MS = 3_000L
     }
 }

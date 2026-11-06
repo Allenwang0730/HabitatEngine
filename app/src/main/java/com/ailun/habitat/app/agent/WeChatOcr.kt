@@ -2,10 +2,12 @@ package com.ailun.habitat.app.agent
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.Build
 import android.view.Display
 import androidx.annotation.RequiresApi
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -32,57 +34,75 @@ object WeChatOcr {
     ): ScreenObservation? {
         val now = System.currentTimeMillis()
         if (now < nextAllowedAt) return null
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
-        // 小屏截图前先藏起来：别把它认成屏幕上的文字
-        val bitmap = com.ailun.habitat.OverlayGuard.aroundCapture { capture(service) } ?: run {
+        val blocks = readScreen(service, screenWidth, screenHeight) ?: run {
             backoff()
             return null
         }
+        backoffMs = 1_000L
+        nextAllowedAt = System.currentTimeMillis() + 1_000L
+        val elements = blocks.take(24).mapIndexed { i, block ->
+            ScreenElement(
+                index = (i + 1).toString(),
+                text = block.text.take(80),
+                centerX = block.box.centerX(),
+                centerY = block.box.centerY(),
+                clickable = true,
+                editable = false,
+                focused = false,
+                bounds = ElementBounds(block.box.left, block.box.top, block.box.right, block.box.bottom),
+            )
+        }
+        return if (elements.isEmpty()) null
+        else ScreenObservation(
+            packageName = packageName,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight,
+            elements = elements,
+            visibleText = elements.joinToString("\n") { it.text },
+            source = "ocr",
+        )
+    }
+
+    /** 识别出的一段文字，坐标已换算到屏幕像素。 */
+    data class Block(val text: String, val box: Rect)
+
+    /** 与 [recognize] 同一套限频和退避（系统截图接口约 1 秒一次），返回原始文字块；被限频时返回 null。 */
+    suspend fun readScreenThrottled(service: AccessibilityService, screenWidth: Int, screenHeight: Int): List<Block>? {
+        if (System.currentTimeMillis() < nextAllowedAt) return null
+        val blocks = readScreen(service, screenWidth, screenHeight) ?: run {
+            backoff()
+            return null
+        }
+        backoffMs = 1_000L
+        nextAllowedAt = System.currentTimeMillis() + 1_000L
+        return blocks
+    }
+
+    /**
+     * 截屏并识别，不限频（ACTION_OCR 节点用；Agent 读屏走 [recognize]，带限频和退避）。
+     * 截图或识别失败返回 null；屏幕上没有字返回空列表。需要 Android 11+。
+     */
+    suspend fun readScreen(service: AccessibilityService, screenWidth: Int, screenHeight: Int): List<Block>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        // 小屏截图前先藏起来：别把它认成屏幕上的文字
+        val bitmap = com.ailun.habitat.OverlayGuard.aroundCapture { capture(service) } ?: return null
         return try {
-            val result = suspendCancellableCoroutine { cont ->
+            val result: Text = suspendCancellableCoroutine<Text?> { cont ->
                 recognizer.process(InputImage.fromBitmap(bitmap, 0))
                     .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
                     .addOnFailureListener { if (cont.isActive) cont.resume(null) }
-            }
-            if (result == null) {
-                backoff()
-                return null
-            }
-            backoffMs = 1_000L
-            nextAllowedAt = System.currentTimeMillis() + 1_000L
-            if (result.textBlocks.isEmpty()) return null
+            } ?: return null
             val scaleX = if (bitmap.width > 0) screenWidth.toFloat() / bitmap.width else 1f
             val scaleY = if (bitmap.height > 0) screenHeight.toFloat() / bitmap.height else 1f
-            val elements = result.textBlocks.mapNotNull { block ->
+            result.textBlocks.mapNotNull { block ->
                 val box = block.boundingBox ?: return@mapNotNull null
                 val text = block.text.trim()
-                if (text.isEmpty()) null else box to text
-            }.take(24).mapIndexed { i, (box, text) ->
-                ScreenElement(
-                    index = (i + 1).toString(),
-                    text = text.take(80),
-                    centerX = ((box.centerX()) * scaleX).toInt(),
-                    centerY = ((box.centerY()) * scaleY).toInt(),
-                    clickable = true,
-                    editable = false,
-                    focused = false,
-                    bounds = ElementBounds(
-                        left = (box.left * scaleX).toInt(),
-                        top = (box.top * scaleY).toInt(),
-                        right = (box.right * scaleX).toInt(),
-                        bottom = (box.bottom * scaleY).toInt(),
-                    ),
+                if (text.isEmpty()) return@mapNotNull null
+                Block(
+                    text,
+                    Rect((box.left * scaleX).toInt(), (box.top * scaleY).toInt(), (box.right * scaleX).toInt(), (box.bottom * scaleY).toInt()),
                 )
             }
-            if (elements.isEmpty()) null
-            else ScreenObservation(
-                packageName = packageName,
-                screenWidth = screenWidth,
-                screenHeight = screenHeight,
-                elements = elements,
-                visibleText = elements.joinToString("\n") { it.text },
-                source = "ocr",
-            )
         } finally {
             bitmap.recycle()
         }
@@ -94,7 +114,7 @@ object WeChatOcr {
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private suspend fun capture(service: AccessibilityService): Bitmap? = suspendCancellableCoroutine { cont ->
+    internal suspend fun capture(service: AccessibilityService): Bitmap? = suspendCancellableCoroutine { cont ->
         service.takeScreenshot(
             Display.DEFAULT_DISPLAY,
             executor,

@@ -46,6 +46,25 @@ class NodeSelfTestActivity : Activity() {
         private const val MARKER_DONE = "HABITAT_TEST_DONE"
     }
 
+    /** eval_setup 的各项都是可选的：给了才改。 */
+    private fun applyEvalSetup() {
+        val i = intent ?: return
+        i.getStringExtra("agent_token")?.let { if (!AgentService.setToken(this, it)) Log.w("HabitatAgent", "eval_setup: agent_token rejected") }
+        i.getStringExtra("deepseek_key")?.let { com.ailun.habitat.app.ai.WorkflowAIClient.setApiKey(this, it) }
+        i.getStringExtra("deepseek_url")?.let { com.ailun.habitat.app.ai.WorkflowAIClient.setBaseUrl(this, it) }
+        i.getStringExtra("provider")?.let { com.ailun.habitat.app.agent.AgentLoopController.setProvider(this, it) }
+        i.getStringExtra("jev_key")?.let { com.ailun.habitat.app.agent.AgentLoopController.setJevKey(this, it) }
+        i.getStringExtra("jev_url")?.let { com.ailun.habitat.app.agent.AgentLoopController.setJevUrl(this, it) }
+        i.getStringExtra("penalty_mode")?.let { com.ailun.habitat.app.agent.AgentLoopController.setPenaltyMode(this, it) }
+        i.getStringExtra("ocr_mode")?.let { com.ailun.habitat.app.agent.ScreenObserver.setOcrMode(this, it) }
+        i.getStringExtra("planner_model")?.let { com.ailun.habitat.app.agent.AgentLoopController.setPlannerModel(this, it) }
+        i.getStringExtra("vision")?.let { com.ailun.habitat.app.agent.AgentLoopController.setVisionMode(this, it) }
+        // 评测：远程目标按本机发起处理 N 小时（0 关闭，最多 24）。只在 debug 构建生效
+        if (i.hasExtra("eval_local_hours")) {
+            com.ailun.habitat.app.agent.AgentLoopController.setEvalLocalOrigin(this, i.getIntExtra("eval_local_hours", 0))
+        }
+    }
+
     private lateinit var statusView: TextView
     private val testScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -61,6 +80,22 @@ class NodeSelfTestActivity : Activity() {
 
         val auto = intent?.getBooleanExtra("auto", false) ?: false
         val only = intent?.getStringExtra("only") // 可选：只跑指定名称的用例
+
+        // 评测架（AndroidWorld 等）用：一次写好令牌、DeepSeek 地址/key、默认执行器。只在 debug 构建生效；
+        // 本 Activity 受 DUMP 权限保护，只有 adb shell 能拉起。值不打日志。
+        if (intent?.getBooleanExtra("eval_setup", false) == true) {
+            val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            if (!debuggable) {
+                Log.w("HabitatAgent", "eval_setup ignored: release build")
+            } else {
+                applyEvalSetup()
+                Log.i("HabitatAgent", "eval_setup applied")
+            }
+            if (intent?.getBooleanExtra("start_agent", false) != true) {
+                finish()
+                return
+            }
+        }
 
         // 调试用：前台 Activity 启动 Agent 服务（Android 14+ 后台启动受限，由界面代启），启完即退
         if (intent?.getBooleanExtra("start_agent", false) == true) {

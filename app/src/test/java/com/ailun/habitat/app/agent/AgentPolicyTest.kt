@@ -268,6 +268,56 @@ class AgentPolicyTest {
         assertEquals(1, Catalogs.tierOf(elements[1]))
     }
 
+    /** 只有列表行的点击/长按会在"手势做了屏幕没变"时改用节点动作；按钮、输入框、开关不会（v15 在对话框输入框上回退，把对话框关了）。 */
+    @Test
+    fun onlyListRowTapsAndLongPressesGetTheNodeFallback() {
+        val elements = listOf(
+            ScreenElement("1", "Notifications", 540, 1147, clickable = true, editable = false, focused = false,
+                viewId = "com.google.android.documentsui:id/item_root", selectable = true),
+            ScreenElement("2", "Save", 960, 180, clickable = true, editable = false, focused = false),
+            ScreenElement("3", "名字", 540, 400, clickable = true, editable = true, focused = false),
+            ScreenElement("4", "Use Bluetooth", 540, 600, clickable = true, editable = false, focused = false,
+                selectable = true, checkable = true, checked = false),
+        )
+        val obs = listScreen().copy(packageName = "com.google.android.documentsui", elements = elements,
+            visibleText = elements.joinToString("\n") { it.text })
+        val catalog = Catalogs.build("open the Notifications folder", obs, emptyList())
+        val rowTap = catalog.actions.single { it.operation == "TAP" && it.matchText == "Notifications" }
+        val rowLong = catalog.actions.single { it.operation == "LONG_PRESS" && it.matchText == "Notifications" }
+        assertTrue(rowTap.listRow && rowLong.listRow)
+        assertTrue(catalog.actions.filter { it.matchText != "Notifications" }.none { it.listRow })
+
+        val node = LoopPolicy.rowNodeVariant(rowTap)!!
+        assertEquals("node", node.params["mode"])
+        assertEquals(rowTap.params["target"], node.params["target"])
+        assertEquals(LoopPolicy.signatureOf(rowTap, obs), LoopPolicy.signatureOf(node, obs))
+        assertEquals("node", LoopPolicy.rowNodeVariant(rowLong)!!.params["mode"])
+        // 已经是节点动作、不是列表行、不是坐标目标：都不再回退
+        assertNull(LoopPolicy.rowNodeVariant(node))
+        catalog.actions.filter { !it.listRow }.forEach { assertNull(it.id, LoopPolicy.rowNodeVariant(it)) }
+        assertNull(LoopPolicy.rowNodeVariant(rowTap.copy(params = mapOf("target" to "Notifications"))))
+    }
+
+    @Test
+    fun textlessIconButtonsBecomeTapTargets() {
+        // AndroidWorld Expense：右下角「+」悬浮按钮没有文字也没有 contentDescription，只有 viewId
+        val fab = ScreenElement("13", "", 981, 2213, clickable = true, editable = false, focused = false,
+            viewId = "com.arduia.expense:id/fb_main_add", bounds = ElementBounds(918, 2150, 1044, 2276))
+        // 左上角汉堡菜单：无文字、无 viewId，但小且在边上
+        val menu = ScreenElement("1", "", 62, 190, clickable = true, editable = false, focused = false,
+            bounds = ElementBounds(20, 148, 104, 232))
+        // 中间一大块无文字容器：不该当成按钮
+        val blob = ScreenElement("5", "", 540, 1200, clickable = true, editable = false, focused = false,
+            bounds = ElementBounds(0, 600, 1080, 1800))
+        val obs = listScreen().copy(elements = listOf(menu, blob, fab), visibleText = "")
+        val catalog = Catalogs.build("Add an expense", obs, emptyList())
+        assertTrue(catalog.tapTargets.keys.toString(), "13" in catalog.tapTargets)
+        assertTrue(catalog.tapTargets.getValue("13").contains("fb main add"))
+        assertTrue("1" in catalog.tapTargets)
+        assertFalse("5" in catalog.tapTargets)
+        assertTrue(Catalogs.iconLabel(fab, 1080, 2400)!!.contains("底部右"))
+    }
+
     @Test
     fun nonClickableTextNodeIsNotATapTarget() {
         // 纯文字节点（clickable=false 且不可编辑）不该进候选，否则模型会去点一行说明文字
@@ -371,6 +421,13 @@ class AgentPolicyTest {
         assertTrue("前台包变了就是变了", !LoopPolicy.sameScreen(a, a.copy(packageName = "com.tencent.mm")))
         assertTrue("控件数变了就是变了", !LoopPolicy.sameScreen(a, a.copy(elements = a.elements.take(2))))
         assertTrue("焦点变了就是变了", !LoopPolicy.sameScreen(a, a.copy(focusedIndex = "2")))
+        // 文字和控件数都没变、只是挪了位置（迷宫里的「X」走了一格）也是变了；同一格里的小抖动不算
+        val first = a.elements.first()
+        val moved = a.copy(elements = listOf(first.copy(centerX = first.centerX + 110)) + a.elements.drop(1))
+        assertTrue("挪了位置就是变了", !LoopPolicy.sameScreen(a, moved))
+        val nudged = a.copy(elements = listOf(first.copy(centerX = first.centerX - first.centerX % 48 + 1)) + a.elements.drop(1))
+        val nudged2 = a.copy(elements = listOf(first.copy(centerX = first.centerX - first.centerX % 48 + 5)) + a.elements.drop(1))
+        assertTrue("同一格里的抖动不算", LoopPolicy.sameScreen(nudged, nudged2))
     }
 
     @Test
@@ -499,5 +556,60 @@ class AgentPolicyTest {
         assertTrue(enter.signature in LoopPolicy.deadEnds(listOf(enter, scroll, back)))
         // 没退回来：这条路还在走，不算死路
         assertFalse(enter.signature in LoopPolicy.deadEnds(listOf(enter, scroll)))
+    }
+
+    // ---- 英文界面的敏感按钮闸（AndroidWorld 实测：只认中文时，远程目标点到了「Delete」，Simple SMS 写着「SMS」的发送键也没拦住）
+
+    private fun smsScreen(): ScreenObservation {
+        val input = ScreenElement("1", "Type a message…", 480, 2200, clickable = true, editable = true, focused = true,
+            bounds = ElementBounds(140, 2150, 860, 2250))
+        val send = ScreenElement("2", "SMS", 960, 2200, clickable = true, editable = false, focused = false,
+            viewId = "com.simplemobiletools.smsmessenger:id/thread_send_message", bounds = ElementBounds(900, 2150, 1020, 2250))
+        val attach = ScreenElement("3", "Attachment", 70, 2200, clickable = true, editable = false, focused = false,
+            bounds = ElementBounds(20, 2150, 120, 2250))
+        val row = ScreenElement("4", "Sender: Adam Ibrahim", 540, 600, clickable = true, editable = false, focused = false,
+            viewId = "com.simplemobiletools.smsmessenger:id/sender_name", bounds = ElementBounds(0, 540, 1080, 660))
+        val els = listOf(input, send, attach, row)
+        return ScreenObservation("com.simplemobiletools.smsmessenger", 1080, 2400, els, els.joinToString("\n") { it.text }, "a11y", focusedIndex = "1")
+    }
+
+    @Test
+    fun smsSendButtonIsGatedWhateverItsLabelSays() {
+        val obs = smsScreen()
+        val goal = "Reply to +13573669236 with message: The pen is mightier than the sword."
+        assertTrue(Catalogs.isSendControl(obs.elements[1], obs))
+        assertFalse("左边的附件按钮不是发送", Catalogs.isSendControl(obs.elements[2], obs))
+        assertFalse("sender_name 不是 send", Catalogs.isSendControl(obs.elements[3], obs))
+        val remote = Catalogs.build(goal, obs, emptyList(), allowGoalUnlock = false)
+        assertFalse("远程目标不能点发送", "2" in remote.tapTargets)
+        assertFalse("远程目标也不能用回车绕过发送键", "PRESS_ENTER" in remote.operations)
+        assertTrue("3" in remote.tapTargets)
+        // 本机发起、目标写了 reply：放行
+        val local = Catalogs.build(goal, obs, emptyList(), allowGoalUnlock = true)
+        assertTrue("2" in local.tapTargets)
+        // 本机发起但目标没说要发（只是看看）：不放行
+        assertFalse("2" in Catalogs.build("Open the conversation with Adam Ibrahim", obs, emptyList(), allowGoalUnlock = true).tapTargets)
+    }
+
+    @Test
+    fun englishSensitiveButtonsFollowTheChineseRules() {
+        assertFalse(Catalogs.allowedTap("Delete the event", "Delete", allowGoalUnlock = false))
+        assertTrue(Catalogs.allowedTap("Delete the event on 2023-10-17", "Delete", allowGoalUnlock = true))
+        assertFalse(Catalogs.allowedTap("Open the event", "Delete", allowGoalUnlock = true))
+        assertFalse(Catalogs.allowedTap("Install the app", "Allow", allowGoalUnlock = false))
+        assertFalse(Catalogs.allowedTap("Buy milk on the list", "Pay now", allowGoalUnlock = false))
+        // 不是对应说法的不拦
+        assertTrue(Catalogs.allowedTap("Open settings", "Remove from favourites", allowGoalUnlock = false))
+        assertTrue(Catalogs.allowedTap("Open settings", "Sender", allowGoalUnlock = false))
+        assertTrue(Catalogs.allowedTap("Open settings", "Clear search", allowGoalUnlock = false))
+        // 「Text the address to Mila」是发消息；「Copy the following text」不是
+        assertTrue(Catalogs.allowedTap("Text the address of the event to Mila Zhang", "Send", allowGoalUnlock = true))
+        assertFalse(Catalogs.allowedTap("Copy the following text to the clipboard: x", "Send", allowGoalUnlock = true))
+    }
+
+    @Test
+    fun englishCredentialScreenIsLocked() {
+        val obs = listScreen().copy(visibleText = "Enter your PIN\n1 2 3")
+        assertTrue(Catalogs.build("Open settings", obs, emptyList()).guard != null)
     }
 }

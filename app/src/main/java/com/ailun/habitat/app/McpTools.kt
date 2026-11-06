@@ -87,9 +87,9 @@ object McpTools {
                         )
                         add(
                             "max_steps",
-                            prop("integer", "最多执行多少步，超出范围会被截到 1–40（默认 20）").apply {
+                            prop("integer", "最多执行多少步，超出范围会被截到 1–120（默认 20）").apply {
                                 addProperty("minimum", 1)
-                                addProperty("maximum", 40)
+                                addProperty("maximum", 120)
                             },
                         )
                         add("planner", prop("boolean", "true：用 DeepSeek 先拆步骤、最后复核；false：不规划。不填跟随手机设置。没配 DeepSeek key 时不规划"))
@@ -113,7 +113,8 @@ object McpTools {
                 "agent_status",
                 "查询自主 Agent 任务的进度和结果（只读）。agent_start 之后每隔几秒调一次，直到 running=false。" +
                     "返回 JSON：running（是否还在跑）、phase（running / done / blocked / error / stopped；没跑过时为 idle）、" +
-                    "detail（结束原因或答案，例如问电量时的读数）、log（最近 40 行步骤记录）。" +
+                    "detail（结束原因或「答案 — 依据」）、answer（提问类目标的答案本身，按目标要求的格式；没有为空串）、" +
+                    "obs_sources（各轮读屏来自无障碍树还是 OCR 的次数，结束后才有）、log（最近 40 行步骤记录）。" +
                     "phase=done 是 Agent 自己判断完成，关键任务请再用 screen 或对应节点核对。",
             )),
         )

@@ -19,6 +19,7 @@ import com.ailun.habitat.paramLong
  *   - 坐标格式 "x,y": 例如 "500,1200"，使用无障碍手势在指定坐标长按
  *   - 选择器格式: 通过文本或 viewId 查找无障碍节点并执行 ACTION_LONG_CLICK
  * - `duration` (可选, 默认 800 毫秒，限制在 1..60000): 对于坐标模式的长按持续时间
+ * - `mode` (可选，仅坐标): "node" = 对包含该点、支持长按的最小节点做 ACTION_LONG_CLICK，不派发手势（[NodeAtPoint]）
  *
  * 输出变量:
  * - `long_press_success` (Boolean): 长按操作是否成功执行
@@ -48,12 +49,17 @@ class NodeLongPressHandler(
         Log.d(TAG, "LongPress: target='$target', duration=${durationMs}ms")
 
         val normalizedTarget = target.trim()
+        val nodeMode = context.interpolate(node.params?.get("mode")?.toString()?.trim().orEmpty()).lowercase() == NodeClickHandler.MODE_NODE
         val success = if (normalizedTarget.contains(",")) {
             val parts = normalizedTarget.split(",")
             val x = parts[0].trim().toIntOrNull()
             val y = parts[1].trim().toIntOrNull()
             if (x != null && y != null) {
-                longPressCoordinate(service, x, y, durationMs)
+                if (nodeMode) {
+                    NodeAtPoint.perform(service, x, y, AccessibilityNodeInfo.ACTION_LONG_CLICK, context.appContext.packageName)
+                } else {
+                    longPressCoordinate(service, x, y, durationMs)
+                }
             } else {
                 Log.w(TAG, "LongPress: invalid coordinate format '$target'")
                 false

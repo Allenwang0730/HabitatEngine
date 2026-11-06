@@ -15,7 +15,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-data class LoopResult(val status: String, val steps: Int, val detail: String)
+/** [answer]：目标是提问时只有答案本身（复核员按目标要求的格式写），[detail] 是给人看的「答案 — 依据」。 */
+data class LoopResult(val status: String, val steps: Int, val detail: String, val answer: String = "")
 
 /**
  * 循环里所有"只看数据"的判定。抽出来是为了能单测：
@@ -57,12 +58,31 @@ object LoopPolicy {
      * 控件状态必须算：真机上拖亮度条、拨开关时文字一个字都不变，旧判定把"已经成功"当成"没变化"，
      * 于是反复拖、被判兜圈、最后报"达到步数上限"——亮度其实早就到最高了。
      */
-    fun sameScreen(a: ScreenObservation, b: ScreenObservation): Boolean =
-        a.visibleText == b.visibleText &&
+    fun sameScreen(a: ScreenObservation, b: ScreenObservation): Boolean {
+        // 混合读屏补进来的 OCR 文字不算：同一屏两次 OCR 结果常差一两个字，算进来会把"没变化"误判成"变了"
+        return treeText(a) == treeText(b) &&
             a.packageName == b.packageName &&
-            a.elements.size == b.elements.size &&
+            a.elements.count { !it.ocr } == b.elements.count { !it.ocr } &&
             a.focusedIndex == b.focusedIndex &&
-            controlState(a) == controlState(b)
+            controlState(a) == controlState(b) &&
+            layout(a) == layout(b)
+    }
+
+    /**
+     * 每段文字在哪一格（[LAYOUT_CELL] 像素）。文字不变、只是挪了位置也算变化：
+     * AndroidWorld BrowserMaze 里「X」从一格走到另一格，文字和控件数一模一样，旧判定说"没变化"，于是去换招、按返回，把页面关了。
+     */
+    private fun layout(o: ScreenObservation): List<String> =
+        o.elements.filter { !it.ocr && it.text.isNotBlank() }.map { "${it.text}@${it.centerX / LAYOUT_CELL},${it.centerY / LAYOUT_CELL}" }
+
+    private const val LAYOUT_CELL = 48
+
+    /** 去掉 OCR 补进来的那一段（[ScreenObserver.mergeOcr] 在树文字后面接「\n + OCR 文字」）。 */
+    private fun treeText(o: ScreenObservation): String {
+        val ocr = o.elements.filter { it.ocr }
+        if (ocr.isEmpty()) return o.visibleText
+        return o.visibleText.removeSuffix("\n" + ocr.joinToString("\n") { it.text })
+    }
 
     private fun controlState(o: ScreenObservation): List<String> =
         o.elements.filter { it.checkable || it.rangeFraction != null }
@@ -146,6 +166,27 @@ object LoopPolicy {
     }
 
     /**
+     * 列表行的节点动作版本：手势点了/长按了列表行，节点成功但屏幕没变时，同一点改用节点 ACTION_CLICK / ACTION_LONG_CLICK 再做一次。
+     *
+     * 文件管理器（DocumentsUI）不认注入的手势：2026-11-06 在模拟器上对同一个文件夹行，手势点（坐标、文字）都点不开，
+     * adb input tap 和节点 ACTION_CLICK 都点得开。AndroidWorld 的 Files×2、Browser×3 和 MobileWorld 里读 zip / PDF 的题都卡在这里。
+     *
+     * 只对列表行，不对按钮、输入框：v15 的回退对所有坐标点击都做，点对话框里的输入框（屏幕本来就不会变）时节点点击把对话框关了，
+     * 而且回退成功一次后整个应用都改走节点（MarkorMergeNotes 从过变成不过）。这里每次都先用手势，节点动作只补没反应的那一次；
+     * 节点只在最上层应用窗口里找（[com.ailun.habitat.handlers.NodeAtPoint]）。不适用返回 null。
+     */
+    fun rowNodeVariant(action: CatalogAction): CatalogAction? {
+        if (!action.listRow || action.params["mode"] != null) return null
+        if (action.tool != "ACTION_CLICK" && action.tool != "ACTION_LONG_PRESS") return null
+        if (action.params["target"]?.toString()?.contains(',') != true) return null
+        return action.copy(
+            id = action.id + "_node",
+            label = action.label + "（改用节点动作）",
+            params = action.params + ("mode" to "node"),
+        )
+    }
+
+    /**
      * 屏幕不动时的"换个招"：优先滚动（可能只是内容在下面），其次返回（可能卡在二级页），
      * 都已经做过就回到桌面。全做过则返回 null，由调用方结束。
      */
@@ -219,8 +260,27 @@ class AgentLoop(
     /** 本机发起为 true；远程发起为 false，目标原文不能解锁敏感按钮和权限弹窗。 */
     private val allowGoalUnlock: Boolean = true,
     private val planner: Planner? = null,
+    /**
+     * true：失败项按 [Penalties] 软惩罚（留在候选里、降低选中概率），每次卡住先反思（[Planner.reflect]）再重规划。
+     * false：旧行为，死路直接从候选里删掉，不反思。
+     */
+    private val softPenalties: Boolean = false,
+    /** true：多步计划里每做 [STEP_CHECK_EVERY] 步让规划模型复查一次这一步完成没有（[Planner.checkStep]）。 */
+    private val stepChecks: Boolean = false,
+    /** true：执行器每一步看得到截图，可以按截图坐标点（TAP_POINT）。只在本机发起时生效（[Catalogs.build]）。 */
+    private val pointTaps: Boolean = false,
 ) {
     @Volatile var stopRequested: Boolean = false
+
+    /**
+     * 重规划次数：默认 [MAX_REPLANS]；步数预算放宽时按比例多给（每 20 步多一次，最多 6 次）——
+     * 步数多了，卡住后换一种做法的机会也该多，否则多出来的步数用不上。
+     */
+    private val maxReplans: Int = (maxSteps / 20).coerceIn(MAX_REPLANS, 6)
+
+    /** 本次任务每轮决策看到的屏幕来自哪里（a11y / ocr / a11y+ocr …）→ 次数。评测里算 OCR 参与比例。 */
+    val obsSources: Map<String, Int> get() = obsCounts.toMap()
+    private val obsCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** 计划与步骤进度（Agent 页的实时清单）。 */
     @Volatile var planListener: PlanListener? = null
@@ -256,8 +316,14 @@ class AgentLoop(
         var used = 0
         var seq = 0
         var replans = 0
+        /** 复查员记下的跨屏笔记总数（facts 里只留最近几条，键号一直往上加）。 */
+        var noteCount = 0
+        /** 按规划器的 replan_after 读到内容后接着规划的次数（[MAX_REFRESHES]）。 */
+        var refreshes = 0
         /** 本次任务里执行失败过的工具调用（权限不足等），重规划后不再尝试。 */
         val failedTools = mutableSetOf<String>()
+        /** 失败后的反思（最多留 [MAX_REFLECTIONS] 条），进重规划和执行器提示词。 */
+        val reflections = mutableListOf<Reflection>()
     }
 
     private data class StepOutcome(val status: String, val detail: String)
@@ -326,7 +392,7 @@ class AgentLoop(
             while (index < plan.steps.size) {
                 if (stopRequested) return LoopResult("stopped", run.used, "已停止")
                 finished()?.let { return it }
-                if (run.used >= maxSteps) return LoopResult("blocked", run.used, "达到步数上限 $maxSteps")
+                if (run.used >= maxSteps) return outOfSteps(run, onStep)
                 val step = plan.steps[index]
                 run.seq++
                 if (plan.steps.size > 1) onStep("步骤 ${index + 1}/${plan.steps.size}：${step.instruction}（完成条件：${step.doneWhen}）")
@@ -340,6 +406,21 @@ class AgentLoop(
                     "done" -> {
                         run.completed += step.instruction
                         planListener?.onStepStatus(index, PlanStatus.DONE)
+                        // 跨屏记忆：要离开这一屏了，先把屏幕上之后用得到的信息记下来（读了文件内容、看到数字再去别的应用填）。
+                        // 周期复查每两步才一次，读文件这种一两步就做完的步骤常常一次都轮不上
+                        val refresh = step.replanAfter && planner != null && run.refreshes < MAX_REFRESHES
+                        if (step.tool == null && (refresh || index + 1 < plan.steps.size)) noteScreen(run, step, onStep)
+                        if (refresh) {
+                            // 规划器说过"看到这份内容再接着规划"：带着记下的事实规划剩下的部分（不算一次卡住）
+                            run.refreshes++
+                            onStep("已经看到需要的内容，接着规划剩下的部分")
+                            val next = makePlan(run, replanContext(run, step.instruction, "").copy(refresh = true), onStep)
+                            if (next != null) {
+                                plan = next
+                                replanned = true
+                                break
+                            }
+                        }
                         index++
                     }
                     "stopped" -> return LoopResult("stopped", run.used, outcome.detail)
@@ -348,11 +429,13 @@ class AgentLoop(
                         planListener?.onStepStatus(index, PlanStatus.FAILED)
                         // 卡住时先看终点：远程任务卡在被挡住的发送按钮上，其实消息已经填好了
                         finished()?.let { return it }
-                        if (planner == null || run.replans >= MAX_REPLANS || run.used >= maxSteps) {
+                        if (run.used >= maxSteps) return outOfSteps(run, onStep)
+                        if (planner == null || run.replans >= maxReplans) {
                             return LoopResult(if (outcome.status == "error") "error" else "blocked", run.used, outcome.detail)
                         }
                         run.replans++
                         onStep("这一步卡住（${outcome.detail}），重新规划（第 ${run.replans} 次）")
+                        reflectOnFailure(run, step.instruction, outcome.detail, onStep)
                         plan = makePlan(run, replanContext(run, step.instruction, outcome.detail), onStep)
                             ?: return LoopResult("blocked", run.used, outcome.detail)
                         replanned = true
@@ -372,31 +455,102 @@ class AgentLoop(
             // 复核：不相信"每一步都选了 DONE"，按屏幕证据再判断一次
             val reviewer = planner ?: return LoopResult("done", run.used, withFacts("完成", run))
             run.observation = ScreenObserver.observe(context)
+            // 这次不通过也没有机会再改了（重规划用完 / 步数快用完）：最后一次复核
+            val last = run.replans >= maxReplans || run.used >= maxSteps - 1
             val review = runCatching {
-                reviewer.review(goal, run.observation, run.completed, run.facts)
+                reviewer.review(goal, run.observation, run.completed, reviewFacts(run, lastChance = last))
             }.getOrNull()
             if (review == null) {
                 onStep("复核不可用，按执行器判断结束")
                 return LoopResult("done", run.used, withFacts("完成（未复核）", run))
             }
             if (review.done) {
-                val detail = listOf(review.answer, review.reason).filter { it.isNotBlank() }.joinToString(" — ").ifBlank { "完成" }
+                val answer = AnswerFormat.normalize(goal, review.answer)
+                val detail = listOf(answer, review.reason).filter { it.isNotBlank() }.joinToString(" — ").ifBlank { "完成" }
                 onStep("复核通过：$detail")
-                return LoopResult("done", run.used, detail)
+                return LoopResult("done", run.used, detail, answer = answer)
             }
             onStep("复核未通过：${review.reason}")
-            if (run.replans >= MAX_REPLANS || run.used >= maxSteps) {
-                return LoopResult("blocked", run.used, "复核未通过：${review.reason}")
+            if (run.replans >= maxReplans || run.used >= maxSteps) {
+                val answer = AnswerFormat.normalize(goal, review.answer)
+                // 提问类目标、复核员手上有答案、也没机会再试了：作答（同 [outOfSteps]）
+                if (answer.isNotBlank() && AnswerFormat.isQuestion(goal)) {
+                    onStep("没有机会再试了，按读到的答案作答（未完全确认）：$answer")
+                    return LoopResult("done", run.used, "$answer — 未完全确认：${review.reason}".take(500), answer = answer)
+                }
+                return LoopResult("blocked", run.used, "复核未通过：${review.reason}", answer = answer)
             }
             run.replans++
+            reflectOnFailure(run, "复核", review.reason, onStep)
             plan = makePlan(run, replanContext(run, "复核", review.reason), onStep)
                 ?: return LoopResult("blocked", run.used, "复核未通过：${review.reason}")
         }
     }
 
+    /**
+     * 给复核员的事实：读到的、记下的，再加上本次成功输入过的文字（typed_N，逐字）。
+     * 最后一屏常常显示不全（长正文、合并后的笔记），AndroidWorld MarkorMergeNotes 里内容全对，复核员因为看不到第三段判了三次未通过。
+     */
+    private fun reviewFacts(run: Run, lastChance: Boolean = false): Map<String, String> {
+        val typed = run.history.filter { it.operation == "TYPE_TEXT" && it.error.isEmpty() }
+            .mapNotNull { it.label.removePrefix("输入「").removeSuffix("」").takeIf { t -> t != it.label && t.isNotBlank() } }
+            .distinct().takeLast(MAX_NOTES)
+        val withTyped = if (typed.isEmpty()) run.facts else run.facts + typed.mapIndexed { i, t -> "typed_${i + 1}" to t.take(600) }
+        // 最后一次复核（没有重规划/步数再去补证据了）：告诉复核员，它按"没有反证"判，不再要求屏幕上的正面证据
+        return if (lastChance) withTyped + (LAST_CHANCE to "true") else withTyped
+    }
+
     /** 本次任务里成功执行过「输入 X」。 */
     private fun typedInRun(run: Run, text: String): Boolean =
         run.history.any { it.operation == "TYPE_TEXT" && it.error.isEmpty() && it.label.contains("「$text」") }
+
+    /**
+     * 跨屏记忆：屏幕上和目标有关的信息记成事实，后面的执行器和复核员都看得到（问答、跨应用填写要用）。
+     * 只留最近 [MAX_NOTES] 条：每条都进每一次执行器/复核员的提示词。
+     */
+    private fun saveNote(run: Run, note: String, onStep: (String) -> Unit) {
+        if (note.isBlank() || note in run.facts.values) return
+        val notes = run.facts.keys.filter { it.startsWith("note_") }
+        if (notes.size >= MAX_NOTES) run.facts.remove(notes.first())
+        run.noteCount++
+        run.facts["note_${run.noteCount}"] = note
+        onStep("记下：$note")
+    }
+
+    /** 一步做完、要离开这一屏之前，让复查员看一眼当前屏幕，只为了记笔记（不改变步骤结果，不算步数）。 */
+    private suspend fun noteScreen(run: Run, step: PlanStep, onStep: (String) -> Unit) {
+        val checker = planner ?: return
+        if (!stepChecks || stopRequested) return
+        val check = runCatching { checker.checkStep(run.goal, step.instruction, step.doneWhen, run.observation) }.getOrNull()
+        check?.note?.let { saveNote(run, it, onStep) }
+    }
+
+    /**
+     * 步数用完：结束前让复核员看一眼当前屏幕（只是一次模型调用，不点任何东西，不算步数）。
+     * 提问类目标常常是答案已经在屏幕上、只差最后一步"作答"——不问就白白交空卷。
+     * 提问类目标有答案就作答（报完成，详情里注明"未完全确认"）：步数到了，交出手上最好的答案，和人一样。
+     * AndroidWorld NotesTodoItemCount：答案「3」是对的，复核员想再往下翻确认，步数用完报 blocked，官方口径记 0 分。
+     * 其余情况状态仍是 blocked（没确认完成），答案放在 [LoopResult.answer]。
+     */
+    private suspend fun outOfSteps(run: Run, onStep: (String) -> Unit): LoopResult {
+        val reason = "达到步数上限 $maxSteps"
+        val reviewer = planner ?: return LoopResult("blocked", run.used, reason)
+        run.observation = ScreenObserver.observe(context)
+        val review = runCatching { reviewer.review(run.goal, run.observation, run.completed, reviewFacts(run, lastChance = true)) }.getOrNull()
+        val answer = AnswerFormat.normalize(run.goal, review?.answer.orEmpty())
+        // 复核员按屏幕证据判定已完成：就是在最后一步做完了，照常报完成（调用方的步数预算里已经给这一步留了位）
+        if (review?.done == true) {
+            val detail = listOf(answer, review.reason).filter { it.isNotBlank() }.joinToString(" — ").ifBlank { "完成" }
+            onStep("步数用完时复核通过：$detail")
+            return LoopResult("done", run.used, detail, answer = answer)
+        }
+        if (answer.isNotBlank() && AnswerFormat.isQuestion(run.goal)) {
+            onStep("步数用完，按屏幕上读到的答案作答（未完全确认）：$answer")
+            return LoopResult("done", run.used, "$answer — 步数用完时的答案，未完全确认：${review?.reason.orEmpty()}".take(500), answer = answer)
+        }
+        if (answer.isNotBlank()) onStep("步数用完，屏幕上读到的答案（未确认完成）：$answer")
+        return LoopResult("blocked", run.used, if (answer.isBlank()) reason else "$reason；屏幕上的答案（未确认）：$answer", answer = answer)
+    }
 
     /**
      * 写小屏/工作区：不看屏幕变化（小屏不在读屏里），成功就算这一步完成；失败不影响任务本身。
@@ -458,7 +612,31 @@ class AgentLoop(
         completed = run.completed.toList(),
         path = run.nav.snapshot().path,
         explored = run.nav.explored(),
+        reflections = run.reflections.toList(),
+        facts = run.facts.toMap(),
     )
+
+    /**
+     * 卡住后、重规划前先反思一次（软惩罚模式）：原因 + 下一步换什么 + 哪些动作别再选。
+     * 反思进重规划和后面每一轮执行器的提示词；「别再选」的动作在候选里加惩罚（[Penalties.forCatalog]），不删除。
+     */
+    private suspend fun reflectOnFailure(run: Run, failedStep: String, reason: String, onStep: (String) -> Unit) {
+        val p = planner ?: return
+        if (!softPenalties) return
+        val recent = run.history.takeLast(12).map { n ->
+            val flag = when {
+                n.error.isNotEmpty() -> "失败: ${n.error.take(60)}"
+                n.changed == false -> "屏幕没变"
+                n.changed == true -> "有变化"
+                else -> ""
+            }
+            "${n.label}（$flag）"
+        }
+        val r = runCatching { p.reflect(run.goal, failedStep, reason, recent, run.observation) }.getOrNull() ?: return
+        run.reflections += r
+        while (run.reflections.size > MAX_REFLECTIONS) run.reflections.removeAt(0)
+        onStep("反思：${r.cause}；下一步：${r.next}" + if (r.avoid.isEmpty()) "" else "；别再选：${r.avoid.joinToString("、")}")
+    }
 
     /** 首次规划失败退回单步（整件事交给执行器）；重规划失败返回 null，由调用方结束。 */
     private suspend fun makePlan(run: Run, replan: ReplanContext?, onStep: (String) -> Unit): Plan? {
@@ -481,7 +659,7 @@ class AgentLoop(
     /** 每步的步数上限：单步拿全部剩余，多步时一步不超过 [STEP_BUDGET]，给后面的步骤留余量。 */
     private fun budgetFor(run: Run, plan: Plan): Int {
         val left = maxSteps - run.used
-        return if (plan.steps.size <= 1) left else minOf(left, STEP_BUDGET)
+        return if (plan.steps.size <= 1) left else minOf(left, maxOf(STEP_BUDGET, maxSteps / 4))
     }
 
     private fun stepContext(run: Run, step: PlanStep, index: Int, total: Int) = StepContext(
@@ -493,6 +671,7 @@ class AgentLoop(
         completed = run.completed.toList(),
         facts = run.facts.toMap(),
         nav = run.nav.snapshot(),
+        reflections = run.reflections.toList(),
     )
 
     /** 工具步：直接调设备工具。工具不合法或没起作用时，把同一步交给界面执行器。 */
@@ -515,8 +694,21 @@ class AgentLoop(
         val result = runNode(inv.node, inv.params, inv.successFlag, inv.outputs)
         run.used++
         run.facts.putAll(result.outputs)
-        delay(700)
-        val after = ScreenObserver.observe(context)
+        // 应用冷启动常要 1~2 秒：只看 700ms 时的前台会把成功判成失败，再在界面上重做一遍，白花一步
+        var after = ScreenObserver.observe(context)
+        if (result.ok && inv.expectPackage != null) {
+            var waited = 0L
+            delay(700)
+            after = ScreenObserver.observe(context)
+            while (!after.packageName.contains(inv.expectPackage, ignoreCase = true) && waited < 1_800L) {
+                delay(450)
+                waited += 450
+                after = ScreenObserver.observe(context)
+            }
+        } else {
+            delay(700)
+            after = ScreenObserver.observe(context)
+        }
         val pkgOk = inv.expectPackage == null || after.packageName.contains(inv.expectPackage, ignoreCase = true)
         val changed = !LoopPolicy.sameScreen(after, before)
         run.history += StepNote(
@@ -554,7 +746,12 @@ class AgentLoop(
         var noChange = 0
         var recoveries = 0
         var invalidPicks = 0
+        var badReplies = 0
+        var nodeFailures = 0
         var autoTaps = 0
+        var redecides = 0
+        var nextCheckAt = STEP_CHECK_EVERY
+        val excluded = mutableSetOf<String>()
         val start = run.used
         while (run.used - start < budget && run.used < maxSteps) {
             if (stopRequested) return StepOutcome("stopped", "已停止")
@@ -567,6 +764,22 @@ class AgentLoop(
             if (step.check?.satisfied(observation) == true) {
                 onStep("这一步已完成：${step.doneWhen}")
                 return StepOutcome("done", step.doneWhen)
+            }
+            // 每做两步问一次规划模型（看截图）"这一步完成没有"：执行器常常已经到了却认不出来——
+            // AndroidWorld（Joplin）实测点进 Health 文件夹后，因为标题栏不写「Health」，执行器又去开侧边栏，把步数耗光。
+            // 提问类目标每一步都问（单步计划也问）：答案常常要翻好几屏凑（这周的活动、某天的所有日程），
+            // 复核员只看最后一屏，前面几屏的内容要靠这里记成笔记。只是一次模型调用，不点任何东西，不算步数。
+            val checker = planner
+            val question = AnswerFormat.isQuestion(run.goal)
+            if (stepChecks && checker != null && (total > 1 || question) && run.used - start >= nextCheckAt) {
+                nextCheckAt = run.used - start + if (question) 1 else STEP_CHECK_EVERY
+                val check = runCatching { checker.checkStep(run.goal, step.instruction, step.doneWhen, observation) }.getOrNull()
+                check?.note?.let { saveNote(run, it, onStep) }
+                // 单步的提问计划：复查只为记笔记。它看到第一屏就会说"完成了"，可答案可能还要往下翻
+                if (check?.done == true && total > 1) {
+                    onStep("复查：这一步的完成条件已经成立（${step.doneWhen}）")
+                    return StepOutcome("done", step.doneWhen)
+                }
             }
             // 代码先点名字对得上的那一行（最多两次）；点错了屏幕会变，下一轮由 check 或执行器接手
             val auto = step.autoTap?.takeIf { autoTaps < MAX_AUTO_TAPS }?.let { Catalogs.leadingMatch(observation, it) }
@@ -586,13 +799,23 @@ class AgentLoop(
             // 判重/兜圈只看本步；死路名单看整个任务（重规划后也不再进已证明走不通的入口）
             val stepHistory = run.history.filter { it.planStep == run.seq }
             val ctx = stepContext(run, step, index, total)
-            val catalog = Catalogs.build(
+            val built = Catalogs.build(
                 run.goal, observation, run.apps, allowGoalUnlock, ctx, step.text, run.failedTools, run.facts.keys, run.scope,
                 tappedBefore = { el ->
                     val sig = "TAP|${el.viewId.ifEmpty { el.text }}|${observation.packageName}"
                     stepHistory.any { it.signature == sig }
                 },
-            ).without(LoopPolicy.deadEnds(run.history)) { LoopPolicy.signatureOf(it, observation) }
+                pointTaps = pointTaps,
+            )
+            // 软惩罚：死路和做过没用的动作留在候选里、按分数降权；硬模式（旧行为）：死路直接删掉
+            val scored = if (softPenalties) {
+                built.copy(penalties = Penalties.forCatalog(built, run.history, observation, run.reflections.flatMap { it.avoid }))
+            } else {
+                built.without(LoopPolicy.deadEnds(run.history)) { LoopPolicy.signatureOf(it, observation) }
+            }
+            // 本步里判过"在重复"的动作：这一步内不再给（[MAX_REDECIDES]）
+            val catalog = if (excluded.isEmpty()) scored else scored.without(excluded) { LoopPolicy.signatureOf(it, observation) }
+            obsCounts.merge(observation.source, 1, Int::plus)
             onStep("读屏 ${ctx.nav?.path ?: observation.packageName} / ${observation.source} / ${observation.elements.size} 个控件（已用 ${run.used} 步，剩 ${maxSteps - run.used} 步）")
             catalog.guard?.let { onStep("限制：$it") }
             val decision = provider.decide(run.goal, observation, catalog, run.history, ctx)
@@ -621,12 +844,19 @@ class AgentLoop(
                         )
                         continue
                     }
+                    // 没拿到可用的决策（回复不是 JSON、网络失败）：同一屏再问一次，不为一次坏回复重规划
+                    if (decision.operation.isEmpty() && badReplies < MAX_BAD_REPLIES) {
+                        badReplies++
+                        onStep("决策没拿到（${decision.detail}），再问一次")
+                        continue
+                    }
                     return StepOutcome("error", decision.detail.ifBlank { "决策失败" })
                 }
                 "wait" -> {
                     waits++
                     if (waits >= LoopPolicy.MAX_WAITS) {
-                        return StepOutcome("blocked", "连续等待 ${LoopPolicy.MAX_WAITS} 次，屏幕没有加载出来")
+                        // 屏幕多半早就加载好了：执行器连着选等待，是因为在候选里找不到要点的东西。原因写清楚，反思和重规划才不会去"等它加载"
+                        return StepOutcome("blocked", "执行器连续 ${LoopPolicy.MAX_WAITS} 次选择等待（多半是候选里找不到要点的控件）")
                     }
                     onStep("等待")
                     delay(800)
@@ -666,6 +896,14 @@ class AgentLoop(
             if (repeatReason != null && recoveries >= LoopPolicy.MAX_RECOVERIES) {
                 return StepOutcome("blocked", "$repeatReason，换招后仍在重复")
             }
+            // 先让模型在去掉这个动作的候选里重选（不花步数）；重选还是不行，才由代码换招（返回/滚动，要花一步）。
+            // AndroidWorld 官方步数下最简单的任务只有 10 步，换招平均每个失败任务要吃掉 1~2 步。
+            if (repeatReason != null && redecides < MAX_REDECIDES) {
+                redecides++
+                excluded += signature
+                onStep("$repeatReason，去掉它重新选择")
+                continue
+            }
             if (action.operation == "TAP" && !stillThere(action, observation)) {
                 stale++
                 onStep("目标已离开原位置，不点击")
@@ -694,6 +932,12 @@ class AgentLoop(
             run.used++
             // 执行器选的工具快捷方式失败（多半是缺权限）：本次任务不再提供它
             if (!result.ok && action.operation == "USE_TOOL") action.toolKey?.let { run.failedTools += it }
+            // 跳页类工具（open_settings / open_app）成功了但屏幕没变：已经在那一页了，再跳一次还是一样。
+            // AndroidWorld 实测：已在蓝牙页时模型反复选「直接打开蓝牙设置页」，直到被判兜圈结束。
+            if (result.ok && action.operation == "USE_TOOL" && action.tool == "ACTION_LAUNCH_APP") {
+                delay(500)
+                if (LoopPolicy.sameScreen(ScreenObserver.observe(context), observation)) action.toolKey?.let { run.failedTools += it }
+            }
             var executed = action
             if (!result.ok) {
                 onStep("${action.tool} 失败: ${result.detail}")
@@ -701,7 +945,11 @@ class AgentLoop(
                 val retry = LoopPolicy.retryCandidate(catalog, action, run.goal, run.history)
                 if (retry == null) {
                     record(run, action, observation, observation, changed = false, ok = false, error = result.detail)
-                    return StepOutcome("error", "${action.tool} 失败: ${result.detail}")
+                    // 一个动作失败不等于这一步走不通：记下失败（软惩罚会压低它），让执行器换一个；同一步里失败多次才结束
+                    nodeFailures++
+                    if (nodeFailures >= MAX_NODE_FAILURES) return StepOutcome("error", "${action.tool} 失败: ${result.detail}")
+                    noChange++
+                    continue
                 }
                 onStep("改用「${retry.label}」重试")
                 result = runNode(retry.tool ?: return StepOutcome("error", "重试动作缺少节点"), retry.params, retry.successFlag, retry.outputs)
@@ -710,11 +958,26 @@ class AgentLoop(
             }
             run.facts.putAll(result.outputs)
             delay(700)
-            val after = ScreenObserver.observe(context)
+            var after = ScreenObserver.observe(context)
             // 读数工具不改屏幕：读到了值就是进展，不能算"无变化"（否则会被反复调用直到判兜圈）
-            val changed = !LoopPolicy.sameScreen(after, observation) || (result.ok && result.outputs.isNotEmpty())
+            var changed = !LoopPolicy.sameScreen(after, observation) || (result.ok && result.outputs.isNotEmpty())
+            // 手势点了/长按了列表行、屏幕没变：同一点改用节点动作再做一次（[LoopPolicy.rowNodeVariant]，花一步）。
+            // history 只记最后这一次：DocumentsUI 的行 viewId 全是 item_root，记两条会被判成重复，长按的"没变化"还会被记成死路
+            val viaNode = if (result.ok && !changed && run.used < maxSteps && run.used - start < budget) LoopPolicy.rowNodeVariant(executed) else null
+            if (viaNode != null) {
+                onStep(viaNode.label)
+                result = runNode(viaNode.tool ?: return StepOutcome("error", "动作缺少节点"), viaNode.params, viaNode.successFlag, viaNode.outputs)
+                run.used++
+                executed = viaNode
+                delay(700)
+                after = ScreenObserver.observe(context)
+                changed = result.ok && !LoopPolicy.sameScreen(after, observation)
+            }
             record(run, executed, observation, after, changed, result.ok, if (result.ok) "" else result.detail)
-            if (!result.ok) return StepOutcome("error", "「${executed.label}」失败: ${result.detail}")
+            if (!result.ok) {
+                nodeFailures++
+                if (nodeFailures >= MAX_NODE_FAILURES) return StepOutcome("error", "「${executed.label}」失败: ${result.detail}")
+            }
             noChange = if (changed) 0 else noChange + 1
             if (!changed) onStep("屏幕没有变化（连续 $noChange 次）")
         }
@@ -767,7 +1030,9 @@ class AgentLoop(
         val again = ScreenObserver.observe(context)
         if (again.elements.isEmpty() || again.source != before.source) return true
         return again.elements.any {
-            it.text == text && kotlin.math.abs(it.centerX - x) <= 120 && kotlin.math.abs(it.centerY - y) <= 120
+            // 图标按钮的 matchText 是生成的名字（Catalogs.iconLabel），复查时也按同样的规则算
+            val label = it.text.ifBlank { Catalogs.iconLabel(it, again.screenWidth, again.screenHeight).orEmpty() }
+            label == text && kotlin.math.abs(it.centerX - x) <= 120 && kotlin.math.abs(it.centerY - y) <= 120
         }
     }
 
@@ -824,6 +1089,25 @@ class AgentLoop(
 
         /** 多步计划里每步最多用几步。 */
         const val STEP_BUDGET = 8
+
+        /** 失败反思最多留几条（新的挤掉旧的），控制提示词长度。 */
+        const val MAX_REFLECTIONS = 3
+
+        /** 一步里模型想重复同一动作时，最多几次"去掉它重选"（不花步数），之后才由代码换招。 */
+        const val MAX_REDECIDES = 2
+
+        /** 多步计划里，一步做了几个动作后复查一次完成条件（[stepChecks]）。 */
+        const val STEP_CHECK_EVERY = 2
+        /** 一步里允许几次"没拿到可用决策"（回复不是 JSON、网络失败）再问。 */
+        const val MAX_BAD_REPLIES = 2
+        /** 一步里动作执行失败（节点返回失败）几次才算这一步走不通。 */
+        const val MAX_NODE_FAILURES = 3
+        /** 复核员看到这个事实（值 "true"）就知道这是最后一次复核。 */
+        const val LAST_CHANCE = "last_chance"
+        /** 跨屏笔记最多留几条。 */
+        const val MAX_NOTES = 6
+        /** 一次任务里按 replan_after 接着规划的上限：防止每版计划都写 replan_after 来回规划（录入很多条时要接着规划好几次）。 */
+        const val MAX_REFRESHES = 4
 
         /** 技能步里代码自己点名字对得上的那一行，最多几次。 */
         const val MAX_AUTO_TAPS = 2

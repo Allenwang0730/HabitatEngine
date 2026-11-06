@@ -150,6 +150,9 @@ class NodeHandlerFactory(
         const val ACTION_SAY_TO_FILE = "ACTION_SAY_TO_FILE"
         const val ACTION_GET_TRAFFIC = "ACTION_GET_TRAFFIC"
         const val ACTION_GET_SETTING = "ACTION_GET_SETTING"
+        // 网页与识字（v1.12）
+        const val ACTION_OPEN_URL = "ACTION_OPEN_URL"
+        const val ACTION_OCR = "ACTION_OCR"
         // FORK/JOIN 由 HabitatExecutor 内建处理（不注册 handler，仅声明常量供白名单/LLM）
         const val ACTION_FORK = HabitatExecutor.ACTION_FORK
         const val ACTION_JOIN = HabitatExecutor.ACTION_JOIN

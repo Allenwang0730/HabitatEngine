@@ -43,5 +43,17 @@ internal object HostSpecs {
             notes = "show/append 时 text、image、title、progress 至少给一个。不阻塞。" +
                 "用户在本次运行中关掉小屏后，后续写入只更新内容不再弹出（mini_screen_shown=false）。来源标签由系统标注，不能用参数指定。",
         ),
+        NodeSpec(
+            F.ACTION_OCR, "截当前屏幕并识别文字（本机离线 OCR，中英文），给无障碍树读不到字的界面用",
+            params = listOf(
+                ParamSpec("contains", ParamType.STRING, "可选：只保留包含这段文字的块（不区分大小写），支持 \${var}"),
+                ParamSpec("output_var", ParamType.STRING, "识别出的文字存到哪个变量", default = "ocr_text"),
+            ),
+            outputs = listOf("ocr_success", "ocr_text", "ocr_blocks", "ocr_count", "ocr_error"),
+            requires = "宿主 App 注册；需开启 Habitat 无障碍服务，Android 11+；屏幕需亮且未锁",
+            notes = "ocr_text 按从上到下、从左到右拼接；ocr_blocks 是 JSON 数组（text、left/top/right/bottom、center_x/center_y，屏幕像素），" +
+                "可把 center_x,center_y 交给 ACTION_CLICK 的 target 点击。只读，不点任何东西；识别在本机完成，不上传。" +
+                "普通 App 的文字优先用 ACTION_FIND_ELEMENT / ACTION_CLICK（更快更准），图片里的字、游戏、Flutter/Unity 页面再用 OCR。",
+        ),
     )
 }

@@ -1,0 +1,24 @@
+# MobileWorld image for Habitat runs: the same changes as MobileWorld's docker/Dockerfile.update (v1.2) on top of the
+# published ghcr.io/tongyi-mai/mobile_world:latest (v1.0, which lacks socat, the adb relay entrypoint and the current
+# task code). The first instructions are copied verbatim so they share the build cache with Dockerfile.update; the
+# three scripts then go in as one layer with their executable bits already set (build_image.sh stages them), because
+# with the classic builder each layer on this 31 GB image takes about 10 minutes to commit.
+FROM ghcr.io/tongyi-mai/mobile_world:latest
+
+# Install socat (added after initial release for ADB port relay)
+RUN apt-get update && apt-get install -y --no-install-recommends socat && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Switch to iptables-nft backend for compatibility with host kernels (6.x+)
+# that have dropped the legacy iptable_nat module in favor of nftables-only NAT.
+# The entrypoint also does runtime detection and can fall back to legacy if needed.
+RUN update-alternatives --set iptables /usr/sbin/iptables-nft && \
+    update-alternatives --set ip6tables /usr/sbin/ip6tables-nft
+
+# Copy updated source code
+COPY src/ /app/service/src/
+
+# entrypoint.sh → /usr/local/bin, start_emulator.sh + proxy_chain.py → /app/docker
+COPY stage/ /
+
+CMD tail -f /var/log/emulator.log /var/log/server.log /var/log/dockerd.err.log

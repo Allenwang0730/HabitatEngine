@@ -17,7 +17,7 @@
 **What you get**
 
 - **Tell the phone what to do** — "open Settings and go to Bluetooth", "turn brightness to max", "what's my battery?" The agent plans, uses device tools directly when it can, taps through the UI when it must, and verifies the result on screen. On-device eval: with planning, **28/28** for both Jev and DeepSeek executors (2026-10-09, 13–18/28 without) — [method and raw data](docs/EVAL.md).
-- **An MCP server on the phone** — Claude Code and Cursor connect over Streamable HTTP (`http://127.0.0.1:8931/mcp`), Claude Desktop through a bundled stdio bridge: read the screen, call all 88 nodes (each with a parameter schema), start agent tasks. Token-authenticated, dangerous tools off by default — [setup](docs/MCP.md).
+- **An MCP server on the phone** — Claude Code and Cursor connect over Streamable HTTP (`http://127.0.0.1:8931/mcp`), Claude Desktop through a bundled stdio bridge: read the screen, call all 90 nodes (each with a parameter schema), start agent tasks. Token-authenticated, dangerous tools off by default — [setup](docs/MCP.md).
 - **An embeddable engine** — drop `:lib` into your own app (JitPack) and run LLM-generated JSON workflows: triggers, branches, loops, variables, shell, HTTP, sensors, notifications.
 
 ## Try it in 2 minutes
@@ -106,9 +106,9 @@ automation drive the device.
 
 ---
 
-## Node Types (88)
+## Node Types (90)
 
-Full parameter reference: [docs/NODES.md](docs/NODES.md) (generated from the node specs). The engine has 88 node types across categories. Common / core ones below (same list is in `NodeKnowledge`, the single source used for LLM generation — documented once here and in `README_CN.md`):
+Full parameter reference: [docs/NODES.md](docs/NODES.md) (generated from the node specs). The engine has 90 node types across categories. Common / core ones below (same list is in `NodeKnowledge`, the single source used for LLM generation — documented once here and in `README_CN.md`):
 
 | Type | Params | Purpose | Requires |
 |------|--------|---------|----------|
@@ -143,6 +143,8 @@ Full parameter reference: [docs/NODES.md](docs/NODES.md) (generated from the nod
 | ACTION_SEND_NOTIFICATION | title, message, channel_id | notification | |
 | ACTION_SWIPE | x1,y1,x2,y2,duration_ms | swipe | needs a11y |
 | ACTION_MEDIA_CONTROL | cmd | media control | |
+| ACTION_OPEN_URL | url, package | open a web page in the browser (http/https only) | |
+| ACTION_OCR | contains, output_var | on-device OCR of the current screen (text + boxes) | accessibility, Android 11+ |
 
 Full categories in each `NodeModules`; `NodeKnowledge` is the single source for the AI-generation prompt and the node reference.
 
@@ -530,4 +532,4 @@ factory.register("MY_ACTION", MyHandler())
 
 ---
 
-**Habitat** · 88 node types · LLM-friendly · MCP agent · embeddable · accessibility + system API · `habitat-server` companion backend
+**Habitat** · 90 node types · LLM-friendly · MCP agent · embeddable · accessibility + system API · `habitat-server` companion backend

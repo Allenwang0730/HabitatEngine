@@ -65,7 +65,7 @@ class PlannerTest {
         assertNull(PlanPrompts.parsePlan("没有 JSON", "x", apps))
         assertNull(PlanPrompts.parsePlan("""{"steps":"no"}""", "x", apps))
         assertNull(PlanPrompts.parsePlan("""{"steps":[{"instruction":"","done_when":""}]}""", "x", apps))
-        val many = (1..10).joinToString(",") { """{"type":"ui","instruction":"第${it}步","done_when":"好了"}""" }
+        val many = (1..PlanPrompts.MAX_STEPS + 4).joinToString(",") { """{"type":"ui","instruction":"第${it}步","done_when":"好了"}""" }
         assertEquals(PlanPrompts.MAX_STEPS, PlanPrompts.parsePlan("""{"steps":[$many]}""", "x", apps)!!.steps.size)
     }
 
@@ -158,6 +158,20 @@ class PlannerTest {
             el("2", "蓝牙", 264, clickable = false),
         )
         assertEquals("蓝牙", MobilePriors.pageTitle(obs))
+    }
+
+    @Test
+    fun englishPageTitleIsNotSplitOnSpaces() {
+        // 文件管理器：左上是汉堡菜单（描述「Show roots」），标题「Files in Downloads」整段才是页面名
+        val files = screen(
+            "com.google.android.documentsui",
+            ScreenElement("1", "Show roots", 80, 230, clickable = true, editable = false, focused = false),
+            el("2", "Files in Downloads", 240, clickable = false),
+        )
+        assertEquals("Files in Downloads", MobilePriors.pageTitle(files))
+        // 只整段相等才当工具栏按钮跳过：「Backup」不是「Back」
+        val backup = screen("com.android.settings", el("1", "Backup", 240, clickable = false))
+        assertEquals("Backup", MobilePriors.pageTitle(backup))
     }
 
     @Test
@@ -259,5 +273,178 @@ class PlannerTest {
         assertTrue(q.toolTargets.values.any { it.contains("电量") })
         val known = Catalogs.build("现在电量是多少？", screen("com.bbk.launcher2"), apps, knownFacts = setOf("battery_level"))
         assertTrue(known.toolTargets.values.none { it.contains("电量") })
+    }
+
+    @Test
+    fun reflectionParsesAndCapsAvoidList() {
+        val r = PlanPrompts.parseReflection(
+            """好的 {"cause":"长按后出现选择模式，应点删除图标","next":"点工具栏的删除","avoid":["长按「a.md」","长按「b.md」","x","y","z","w"]}""",
+        )!!
+        assertTrue(r.cause.contains("选择模式"))
+        assertEquals("点工具栏的删除", r.next)
+        assertEquals(5, r.avoid.size)
+        // 原因和下一步都空：不算反思
+        assertEquals(null, PlanPrompts.parseReflection("""{"cause":"","next":"","avoid":[]}"""))
+        assertEquals(null, PlanPrompts.parseReflection("not json"))
+    }
+
+    @Test
+    fun reviewPromptAsksForBareAnswer() {
+        assertTrue(PlanPrompts.SYSTEM_REVIEW.contains("answer 只写答案本身"))
+        val review = PlanPrompts.parseReview("""{"done":true,"reason":"屏幕上有 3 条待办","answer":"3"}""")!!
+        assertEquals("3", review.answer)
+    }
+
+    @Test
+    fun evalModeAcceptsTextReadFromTheScreen() {
+        val raw = """{"steps":[{"type":"ui","instruction":"在金额框输入 47.25","done_when":"金额框里是 47.25","text":"47.25"}]}"""
+        // 默认：47.25 不在目标里，输入文字被丢掉（防屏幕上的内容让 Agent 打别的字）
+        assertEquals(null, PlanPrompts.parsePlan(raw, "Add the expense from the receipt", apps)!!.steps.single().text)
+        // 评测模式：可以输入从屏幕读到的内容
+        assertEquals("47.25", PlanPrompts.parsePlan(raw, "Add the expense from the receipt", apps, anyText = true)!!.steps.single().text)
+    }
+
+    @Test
+    fun stepCheckParses() {
+        assertEquals(true, PlanPrompts.parseStepCheck("""好的 {"done":true,"reason":"已在 Health 列表页"}""")!!.done)
+        assertEquals(false, PlanPrompts.parseStepCheck("""{"done":false,"reason":"还在侧边栏"}""")!!.done)
+        assertEquals("3 个待办", PlanPrompts.parseStepCheck("""{"done":true,"note":"3 个待办","reason":"x"}""")!!.note)
+        assertEquals(null, PlanPrompts.parseStepCheck("""{"done":"maybe"}"""))
+        assertEquals(null, PlanPrompts.parseStepCheck("no json"))
+    }
+
+    @Test
+    fun replanPromptCarriesReflections() {
+        val ctx = ReplanContext("删除笔记", "兜圈", emptyList(), reflections = listOf(Reflection("一直长按", "点删除图标")))
+        val text = PlanPrompts.planUser("Delete the note", screen("net.gsantner.markor"), apps, ctx)
+        assertTrue(text.contains("失败后的反思"))
+        assertTrue(text.contains("点删除图标"))
+    }
+
+    @Test
+    fun longInputTextIsKeptWhole() {
+        // 40 字上限把 MarkorCreateNote 的正文截在 "without break" 上
+        val goal = "Create a new note in Markor named fair_apple_V9Ao.txt with the following text: You can't make an omelette without breaking a few eggs."
+        val body = "You can't make an omelette without breaking a few eggs."
+        val raw = """{"steps":[{"type":"ui","instruction":"在正文输入","done_when":"正文是那句话","text":"$body"}]}"""
+        assertEquals(body, PlanPrompts.parsePlan(raw, goal, apps)!!.steps[0].text)
+    }
+
+    @Test
+    fun horizontalScrollerDetection() {
+        val w = 1080
+        val h = 2400
+        val chips = ElementBounds(0, 420, 1080, 540)
+        assertTrue(ScreenObserver.isHorizontalScroller("android.widget.HorizontalScrollView", chips, -1, -1, w, h))
+        assertTrue(ScreenObserver.isHorizontalScroller("androidx.recyclerview.widget.RecyclerView", chips, 1, 8, w, h))
+        // 又宽又扁、没有集合信息
+        assertTrue(ScreenObserver.isHorizontalScroller("android.view.View", chips, -1, -1, w, h))
+        // 竖着滚的列表、整屏翻页都不算
+        assertFalse(ScreenObserver.isHorizontalScroller("androidx.recyclerview.widget.RecyclerView", ElementBounds(0, 300, 1080, 2200), 20, 1, w, h))
+        assertFalse(ScreenObserver.isHorizontalScroller("android.widget.ScrollView", chips, -1, -1, w, h))
+        assertFalse(ScreenObserver.isHorizontalScroller("androidx.viewpager.widget.ViewPager", ElementBounds(0, 200, 1080, 2300), -1, -1, w, h))
+    }
+
+    @Test
+    fun horizontalRowGetsLeftAndRightScroll() {
+        val row = ScrollRow(ElementBounds(0, 420, 1080, 540), "Food Income Housing")
+        val obs = screen("com.arduia.expense", el("1", "Food", 480)).copy(screenWidth = 1080, screenHeight = 2400, hScrolls = listOf(row))
+        val catalog = Catalogs.build("Add an Education expense", obs, apps)
+        val right = catalog.resolve("SCROLL_RIGHT", "h1")!!
+        // 露出右边的项：手指从右往左滑，只在这一排的高度上
+        assertTrue((right.params["x1"] as Int) > (right.params["x2"] as Int))
+        assertEquals(480, right.params["y1"])
+        assertEquals(480, right.params["y2"])
+        val left = catalog.resolve("SCROLL_LEFT", "h1")!!
+        assertTrue((left.params["x1"] as Int) < (left.params["x2"] as Int))
+        // 只有一排时，模型没写 target 也落到这一排
+        assertEquals(right, decisionFromChoice(catalog, "SCROLL_RIGHT", null, 1.0, "").action)
+        // 没有横排就不提供横向滚动
+        assertNull(Catalogs.build("Add an Education expense", obs.copy(hScrolls = emptyList()), apps).operations["SCROLL_RIGHT"])
+    }
+
+    @Test
+    fun replanAfterEndsThePlanAtThatStep() {
+        val raw = """{"steps":[
+            {"type":"ui","instruction":"打开 my_expenses.txt","done_when":"能看到文件内容","replan_after":true},
+            {"type":"ui","instruction":"在 Pro Expense 里加一笔","done_when":"列表里有它"}]}"""
+        val plan = PlanPrompts.parsePlan(raw, "Log the reimbursable transactions from my_expenses.txt in pro expense", apps)!!
+        assertEquals(1, plan.steps.size)
+        assertTrue(plan.steps[0].replanAfter)
+        // 不写就是 false；写成字符串的不认
+        val plain = PlanPrompts.parsePlan("""{"steps":[{"type":"ui","instruction":"a","done_when":"b","replan_after":"yes"}]}""", "x", apps)!!
+        assertFalse(plain.steps[0].replanAfter)
+        // 接着规划时告诉规划器"不是卡住了"，并带上记下的事实
+        val ctx = ReplanContext("打开 my_expenses.txt", "", emptyList(), facts = mapOf("note_1" to "Tuition Fees 160.28 Education"), refresh = true)
+        val text = PlanPrompts.planUser("Log the reimbursable transactions", screen("com.arduia.expense"), apps, ctx)
+        assertTrue(text.contains("replan_after"))
+        assertTrue(text.contains("Tuition Fees 160.28 Education"))
+        assertFalse(text.contains("卡住了"))
+    }
+
+    @Test
+    fun tapPointScalesScreenshotCoordinatesAndRespectsGates() {
+        val pay = el("1", "Pay now", 1800).copy(bounds = ElementBounds(100, 1700, 980, 1900))
+        val obs = screen("com.example.shop", el("2", "Notes", 300), pay).copy(screenWidth = 1080, screenHeight = 2400)
+        val catalog = Catalogs.build("Open the search", obs, apps, pointTaps = true)
+        val p = catalog.pointTap!!
+        // 1080 宽的屏截图缩到 720 宽：截图坐标 ×1.5 才是屏幕坐标
+        assertEquals(720, p.imageWidth)
+        assertEquals(1600, p.imageHeight)
+        val tap = catalog.resolve("TAP_POINT", "600,80")!!
+        assertEquals("900,120", tap.params["target"])
+        // 落在目标没放行的「Pay now」上：不执行
+        assertNull(catalog.resolve("TAP_POINT", "360,1200"))
+        assertEquals("error", decisionFromChoice(catalog, "TAP_POINT", "360,1200", 1.0, "").status)
+        // 截图外、格式不对
+        assertNull(catalog.resolve("TAP_POINT", "800,80"))
+        assertNull(catalog.resolve("TAP_POINT", "abc"))
+        // 远程发起（不能解锁）、没开截图：不给 TAP_POINT
+        assertNull(Catalogs.build("Open the search", obs, apps, allowGoalUnlock = false, pointTaps = true).pointTap)
+        assertNull(Catalogs.build("Open the search", obs, apps).operations["TAP_POINT"])
+        // 去掉死路时 TAP_POINT 留着
+        assertNotNull(catalog.without(setOf("x")) { it.id }.operations["TAP_POINT"])
+        // 滑动：同样按 1.5 倍换算；起点在「Pay now」上、太短、格式不对都不执行
+        val swipe = catalog.resolve("SWIPE_POINT", "600,500,100,500")!!
+        assertEquals(listOf(900, 750, 150, 750), listOf("x1", "y1", "x2", "y2").map { swipe.params[it] })
+        assertNull(catalog.resolve("SWIPE_POINT", "360,1200,50,1200"))
+        assertNull(catalog.resolve("SWIPE_POINT", "600,500,610,505"))
+        assertNull(catalog.resolve("SWIPE_POINT", "600,500"))
+    }
+
+    @Test
+    fun tapPointOnAListedControlIsThatControl() {
+        val shutter = el("1", "Shutter", 2200).copy(centerX = 540, bounds = ElementBounds(440, 2100, 640, 2300))
+        val obs = screen("com.android.camera2", shutter).copy(screenWidth = 1080, screenHeight = 2400)
+        val catalog = Catalogs.build("Take one video", obs, apps, pointTaps = true)
+        // 截图 (360,1466) = 屏幕 (540,2199)：落在「Shutter」里，就按 TAP 它算（判重、惩罚都对得上）
+        val viaPoint = catalog.resolve("TAP_POINT", "360,1466")!!
+        assertEquals("TAP", viaPoint.operation)
+        assertEquals("tap_1", viaPoint.id)
+        // 「Shutter」这一步被去掉了（连点两次被判重复）：不能用坐标再点它
+        val without = catalog.without(setOf("tap_1")) { it.id }
+        assertNull(without.resolve("TAP_POINT", "360,1466"))
+        // 不在任何控件里的点照常按坐标点
+        assertEquals("TAP_POINT", catalog.resolve("TAP_POINT", "100,100")!!.operation)
+    }
+
+    @Test
+    fun stepNamingAnEmptyFieldTypesIntoItWithoutTappingFirst() {
+        fun field(i: String, text: String, y: Int) = ScreenElement(
+            i, text, 540, y, clickable = true, editable = true, focused = false, bounds = ElementBounds(40, y - 60, 1040, y + 60),
+        )
+        // 菜谱表单：Title 已经填了值，Description、Servings 还是提示字
+        val obs = screen("com.flauschcode.broccoli", field("1", "Chickpea Soup", 300), field("2", "Description", 500), field("3", "Servings", 700))
+            .copy(screenWidth = 1080, screenHeight = 2400)
+        val ctx = StepContext(
+            goal = "Add the recipes", instruction = "在 Description 输入框输入描述（菜名 Chickpea Soup）", doneWhen = "Description 里是描述",
+            index = 1, total = 5,
+        )
+        val catalog = Catalogs.build("Add the recipes", obs, apps, step = ctx, stepText = "A hearty soup")
+        val type = catalog.actions.single { it.operation == "TYPE_TEXT" }
+        assertEquals("540,500", type.params["target"])
+        // 没点名哪个框、也没有焦点：不猜（要先点一个）
+        val plain = Catalogs.build("Add the recipes", obs, apps, step = ctx.copy(instruction = "填表"), stepText = "A hearty soup")
+        assertTrue(plain.actions.none { it.operation == "TYPE_TEXT" })
     }
 }
