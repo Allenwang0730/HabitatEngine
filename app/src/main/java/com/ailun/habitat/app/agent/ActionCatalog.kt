@@ -203,6 +203,7 @@ object Catalogs {
                         // OCR 文字不保证每次读屏都在（OCR 限频、缓存过期），不拿它做"目标还在原位"的复查
                         matchText = el.text.takeUnless { el.ocr },
                         viewId = el.viewId,
+                        listRow = type == "列表行",
                     ),
                 )
             }
@@ -292,6 +293,7 @@ object Catalogs {
                         centerY = el.centerY,
                         matchText = el.text,
                         viewId = el.viewId,
+                        listRow = type == "列表行",
                     ),
                 )
             }

@@ -166,6 +166,27 @@ object LoopPolicy {
     }
 
     /**
+     * 列表行的节点动作版本：手势点了/长按了列表行，节点成功但屏幕没变时，同一点改用节点 ACTION_CLICK / ACTION_LONG_CLICK 再做一次。
+     *
+     * 文件管理器（DocumentsUI）不认注入的手势：2026-11-06 在模拟器上对同一个文件夹行，手势点（坐标、文字）都点不开，
+     * adb input tap 和节点 ACTION_CLICK 都点得开。AndroidWorld 的 Files×2、Browser×3 和 MobileWorld 里读 zip / PDF 的题都卡在这里。
+     *
+     * 只对列表行，不对按钮、输入框：v15 的回退对所有坐标点击都做，点对话框里的输入框（屏幕本来就不会变）时节点点击把对话框关了，
+     * 而且回退成功一次后整个应用都改走节点（MarkorMergeNotes 从过变成不过）。这里每次都先用手势，节点动作只补没反应的那一次；
+     * 节点只在最上层应用窗口里找（[com.ailun.habitat.handlers.NodeAtPoint]）。不适用返回 null。
+     */
+    fun rowNodeVariant(action: CatalogAction): CatalogAction? {
+        if (!action.listRow || action.params["mode"] != null) return null
+        if (action.tool != "ACTION_CLICK" && action.tool != "ACTION_LONG_PRESS") return null
+        if (action.params["target"]?.toString()?.contains(',') != true) return null
+        return action.copy(
+            id = action.id + "_node",
+            label = action.label + "（改用节点动作）",
+            params = action.params + ("mode" to "node"),
+        )
+    }
+
+    /**
      * 屏幕不动时的"换个招"：优先滚动（可能只是内容在下面），其次返回（可能卡在二级页），
      * 都已经做过就回到桌面。全做过则返回 null，由调用方结束。
      */
@@ -937,9 +958,21 @@ class AgentLoop(
             }
             run.facts.putAll(result.outputs)
             delay(700)
-            val after = ScreenObserver.observe(context)
+            var after = ScreenObserver.observe(context)
             // 读数工具不改屏幕：读到了值就是进展，不能算"无变化"（否则会被反复调用直到判兜圈）
-            val changed = !LoopPolicy.sameScreen(after, observation) || (result.ok && result.outputs.isNotEmpty())
+            var changed = !LoopPolicy.sameScreen(after, observation) || (result.ok && result.outputs.isNotEmpty())
+            // 手势点了/长按了列表行、屏幕没变：同一点改用节点动作再做一次（[LoopPolicy.rowNodeVariant]，花一步）。
+            // history 只记最后这一次：DocumentsUI 的行 viewId 全是 item_root，记两条会被判成重复，长按的"没变化"还会被记成死路
+            val viaNode = if (result.ok && !changed && run.used < maxSteps && run.used - start < budget) LoopPolicy.rowNodeVariant(executed) else null
+            if (viaNode != null) {
+                onStep(viaNode.label)
+                result = runNode(viaNode.tool ?: return StepOutcome("error", "动作缺少节点"), viaNode.params, viaNode.successFlag, viaNode.outputs)
+                run.used++
+                executed = viaNode
+                delay(700)
+                after = ScreenObserver.observe(context)
+                changed = result.ok && !LoopPolicy.sameScreen(after, observation)
+            }
             record(run, executed, observation, after, changed, result.ok, if (result.ok) "" else result.detail)
             if (!result.ok) {
                 nodeFailures++

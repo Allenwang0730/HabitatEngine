@@ -268,6 +268,36 @@ class AgentPolicyTest {
         assertEquals(1, Catalogs.tierOf(elements[1]))
     }
 
+    /** 只有列表行的点击/长按会在"手势做了屏幕没变"时改用节点动作；按钮、输入框、开关不会（v15 在对话框输入框上回退，把对话框关了）。 */
+    @Test
+    fun onlyListRowTapsAndLongPressesGetTheNodeFallback() {
+        val elements = listOf(
+            ScreenElement("1", "Notifications", 540, 1147, clickable = true, editable = false, focused = false,
+                viewId = "com.google.android.documentsui:id/item_root", selectable = true),
+            ScreenElement("2", "Save", 960, 180, clickable = true, editable = false, focused = false),
+            ScreenElement("3", "名字", 540, 400, clickable = true, editable = true, focused = false),
+            ScreenElement("4", "Use Bluetooth", 540, 600, clickable = true, editable = false, focused = false,
+                selectable = true, checkable = true, checked = false),
+        )
+        val obs = listScreen().copy(packageName = "com.google.android.documentsui", elements = elements,
+            visibleText = elements.joinToString("\n") { it.text })
+        val catalog = Catalogs.build("open the Notifications folder", obs, emptyList())
+        val rowTap = catalog.actions.single { it.operation == "TAP" && it.matchText == "Notifications" }
+        val rowLong = catalog.actions.single { it.operation == "LONG_PRESS" && it.matchText == "Notifications" }
+        assertTrue(rowTap.listRow && rowLong.listRow)
+        assertTrue(catalog.actions.filter { it.matchText != "Notifications" }.none { it.listRow })
+
+        val node = LoopPolicy.rowNodeVariant(rowTap)!!
+        assertEquals("node", node.params["mode"])
+        assertEquals(rowTap.params["target"], node.params["target"])
+        assertEquals(LoopPolicy.signatureOf(rowTap, obs), LoopPolicy.signatureOf(node, obs))
+        assertEquals("node", LoopPolicy.rowNodeVariant(rowLong)!!.params["mode"])
+        // 已经是节点动作、不是列表行、不是坐标目标：都不再回退
+        assertNull(LoopPolicy.rowNodeVariant(node))
+        catalog.actions.filter { !it.listRow }.forEach { assertNull(it.id, LoopPolicy.rowNodeVariant(it)) }
+        assertNull(LoopPolicy.rowNodeVariant(rowTap.copy(params = mapOf("target" to "Notifications"))))
+    }
+
     @Test
     fun textlessIconButtonsBecomeTapTargets() {
         // AndroidWorld Expense：右下角「+」悬浮按钮没有文字也没有 contentDescription，只有 viewId

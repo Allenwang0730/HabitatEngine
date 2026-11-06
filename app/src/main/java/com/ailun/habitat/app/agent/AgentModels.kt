@@ -176,6 +176,11 @@ data class CatalogAction(
     val outputs: List<String> = emptyList(),
     /** 设备工具的身份（tool|args），用于记"本次失败过的工具"。 */
     val toolKey: String? = null,
+    /**
+     * TAP / LONG_PRESS 的目标是列表行（[Catalogs.typeOf] = 列表行：可点的容器，不是按钮、开关、输入框）。
+     * 只有这种点击、长按在"手势做了屏幕没变"时改用节点动作（[LoopPolicy.rowNodeVariant]）。
+     */
+    val listRow: Boolean = false,
 )
 
 data class ActionCatalog(
