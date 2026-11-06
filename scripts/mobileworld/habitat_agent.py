@@ -153,6 +153,36 @@ def _connect(adb_port: int) -> rh.Adb:
     raise RuntimeError(f"emulator at {serial} not reachable over adb")
 
 
+MAX_LOST_POLLS = 40  # about 2 minutes of failed agent_status polls (3 s apart)
+
+
+def _run_goal(mcp: rh.Mcp, goal: str, timeout_s: int) -> dict:
+    """rh.run_goal, but a server that stays unreachable raises (MobileWorld retries the task) instead of
+    polling until the timeout and scoring the task as a failure."""
+    ok, text = mcp.call("agent_start", {"goal": goal, "provider": "deepseek", "planner": True, "max_steps": STEPS})
+    if not ok:
+        raise RuntimeError(f"agent_start refused: {text[:300]}")
+    deadline, lost = time.time() + timeout_s, 0
+    while time.time() < deadline:
+        time.sleep(3)
+        try:
+            ok, text = mcp.call("agent_status")
+        except (OSError, ValueError) as e:
+            lost += 1
+            if lost >= MAX_LOST_POLLS:
+                raise RuntimeError(f"Habitat MCP server unreachable for {lost} polls: {e!r}") from e
+            continue
+        lost = 0
+        status = json.loads(text) if ok else {}
+        if status and not status.get("running"):
+            return status
+    mcp.call("agent_stop")
+    time.sleep(2)
+    status = json.loads(mcp.call("agent_status")[1])
+    status["phase"] = "timeout"
+    return status
+
+
 class HabitatAgent(BaseAgent):
     """Runs a whole MobileWorld task inside Habitat, then hands the answer (if any) back."""
 
@@ -198,12 +228,9 @@ class HabitatAgent(BaseAgent):
         mcp = rh.Mcp(token, f"http://127.0.0.1:{mcp_port}/mcp")
         mcp.wait_ready()
         a11y = rh.ensure_a11y(adb, mcp)
-        # Once the agent has started, whatever happens is the agent's result.
-        try:
-            status = rh.run_goal(mcp, goal, "deepseek", True, STEPS, timeout_s=max(600, min(5400, 60 * STEPS)))
-        except Exception as e:
-            logger.exception(f"Habitat run failed: {e!r}")
-            return f"agent_error: {e!r}"[:2000], JSONAction(action_type="finished")
+        # Once the agent has started, whatever it does is the agent's result. Losing the app's MCP server for
+        # minutes is not (run_goal skips failed polls, so a dead server only showed up as a 50-minute timeout).
+        status = _run_goal(mcp, goal, timeout_s=max(600, min(5400, 60 * STEPS)))
         answer = (status.get("answer") or "").strip()
         summary = {
             "phase": status.get("phase"), "detail": (status.get("detail") or "")[:500], "answer": answer[:300],
