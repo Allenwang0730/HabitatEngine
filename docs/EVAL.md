@@ -94,7 +94,16 @@ Raw data: [`eval/2026-10-09.json`](eval/2026-10-09.json).
 
 The 3× run is not comparable with official-budget numbers; it is there because many leaderboard entries use 150 steps or no limit. Three of its tasks failed in AndroidWorld's own setup (Pro Expense onboarding: `Target text "NEXT" not found`) and count as failures.
 
-The agent code on the branch is `f1033a0`'s (later changes were measured worse on a matching subset and reverted in `0f205f2`). An earlier build the same night (`fcade18`) scored 75/116 (64.7%) / 83/116 on the same tasks and seeds. The changes in between: the executor writes straight into the input box a step names instead of tapping it first; the final review, when no retry is left, passes unless it sees evidence of a miss; the reviewer sees the text that was typed; and a regression where Markor files were saved as `a.md.md` was fixed.
+Same build and settings on other seeds (each seed gives every task different parameters):
+
+| Seed | AndroidWorld's rule | Device state correct |
+|---|:---:|:---:|
+| 30 | 83/116 (71.6%) | 88/116 |
+| 31 | 84/116 (72.4%) | 87/116 |
+| 32 | 41/55 so far (run interrupted, not finished) | — |
+| **30 + 31** | **83.5/116 (72.0%)** | 87.5/116 |
+
+The agent code these numbers come from is `f1033a0`'s (later changes were measured worse on a matching subset and reverted in `0f205f2`). The branch has since moved on: `231166f` adds a list-row fallback (below, under MobileWorld) that has only been measured on subsets. An earlier build the same night (`fcade18`) scored 75/116 (64.7%) / 83/116 on the same tasks and seeds. The changes in between: the executor writes straight into the input box a step names instead of tapping it first; the final review, when no retry is left, passes unless it sees evidence of a miss; the reviewer sees the text that was typed; and a regression where Markor files were saved as `a.md.md` was fixed.
 
 Setup: seed 30 with AndroidWorld's per-task seeding (`sha256("30_<task>_0")`, same goals as `create_suite(seed=30)`), pass@1, step budget `int(10 × complexity)` as in AndroidWorld's runner (one step kept for the final answer). Three read-only emulators, each running a third of the tasks.
 Models, through a gateway: executor `claude-sonnet-5-5` (fallback `qwen3.8-max`); planner / reviewer / reflection / step check `claude-opus-5-5` (fallback `claude-sonnet-5-5`). Screenshots go to every model call (`vision=all`); the accessibility tree is the main input and the executor still picks from code-built candidates (plus `TAP_POINT` / `SWIPE_POINT` on screenshot coordinates, gated the same way).
@@ -105,7 +114,7 @@ Failures (33), by how the run ended: out of steps 20 (the three browser tasks, f
 
 Where this sits: on the [leaderboard](https://docs.google.com/spreadsheets/d/1cchzP9dlTZ3WXQTfYNhh3avxoLipqHN75v1Tb86uhHo) as of 2026-11-06 (snapshot in [`eval/androidworld/leaderboard-2026-11-06.csv`](eval/androidworld/leaderboard-2026-11-06.csv)), 23 of the 47 agent entries report more than 71.6%, five of them 100% (the human baseline is 80.0%), so 71.6% would rank about 24th. The leaderboard is self-reported with no verification and has no step-budget column; most top entries use screenshots with newer models, and some say they trained on AndroidWorld tasks. Accessibility-tree-only entries: V-Droid 59.5%, AndroidGen 46.8%, the AndroidWorld paper's T3A 30.6%. Habitat's own baseline on the 116 task templates a day earlier (DeepSeek, no screenshots, remote-origin rules, older per-position seeding) was 17/116.
 
-Raw data: [`eval/androidworld/2026-11-06-full116-v14-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v14-official-s30.jsonl), the 3× budget run [`…-v14-lenient-s30.jsonl`](eval/androidworld/2026-11-06-full116-v14-lenient-s30.jsonl), and the earlier build's [`…-v12-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v12-official-s30.jsonl) (task, seed, goal, both scores, end phase, final detail and answer, seconds, step budget).
+Raw data: [`eval/androidworld/2026-11-06-full116-v14-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v14-official-s30.jsonl), seed 31 [`…-v14-official-s31.jsonl`](eval/androidworld/2026-11-06-full116-v14-official-s31.jsonl), the 3× budget run [`…-v14-lenient-s30.jsonl`](eval/androidworld/2026-11-06-full116-v14-lenient-s30.jsonl), and the earlier build's [`…-v12-official-s30.jsonl`](eval/androidworld/2026-11-06-full116-v12-official-s30.jsonl) (task, seed, goal, both scores, end phase, final detail and answer, seconds, step budget).
 
 ### 2026-11-04 — branch `feat/ocr-open-url` at `ed6116b`, 25-task subset, 3 seeds
 
@@ -139,6 +148,20 @@ How to read this:
 - Text-only agents on the full AndroidWorld set, for scale: T3A (GPT-4 Turbo, accessibility tree) 30.6% in the [AndroidWorld paper](https://arxiv.org/abs/2405.14573); human 80.0%. Those numbers are over all 116 tasks and are not directly comparable with a 25-task subset.
 
 Raw data: [`eval/androidworld/`](eval/androidworld/) (task, seed, goal, score, end phase, Habitat's final detail, seconds). Step logs are not published (they contain screen text).
+
+## MobileWorld (public benchmark, emulator)
+
+[MobileWorld](https://github.com/Tongyi-MAI/MobileWorld) (Tongyi-MAI): 201 tasks on a rooted Pixel 8 / Android 14 emulator in Docker, with its own Mail, Mastodon, Mattermost and shop backends; 117 are GUI-only (no `ask_user`, no MCP tools), the leaderboard's GUI-only column, which uses a 50-step budget. Habitat runs as a black box through [`scripts/mobileworld/habitat_agent.py`](../scripts/mobileworld/README.md): the whole task runs inside the first `predict()`, then MobileWorld checks the device and backend state. Question tasks are checked strictly (for example `int(answer)`).
+
+### 2026-11-06 — first baseline, not finished
+
+`f1033a0`, not tuned on MobileWorld, same models and eval switch as the AndroidWorld run, 50 device actions per task. The run was interrupted twice when the WSL VM stopped and is resumable; **15 of 117 tasks are scored so far: 4 passed.** MobileWorld runs tasks grouped by app, so these 15 are not a random sample (most are Files / document-reader tasks) and the rate says little about the full set.
+
+Failures so far: 7 of 11 are file-manager tasks (open a PDF or zip and answer, copy or rename files); then Mastodon ×2, SMS clean-up (deleted some spam, not all), and a mail-with-attachment task.
+
+**Root cause shared with AndroidWorld.** In the file manager (DocumentsUI), Habitat's accessibility gestures on list rows do nothing: tapping a folder or file (by coordinates or by text) does not open it, and long-pressing does not select it. On the same row, `adb input tap` and a node `ACTION_CLICK` both work (checked on a spare AndroidWorld emulator). In AndroidWorld's two seeds, 14 tasks show "tapped a list row, screen did not change", including both Files tasks and all three Browser tasks (they open `task.html` from Files).
+
+`231166f` adds a narrow fallback: only for list rows, when a tap or long press reports success but the screen does not change, the same point gets the node action once (one extra step). It is not applied to buttons, input fields or screenshot-coordinate taps, does not switch a whole app to node clicks, and only looks in the topmost app window — an earlier, broader version (`e315e4b`) closed a Markor dialog and was reverted. Partial check, not a score: on 13 of 20 AndroidWorld validation tasks (seed 30), the tasks where the fallback fired went FilesDeleteFile 0→1, FilesMoveFile right end state but out of steps, BrowserMaze now opens the page; the two tasks that changed without it firing (MarkorMergeNotes 1→0, SimpleCalendarLocationOfEvent 0→1) are run-to-run noise; both controls passed. On MobileWorld's CheckInvoiceTask3 it now opens the invoice PDF and sends the SMS, but with a wrong number.
 
 ## What the raw files contain
 
